@@ -6,6 +6,38 @@ use warnings;
 use JSON::MaybeXS qw( encode_json );
 use Time::HiRes qw( time );
 
+=head1 DESCRIPTION
+
+Handles the Anthropic Messages API format for L<Langertha::Knarr>.
+
+Routes handled:
+
+=over
+
+=item * C<POST /v1/messages> — chat completions (streaming and non-streaming)
+
+=back
+
+The Anthropic format extracts an optional C<system> field from the request body
+and prepends it to the messages list as a C<system> role message. Streaming
+uses SSE with C<event: message_stop> as the end marker. Passthrough format name
+is C<anthropic>, forwarding to C<https://api.anthropic.com> when passthrough
+is enabled.
+
+=seealso
+
+=over
+
+=item * L<Langertha::Knarr> — Main documentation
+
+=item * L<Langertha::Knarr::Proxy::OpenAI> — OpenAI format handler
+
+=item * L<Langertha::Knarr::Proxy::Ollama> — Ollama format handler
+
+=back
+
+=cut
+
 sub format_name { 'anthropic' }
 
 sub passthrough_format { 'anthropic' }

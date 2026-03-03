@@ -6,6 +6,40 @@ use warnings;
 use JSON::MaybeXS qw( encode_json );
 use Time::HiRes qw( time );
 
+=head1 DESCRIPTION
+
+Handles the Ollama native API format for L<Langertha::Knarr>.
+
+Routes handled:
+
+=over
+
+=item * C<POST /api/chat> — chat (streaming by default unless C<stream: false>)
+
+=item * C<GET /api/tags> — model list
+
+=item * C<GET /api/ps> — running models (always returns empty list)
+
+=back
+
+Streaming uses NDJSON (newline-delimited JSON). There is no separate end
+marker — the final chunk includes C<"done": true>. Ollama requests are never
+passed through to an upstream server (C<passthrough_format> returns C<undef>).
+
+=seealso
+
+=over
+
+=item * L<Langertha::Knarr> — Main documentation
+
+=item * L<Langertha::Knarr::Proxy::OpenAI> — OpenAI format handler
+
+=item * L<Langertha::Knarr::Proxy::Anthropic> — Anthropic format handler
+
+=back
+
+=cut
+
 sub format_name { 'ollama' }
 
 sub passthrough_format { undef }

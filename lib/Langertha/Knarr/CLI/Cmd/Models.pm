@@ -5,6 +5,27 @@ use Moo;
 use MooX::Cmd;
 use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr models [options]';
 
+=head1 DESCRIPTION
+
+Implements the C<knarr models> command. Loads the config file, triggers
+auto-discovery (if enabled), and prints the full model list as a table or
+JSON. Each row shows the model ID, engine class, backend model name, and
+whether it was explicitly configured or auto-discovered.
+
+See L<knarr> for option details and L<Langertha::Knarr> for full documentation.
+
+=seealso
+
+=over
+
+=item * L<knarr> — CLI synopsis and option reference
+
+=item * L<Langertha::Knarr::Router/list_models> — Underlying data source
+
+=back
+
+=cut
+
 option format => (
   is      => 'ro',
   format  => 's',

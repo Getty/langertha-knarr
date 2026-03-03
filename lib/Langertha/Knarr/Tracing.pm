@@ -8,10 +8,51 @@ use JSON::MaybeXS ();
 use MIME::Base64 qw( encode_base64 );
 use Log::Any qw( $log );
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Tracing;
+
+    my $tracing = Langertha::Knarr::Tracing->new(config => $config);
+
+    my $trace_id = $tracing->start_trace(
+      model    => 'gpt-4o',
+      engine   => 'Langertha::Engine::OpenAI',
+      messages => \@messages,
+      params   => \%params,
+      format   => 'openai',
+    );
+
+    # ... handle request ...
+
+    $tracing->end_trace($trace_id,
+      output => $response_text,
+      model  => 'gpt-4o',
+      usage  => { input => 100, output => 50, total => 150 },
+    );
+
+=head1 DESCRIPTION
+
+Records every proxy request as a Langfuse trace with a nested generation. When
+tracing is not configured (no public and secret key), all methods are no-ops.
+
+Langfuse credentials are read from the config file's C<langfuse:> section or
+from the C<LANGFUSE_PUBLIC_KEY>, C<LANGFUSE_SECRET_KEY>, and C<LANGFUSE_URL>
+environment variables. The module strips surrounding quotes from environment
+variable values, which Docker C<--env-file> sometimes adds literally.
+
+=cut
+
 has config => (
   is       => 'ro',
   required => 1,
 );
+
+=attr config
+
+The L<Langertha::Knarr::Config> object. Required. Provides Langfuse
+credentials and C<trace_name>.
+
+=cut
 
 has _enabled => (
   is      => 'lazy',
@@ -55,6 +96,14 @@ has trace_name => (
   is      => 'lazy',
   builder => '_build_trace_name',
 );
+
+=attr trace_name
+
+The Langfuse trace name applied to all traces. Resolved in priority order from:
+C<langfuse.trace_name> in config, C<LANGFUSE_TRACE_NAME> env var,
+C<KNARR_TRACE_NAME> env var, or the default C<knarr-proxy>.
+
+=cut
 
 sub _build_trace_name {
   my ($self) = @_;
@@ -109,6 +158,22 @@ sub _timestamp {
     $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0], int($us/1000));
 }
 
+=method start_trace
+
+    my $trace_info = $tracing->start_trace(
+      model    => $model_name,
+      engine   => $engine_class,
+      messages => \@messages,
+      params   => \%params,
+      format   => 'openai',
+    );
+
+Creates a new Langfuse trace and generation. Returns a C<$trace_info> hashref
+that must be passed to L</end_trace>. Returns C<undef> when tracing is
+disabled.
+
+=cut
+
 sub start_trace {
   my ($self, %opts) = @_;
   return undef unless $self->_enabled;
@@ -151,6 +216,23 @@ sub start_trace {
 
   return { trace_id => $trace_id, gen_id => $gen_id, start_time => $now };
 }
+
+=method end_trace
+
+    $tracing->end_trace($trace_info,
+      output => $response_text,
+      model  => $model,
+      usage  => { input => 100, output => 50, total => 150 },
+    );
+
+    # On error:
+    $tracing->end_trace($trace_info, error => "Something went wrong");
+
+Closes the generation and trace started by L</start_trace>, then flushes the
+batch to Langfuse. Pass C<error> to record a failed generation at level ERROR.
+Does nothing when C<$trace_info> is C<undef> (tracing was disabled at start).
+
+=cut
 
 sub end_trace {
   my ($self, $trace_info, %opts) = @_;
@@ -199,6 +281,16 @@ sub end_trace {
   $self->flush;
 }
 
+=method flush
+
+    $tracing->flush;
+
+Sends all pending trace events to the Langfuse ingestion API as a batch and
+clears the internal buffer. Called automatically by L</end_trace>. Does nothing
+when tracing is disabled or the batch is empty.
+
+=cut
+
 sub flush {
   my ($self) = @_;
   return unless $self->_enabled;
@@ -235,5 +327,17 @@ sub flush {
 
   $self->_batch([]);
 }
+
+=seealso
+
+=over
+
+=item * L<Langertha::Knarr> — Tracing is wired in automatically for all routes
+
+=item * L<Langertha::Knarr::Config> — Provides Langfuse credentials
+
+=back
+
+=cut
 
 1;

@@ -6,10 +6,39 @@ use Module::Runtime qw( require_module );
 use Carp qw( croak );
 use Log::Any qw( $log );
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Router;
+
+    my $router = Langertha::Knarr::Router->new(config => $config);
+
+    my ($engine, $model) = $router->resolve('gpt-4o');
+    my $result = $engine->simple_chat(@messages);
+
+    my $models = $router->list_models;
+
+=head1 DESCRIPTION
+
+Resolves a model name to a Langertha engine instance and canonical model
+identifier. Engine instances are cached and reused across requests to avoid
+repeated construction overhead.
+
+When C<auto_discover> is enabled in the config, the router queries each
+configured engine for its full model list on first use, making all discovered
+models available as routing targets.
+
+=cut
+
 has config => (
   is       => 'ro',
   required => 1,
 );
+
+=attr config
+
+The L<Langertha::Knarr::Config> object. Required.
+
+=cut
 
 has _engine_cache => (
   is      => 'ro',
@@ -25,6 +54,30 @@ has _discovery_done => (
   is      => 'rw',
   default => 0,
 );
+
+=method resolve
+
+    my ($engine, $model) = $router->resolve($model_name, %opts);
+    my ($engine, $model) = $router->resolve($model_name, skip_default => 1);
+
+Resolves C<$model_name> to a Langertha engine instance and the canonical model
+string to use with that engine. The resolution order is:
+
+=over
+
+=item 1. Explicit model config in L<Langertha::Knarr::Config/models>
+
+=item 2. Auto-discovered models (if C<auto_discover> is enabled)
+
+=item 3. The default engine from L<Langertha::Knarr::Config/default_engine>
+(skipped when C<skip_default =E<gt> 1> is passed)
+
+=back
+
+Croaks if the model cannot be resolved. Pass C<skip_default =E<gt> 1> to allow
+the caller to try passthrough before falling back to the default engine.
+
+=cut
 
 sub resolve {
   my ($self, $model_name, %opts) = @_;
@@ -147,6 +200,17 @@ sub _discover_models {
   }
 }
 
+=method list_models
+
+    my $models = $router->list_models;
+
+Returns an ArrayRef of model hashrefs, each with keys C<id>, C<engine>,
+C<model>, and C<source> (either C<configured> or C<discovered>). Triggers
+auto-discovery if not already done. Used to build the model list responses
+for C<GET /v1/models> and C<GET /api/tags>.
+
+=cut
+
 sub list_models {
   my ($self) = @_;
 
@@ -177,5 +241,17 @@ sub list_models {
 
   return \@models;
 }
+
+=seealso
+
+=over
+
+=item * L<Langertha::Knarr> — Main documentation and routing priority description
+
+=item * L<Langertha::Knarr::Config> — Provides model and engine configuration
+
+=back
+
+=cut
 
 1;

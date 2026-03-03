@@ -5,6 +5,33 @@ use Moo;
 use MooX::Cmd;
 use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr init [options]';
 
+=head1 DESCRIPTION
+
+Implements the C<knarr init> command. Scans C<%ENV> and any C<.env> files
+for known API key variables (C<.env> and C<.env.local> in the current
+directory are always scanned), then generates a complete YAML configuration
+and writes it to stdout or a file.
+
+    knarr init > knarr.yaml
+    knarr init -e .env.production -o production.yaml
+
+See L<knarr> for full option details, L<Langertha::Knarr::Config/scan_env>
+for the env scanning logic, and L<Langertha::Knarr> for the config format.
+
+=seealso
+
+=over
+
+=item * L<knarr> — CLI synopsis and option reference
+
+=item * L<Langertha::Knarr::Config/scan_env> — API key detection
+
+=item * L<Langertha::Knarr::Config/generate_config> — YAML generation
+
+=back
+
+=cut
+
 option env_file => (
   is      => 'ro',
   format  => 's@',

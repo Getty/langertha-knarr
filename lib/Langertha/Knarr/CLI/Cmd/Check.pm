@@ -5,6 +5,27 @@ use Moo;
 use MooX::Cmd;
 use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr check [options]';
 
+=head1 DESCRIPTION
+
+Implements the C<knarr check> command. Parses the config file, runs
+L<Langertha::Knarr::Config/validate>, and prints a status summary including
+listen addresses, model count, auto-discover state, proxy auth state, and
+Langfuse tracing state. Exits with a non-zero code on invalid config.
+
+See L<knarr> for option details and L<Langertha::Knarr> for full documentation.
+
+=seealso
+
+=over
+
+=item * L<knarr> — CLI synopsis and option reference
+
+=item * L<Langertha::Knarr::Config/validate> — Validation logic
+
+=back
+
+=cut
+
 sub execute {
   my ($self, $args, $chain) = @_;
   my $main = $chain->[0];

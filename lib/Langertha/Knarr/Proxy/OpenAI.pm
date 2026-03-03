@@ -6,6 +6,40 @@ use warnings;
 use JSON::MaybeXS qw( encode_json );
 use Time::HiRes qw( time );
 
+=head1 DESCRIPTION
+
+Handles the OpenAI Chat Completions API format for L<Langertha::Knarr>.
+
+Routes handled:
+
+=over
+
+=item * C<POST /v1/chat/completions> — chat completions (streaming and non-streaming)
+
+=item * C<POST /v1/embeddings> — embeddings
+
+=item * C<GET /v1/models> — model list
+
+=back
+
+Streaming uses SSE (Server-Sent Events) with C<data: [DONE]> as the end marker.
+Passthrough format name is C<openai>, forwarding to C<https://api.openai.com>
+when passthrough is enabled.
+
+=seealso
+
+=over
+
+=item * L<Langertha::Knarr> — Main documentation
+
+=item * L<Langertha::Knarr::Proxy::Anthropic> — Anthropic format handler
+
+=item * L<Langertha::Knarr::Proxy::Ollama> — Ollama format handler
+
+=back
+
+=cut
+
 sub format_name { 'openai' }
 
 sub passthrough_format { 'openai' }

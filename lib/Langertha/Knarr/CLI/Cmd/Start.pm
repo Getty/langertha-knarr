@@ -7,6 +7,29 @@ use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr start [option
 use Log::Any qw( $log );
 use Log::Any::Adapter;
 
+=head1 DESCRIPTION
+
+Implements the C<knarr start> command. Loads the config file, validates it,
+and starts the Mojolicious server. Exits with an error if the config file is
+not found or fails validation.
+
+See L<knarr> for the full option reference and L<Langertha::Knarr> for the
+configuration file format.
+
+=seealso
+
+=over
+
+=item * L<knarr> — CLI synopsis and option reference
+
+=item * L<Langertha::Knarr> — Full documentation
+
+=item * L<Langertha::Knarr::CLI::Cmd::Container> — Zero-config Docker mode
+
+=back
+
+=cut
+
 option port => (
   is      => 'ro',
   format  => 'i',

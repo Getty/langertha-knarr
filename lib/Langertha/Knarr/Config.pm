@@ -6,15 +6,55 @@ use YAML::PP;
 use Carp qw( croak );
 use Log::Any qw( $log );
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Config;
+
+    # Load from file
+    my $config = Langertha::Knarr::Config->new(file => 'knarr.yaml');
+
+    # Build from environment (Docker zero-config mode)
+    my $config = Langertha::Knarr::Config->from_env;
+
+    # Validate
+    my @errors = $config->validate;
+    die join("\n", @errors) if @errors;
+
+=head1 DESCRIPTION
+
+Loads and validates Knarr configuration from a YAML file or from environment
+variables. All string values in the YAML file support C<${ENV_VAR}>
+interpolation.
+
+See L<Langertha::Knarr> for the full configuration file format reference.
+
+=cut
+
 has file => (
   is        => 'ro',
   predicate => 'has_file',
 );
 
+=attr file
+
+Path to the YAML configuration file. Optional — when omitted the config
+object starts with an empty data hash (useful for testing or for
+configs built purely from environment variables via L</from_env>).
+
+=cut
+
 has data => (
   is      => 'lazy',
   builder => '_build_data',
 );
+
+=attr data
+
+The raw configuration hashref, loaded from L</file> and with all
+C<${ENV_VAR}> references expanded. Can be supplied directly to bypass
+file loading.
+
+=cut
 
 sub _build_data {
   my ($self) = @_;
@@ -49,6 +89,20 @@ sub _interpolate_env {
     }
   }
 }
+
+=method from_env
+
+    my $config = Langertha::Knarr::Config->from_env(%opts);
+
+Class method. Builds a config object purely from environment variables
+(zero-config Docker mode). Calls L</scan_env> to detect which API keys are
+set, assigns a sensible default model for each detected engine, enables
+C<auto_discover> and C<passthrough>, and sets OpenAI as the default engine
+when C<OPENAI_API_KEY> is present.
+
+Options are passed through to L</scan_env> (e.g. C<include_test>).
+
+=cut
 
 # Build config purely from environment variables (zero-config Docker mode)
 sub from_env {
@@ -97,6 +151,13 @@ has listen => (
   builder => '_build_listen',
 );
 
+=attr listen
+
+ArrayRef of C<host:port> strings to listen on. Defaults to
+C<['127.0.0.1:8080', '127.0.0.1:11434']>.
+
+=cut
+
 sub _build_listen {
   my ($self) = @_;
   my $raw = $self->data->{listen};
@@ -109,6 +170,14 @@ has models => (
   builder => '_build_models',
 );
 
+=attr models
+
+HashRef of model name → model definition hashref from the C<models:> config
+section. Each definition may include C<engine>, C<model>, C<api_key_env>,
+C<api_key>, C<url>, C<system_prompt>, C<temperature>, and C<response_size>.
+
+=cut
+
 sub _build_models {
   my ($self) = @_;
   return $self->data->{models} // {};
@@ -118,6 +187,14 @@ has default_engine => (
   is      => 'lazy',
   builder => '_build_default_engine',
 );
+
+=attr default_engine
+
+HashRef from the C<default:> config section, or C<undef> if not set. At
+minimum contains C<engine>. Used as the fallback when a model name is not
+explicitly configured and no passthrough URL matches.
+
+=cut
 
 sub _build_default_engine {
   my ($self) = @_;
@@ -129,6 +206,14 @@ has langfuse => (
   builder => '_build_langfuse',
 );
 
+=attr langfuse
+
+HashRef from the C<langfuse:> config section. May contain C<url>,
+C<public_key>, C<secret_key>, and C<trace_name>. Returns an empty hashref
+when the section is absent.
+
+=cut
+
 sub _build_langfuse {
   my ($self) = @_;
   return $self->data->{langfuse} // {};
@@ -138,6 +223,14 @@ has proxy_api_key => (
   is      => 'lazy',
   builder => '_build_proxy_api_key',
 );
+
+=attr proxy_api_key
+
+Optional shared secret that clients must present in the C<Authorization: Bearer>
+or C<x-api-key> header. Falls back to the C<KNARR_API_KEY> environment variable.
+When not set, the proxy is open (no auth required).
+
+=cut
 
 sub _build_proxy_api_key {
   my ($self) = @_;
@@ -149,10 +242,26 @@ sub has_proxy_api_key {
   return defined $self->proxy_api_key;
 }
 
+=method has_proxy_api_key
+
+    if ($config->has_proxy_api_key) { ... }
+
+Returns true when a L</proxy_api_key> is configured.
+
+=cut
+
 has auto_discover => (
   is      => 'lazy',
   builder => '_build_auto_discover',
 );
+
+=attr auto_discover
+
+Boolean. When true, L<Langertha::Knarr::Router> queries each configured engine
+for its model list at startup, making all discovered models available without
+explicit config entries. Defaults to C<0>.
+
+=cut
 
 sub _build_auto_discover {
   my ($self) = @_;
@@ -168,6 +277,15 @@ has passthrough => (
   is      => 'lazy',
   builder => '_build_passthrough',
 );
+
+=attr passthrough
+
+HashRef of format name → upstream base URL. C<passthrough: true> in YAML
+enables all known formats with their default upstream URLs
+(C<https://api.openai.com> and C<https://api.anthropic.com>). Per-format
+URLs can be customised or set to C<false> to disable selectively.
+
+=cut
 
 sub _build_passthrough {
   my ($self) = @_;
@@ -199,6 +317,26 @@ sub passthrough_url_for {
   my ($self, $format) = @_;
   return $self->passthrough->{$format};
 }
+
+=method passthrough_url_for
+
+    my $url = $config->passthrough_url_for('openai');
+
+Returns the upstream base URL for the given format name (e.g. C<openai> or
+C<anthropic>), or C<undef> if passthrough is not configured for that format.
+
+=cut
+
+=method validate
+
+    my @errors = $config->validate;
+
+Validates the configuration and returns a list of error strings. Returns an
+empty list when the config is valid. Checks that every model entry has an
+C<engine> key, that the default engine (if set) has an C<engine> key, and
+that at least one model or default engine is configured.
+
+=cut
 
 sub validate {
   my ($self) = @_;
@@ -234,6 +372,32 @@ sub engine_definitions {
   }
   return \%defs;
 }
+
+=method scan_env
+
+    my $found = Langertha::Knarr::Config->scan_env(
+      env_files    => ['.env', '.env.local'],
+      include_test => 1,
+    );
+
+Class method. Scans C<%ENV> and optional C<.env> files for known API key
+environment variables. Returns a HashRef of engine name → C<{engine,
+api_key_env}> for every engine whose key was found.
+
+Priority order per engine: C<LANGERTHA_*_API_KEY> beats the bare vendor key
+(e.g. C<OPENAI_API_KEY>), which beats the C<TEST_LANGERTHA_*_API_KEY> variant.
+
+Options:
+
+=over
+
+=item * C<env_files> — ArrayRef of .env file paths to parse (optional)
+
+=item * C<include_test> — Include C<TEST_*> variables (default: C<1>)
+
+=back
+
+=cut
 
 # Scan environment and .env files for API keys, return model config suggestions
 sub scan_env {
@@ -289,6 +453,21 @@ sub scan_env {
 
   return \%found;
 }
+
+=method generate_config
+
+    my $yaml = Langertha::Knarr::Config->generate_config(
+      engines => $found,       # from scan_env
+      listen  => ['127.0.0.1:8080', '127.0.0.1:11434'],
+    );
+
+Class method. Generates a YAML configuration string from C<scan_env> results.
+The generated YAML includes sensible defaults for each detected engine and
+commented-out stanzas for optional features. Used by C<knarr init>.
+
+Returns a string.
+
+=cut
 
 # Generate a YAML config string from scan results
 sub generate_config {
@@ -365,5 +544,19 @@ sub generate_config {
 
   return join("\n", @lines) . "\n";
 }
+
+=seealso
+
+=over
+
+=item * L<Langertha::Knarr> — Main documentation and config format reference
+
+=item * L<Langertha::Knarr::Router> — Uses config to resolve models to engines
+
+=item * L<Langertha::Knarr::Tracing> — Uses config for Langfuse credentials
+
+=back
+
+=cut
 
 1;

@@ -7,6 +7,36 @@ use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr container [op
 use Log::Any qw( $log );
 use Log::Any::Adapter;
 
+=head1 DESCRIPTION
+
+Implements the C<knarr container> command — the entry point used by the
+official Docker image. If a config file exists at the default path
+(C<./knarr.yaml> or as specified with C<-c>), it is loaded normally. Otherwise
+the config is built automatically from environment variables via
+L<Langertha::Knarr::Config/from_env> (C<TEST_*> keys are ignored in this mode).
+
+The server always listens on C<0.0.0.0:8080> (OpenAI/Anthropic) and
+C<0.0.0.0:11434> (Ollama), suitable for a container environment. A startup
+summary is printed to stderr showing detected engines, passthrough state, and
+Langfuse status.
+
+See L<knarr> for option details and L<Langertha::Knarr> for Docker usage
+examples and environment variable reference.
+
+=seealso
+
+=over
+
+=item * L<knarr> — CLI synopsis and option reference
+
+=item * L<Langertha::Knarr> — Docker usage and environment variable reference
+
+=item * L<Langertha::Knarr::Config/from_env> — Zero-config env detection
+
+=back
+
+=cut
+
 option workers => (
   is      => 'ro',
   format  => 'i',

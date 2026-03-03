@@ -14,6 +14,344 @@ use Langertha::Knarr::Proxy::OpenAI;
 use Langertha::Knarr::Proxy::Anthropic;
 use Langertha::Knarr::Proxy::Ollama;
 
+=head1 SYNOPSIS
+
+    # Docker (recommended)
+    docker run \
+      -e OPENAI_API_KEY=sk-... \
+      -p 8080:8080 \
+      raudssus/langertha-knarr
+
+    # Or with Langfuse tracing
+    docker run \
+      -e OPENAI_API_KEY=sk-... \
+      -e LANGFUSE_PUBLIC_KEY=pk-lf-... \
+      -e LANGFUSE_SECRET_KEY=sk-lf-... \
+      -p 8080:8080 \
+      raudssus/langertha-knarr
+
+    # Local usage
+    knarr init > knarr.yaml
+    knarr start
+
+    # Programmatic usage
+    use Langertha::Knarr;
+    my $app = Langertha::Knarr->build_app(config_file => '/etc/knarr/knarr.yaml');
+
+=head1 DESCRIPTION
+
+Knarr is an LLM proxy that accepts requests in OpenAI, Anthropic, or Ollama
+format, routes them to any Langertha backend engine, and automatically records
+every request and response in Langfuse for observability and cost tracking.
+
+Named after the Norse cargo ship, Knarr carries your LLM calls safely to their
+destination.
+
+=head2 Request Flow
+
+                         ┌─────────────────────────────────┐
+    Client               │           Knarr Proxy            │           Backend
+    ──────               │           ────────────           │           ───────
+    OpenAI format   ───► │  /v1/chat/completions            │
+    Anthropic format───► │  /v1/messages        ──Router──► │ ──► Langertha Engine ──► API
+    Ollama format   ───► │  /api/chat                       │
+                         │         │                        │
+                         │         ▼                        │
+                         │   Langfuse Tracing               │
+                         └─────────────────────────────────┘
+
+Every request is traced: the model name, engine used, full message input, output
+text, token usage, and any errors are sent to Langfuse automatically.
+
+=head2 API Formats and Routes
+
+Knarr listens on port 8080 for OpenAI and Anthropic requests, and port 11434
+for Ollama requests (matching the Ollama default).
+
+B<OpenAI format> (port 8080):
+
+=over
+
+=item * C<POST /v1/chat/completions> — Chat completions
+
+=item * C<POST /v1/embeddings> — Embeddings
+
+=item * C<GET /v1/models> — List available models
+
+=back
+
+B<Anthropic format> (port 8080):
+
+=over
+
+=item * C<POST /v1/messages> — Messages API
+
+=back
+
+B<Ollama format> (port 11434):
+
+=over
+
+=item * C<POST /api/chat> — Chat
+
+=item * C<GET /api/tags> — List models
+
+=item * C<GET /api/ps> — Running models (always returns empty)
+
+=back
+
+B<Health check> (any port):
+
+=over
+
+=item * C<GET /health> — Returns C<{"status":"ok","proxy":"knarr"}>
+
+=back
+
+=head2 Passthrough Mode
+
+By default, when C<passthrough: true> is set (the default in container mode),
+requests are forwarded transparently to the upstream API using the client's own
+API key. This means you can point any OpenAI or Anthropic client at Knarr and
+it will just work, while Knarr adds Langfuse tracing on top.
+
+Passthrough defaults:
+
+=over
+
+=item * C<openai> passthrough → C<https://api.openai.com>
+
+=item * C<anthropic> passthrough → C<https://api.anthropic.com>
+
+=back
+
+Ollama requests are never passed through (no upstream Ollama passthrough URL).
+
+=head2 Engine Routing
+
+When a model is explicitly configured in the config file (or discovered via
+C<auto_discover>), Knarr routes requests through the corresponding Langertha
+engine. This allows routing to alternative backends, local models, or services
+that do not natively speak the protocol the client is using.
+
+Example: an Ollama client can request C<gpt-4o>, and Knarr will route it
+through the OpenAI Langertha engine, returning an Ollama-formatted response.
+
+=head2 Routing Priority
+
+For each incoming request, Knarr resolves the target in this order:
+
+=over
+
+=item 1. Explicit model config or auto-discovered model → route via Langertha engine
+
+=item 2. Passthrough enabled for this format → forward to upstream API
+
+=item 3. Default engine configured → route via default Langertha engine
+
+=item 4. None of the above → 404 error
+
+=back
+
+=head2 Streaming
+
+All three formats support streaming:
+
+=over
+
+=item * OpenAI — SSE (Server-Sent Events), ends with C<data: [DONE]>
+
+=item * Anthropic — SSE, ends with C<event: message_stop>
+
+=item * Ollama — NDJSON (newline-delimited JSON), ends with C<{"done":true}>
+
+=back
+
+For passthrough requests, the stream is piped byte-for-byte from the upstream
+API to the client with no buffering.
+
+=head2 Docker Usage
+
+The primary way to run Knarr is with Docker. The image is published at
+C<raudssus/langertha-knarr>.
+
+Zero-config start with just an API key:
+
+    docker run -e OPENAI_API_KEY=sk-... -p 8080:8080 raudssus/langertha-knarr
+
+With multiple providers and Langfuse:
+
+    docker run \
+      -e OPENAI_API_KEY=sk-... \
+      -e ANTHROPIC_API_KEY=sk-ant-... \
+      -e LANGFUSE_PUBLIC_KEY=pk-lf-... \
+      -e LANGFUSE_SECRET_KEY=sk-lf-... \
+      -e LANGFUSE_URL=https://cloud.langfuse.com \
+      -p 8080:8080 \
+      -p 11434:11434 \
+      raudssus/langertha-knarr
+
+With a mounted config file:
+
+    docker run \
+      -v ./knarr.yaml:/app/knarr.yaml \
+      -p 8080:8080 \
+      raudssus/langertha-knarr \
+      knarr start -c /app/knarr.yaml
+
+=head2 Configuration File
+
+The config file is YAML. All string values support C<${ENV_VAR}> interpolation.
+
+    listen:
+      - "127.0.0.1:8080"
+      - "127.0.0.1:11434"
+
+    models:
+      gpt-4o:
+        engine: OpenAI
+        model: gpt-4o
+        api_key_env: OPENAI_API_KEY
+      local:
+        engine: OllamaOpenAI
+        url: http://localhost:11434/v1
+        model: llama3.2
+
+    default:
+      engine: OpenAI
+
+    auto_discover: true
+
+    passthrough:
+      openai: https://api.openai.com
+      anthropic: https://api.anthropic.com
+
+    proxy_api_key: ${KNARR_API_KEY}
+
+    langfuse:
+      url: https://cloud.langfuse.com
+      public_key: ${LANGFUSE_PUBLIC_KEY}
+      secret_key: ${LANGFUSE_SECRET_KEY}
+      trace_name: my-app
+
+Model config keys:
+
+=over
+
+=item * C<engine> (required) — Langertha engine name (e.g. C<OpenAI>, C<Anthropic>, C<OllamaOpenAI>)
+
+=item * C<model> — Model name to pass to the engine
+
+=item * C<api_key_env> — Environment variable name holding the API key
+
+=item * C<api_key> — Literal API key (prefer C<api_key_env>)
+
+=item * C<url> — Custom base URL (for self-hosted or OpenAI-compatible endpoints)
+
+=item * C<system_prompt> — Default system prompt for all requests to this model
+
+=item * C<temperature> — Default temperature
+
+=item * C<response_size> — Default max response tokens
+
+=back
+
+=head2 Langfuse Tracing
+
+When C<LANGFUSE_PUBLIC_KEY> and C<LANGFUSE_SECRET_KEY> are set (or configured
+in the config file), Knarr automatically traces every request:
+
+=over
+
+=item * Trace created with model name, engine, format, and input messages
+
+=item * Generation recorded with start time, end time, output, and token usage
+
+=item * Errors recorded with level ERROR and the error message
+
+=item * Tags: C<knarr> added to every trace
+
+=back
+
+Traces are sent synchronously after each request. Configure the trace name with
+C<KNARR_TRACE_NAME> or C<langfuse.trace_name> in the config file.
+
+=head2 Programmatic Usage
+
+    use Langertha::Knarr;
+    use Langertha::Knarr::Config;
+
+    # From a config file
+    my $app = Langertha::Knarr->build_app(config_file => 'knarr.yaml');
+
+    # From a pre-built config object
+    my $config = Langertha::Knarr::Config->new(file => 'knarr.yaml');
+    my $app = Langertha::Knarr->build_app(config => $config);
+
+    # Use with any Mojolicious server
+    use Mojo::Server::Daemon;
+    my $daemon = Mojo::Server::Daemon->new(
+      app    => $app,
+      listen => ['http://127.0.0.1:8080'],
+    );
+    $daemon->run;
+
+=head2 Environment Variables
+
+=over
+
+=item * C<OPENAI_API_KEY> — OpenAI API key (auto-detected by C<knarr container>)
+
+=item * C<ANTHROPIC_API_KEY> — Anthropic API key (auto-detected)
+
+=item * C<GROQ_API_KEY> — Groq API key (auto-detected)
+
+=item * C<MISTRAL_API_KEY> — Mistral API key (auto-detected)
+
+=item * C<DEEPSEEK_API_KEY> — DeepSeek API key (auto-detected)
+
+=item * C<GEMINI_API_KEY> — Google Gemini API key (auto-detected)
+
+=item * C<OPENROUTER_API_KEY> — OpenRouter API key (auto-detected)
+
+=item * C<LANGFUSE_PUBLIC_KEY> — Langfuse public key (enables tracing)
+
+=item * C<LANGFUSE_SECRET_KEY> — Langfuse secret key (enables tracing)
+
+=item * C<LANGFUSE_URL> — Langfuse server URL (default: C<https://cloud.langfuse.com>)
+
+=item * C<KNARR_TRACE_NAME> — Name for Langfuse traces (default: C<knarr-proxy>)
+
+=item * C<KNARR_API_KEY> — Require this key in C<Authorization> or C<x-api-key> headers
+
+=back
+
+For CLI documentation, see L<knarr>.
+
+=seealso
+
+=over
+
+=item * L<knarr> — Command-line interface
+
+=item * L<Langertha::Knarr::Config> — Configuration loading and validation
+
+=item * L<Langertha::Knarr::Router> — Model-to-engine routing
+
+=item * L<Langertha::Knarr::Tracing> — Langfuse tracing
+
+=item * L<Langertha::Knarr::Proxy::OpenAI> — OpenAI format handler
+
+=item * L<Langertha::Knarr::Proxy::Anthropic> — Anthropic format handler
+
+=item * L<Langertha::Knarr::Proxy::Ollama> — Ollama format handler
+
+=item * L<Langertha::Knarr::CLI> — CLI entry point
+
+=back
+
+=cut
+
 sub build_app {
   my ( $class, %opts ) = @_;
   my $config_obj = $opts{config}
@@ -88,6 +426,27 @@ sub build_app {
 
   return $app;
 }
+
+=method build_app
+
+    my $app = Langertha::Knarr->build_app(%opts);
+
+Build and return a L<Mojolicious> application with all proxy routes wired up.
+
+Options:
+
+=over
+
+=item * C<config> — A pre-built L<Langertha::Knarr::Config> object
+
+=item * C<config_file> — Path to a YAML config file (used if C<config> not given)
+
+=back
+
+Returns a L<Mojolicious> application ready to be passed to C<Mojo::Server::Daemon>
+or any other Mojolicious-compatible server.
+
+=cut
 
 sub _handle_request ($c, $proxy_class, $type) {
   my $router  = $c->knarr_router;

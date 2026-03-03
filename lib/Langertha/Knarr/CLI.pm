@@ -4,6 +4,36 @@ use Moo;
 use MooX::Cmd;
 use MooX::Options protect_argv => 0;
 
+=head1 DESCRIPTION
+
+MooX::Cmd entry point for the C<knarr> CLI. Dispatches to subcommand classes
+under C<Langertha::Knarr::CLI::Cmd::*>. When invoked without a subcommand,
+prints a banner and usage summary.
+
+For full CLI documentation see L<knarr> and L<Langertha::Knarr>.
+
+=seealso
+
+=over
+
+=item * L<knarr> — CLI synopsis and option reference
+
+=item * L<Langertha::Knarr> — Full documentation
+
+=item * L<Langertha::Knarr::CLI::Cmd::Start> — C<knarr start>
+
+=item * L<Langertha::Knarr::CLI::Cmd::Container> — C<knarr container>
+
+=item * L<Langertha::Knarr::CLI::Cmd::Init> — C<knarr init>
+
+=item * L<Langertha::Knarr::CLI::Cmd::Models> — C<knarr models>
+
+=item * L<Langertha::Knarr::CLI::Cmd::Check> — C<knarr check>
+
+=back
+
+=cut
+
 our $VERSION = '0.002';
 
 option config => (
@@ -14,6 +44,13 @@ option config => (
   default => sub { './knarr.yaml' },
 );
 
+=opt --config
+
+Path to the YAML configuration file. Short form: C<-c>. Defaults to
+C<./knarr.yaml>. Applies to all subcommands.
+
+=cut
+
 option verbose => (
   is      => 'ro',
   short   => 'v',
@@ -21,6 +58,13 @@ option verbose => (
   default => 0,
   negativable => 1,
 );
+
+=opt --verbose
+
+Enable verbose logging to stderr. Short form: C<-v>. Applies to all
+subcommands.
+
+=cut
 
 sub execute {
   my ($self) = @_;
