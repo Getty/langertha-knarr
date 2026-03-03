@@ -1,0 +1,9 @@
+Revision history for Langertha-Knarr
+
+{{$NEXT}}
+
+  - Initial release
+  - Multi-format LLM proxy: OpenAI, Anthropic, Ollama
+  - Passthrough mode with Langfuse tracing
+  - Docker container mode with auto-detect from ENV
+  - CLI: start, container, models, check, init
