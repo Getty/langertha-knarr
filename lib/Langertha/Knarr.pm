@@ -1,5 +1,5 @@
 package Langertha::Knarr;
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 # ABSTRACT: LLM Proxy with Langfuse Tracing
 use strict;
 use warnings;
