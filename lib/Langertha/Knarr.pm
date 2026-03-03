@@ -16,49 +16,100 @@ use Langertha::Knarr::Proxy::Ollama;
 
 =head1 SYNOPSIS
 
-    # Docker (recommended)
-    docker run \
-      -e OPENAI_API_KEY=sk-... \
-      -p 8080:8080 \
-      raudssus/langertha-knarr
+    # 1. Create a .env with your Langfuse credentials
+    #    (free tier at https://cloud.langfuse.com)
+    LANGFUSE_PUBLIC_KEY=pk-lf-...
+    LANGFUSE_SECRET_KEY=sk-lf-...
+    LANGFUSE_BASE_URL=https://cloud.langfuse.com
 
-    # Or with Langfuse tracing
-    docker run \
-      -e OPENAI_API_KEY=sk-... \
-      -e LANGFUSE_PUBLIC_KEY=pk-lf-... \
-      -e LANGFUSE_SECRET_KEY=sk-lf-... \
-      -p 8080:8080 \
-      raudssus/langertha-knarr
+    # 2. Start the proxy
+    docker run --env-file .env -p 8080:8080 raudssus/langertha-knarr
 
-    # Local usage
-    knarr init > knarr.yaml
-    knarr start
+    # 3. Point your client at it
+    ANTHROPIC_BASE_URL=http://localhost:8080 claude    # Claude Code
+    OPENAI_BASE_URL=http://localhost:8080/v1 my-app    # OpenAI SDK apps
 
-    # Programmatic usage
-    use Langertha::Knarr;
-    my $app = Langertha::Knarr->build_app(config_file => '/etc/knarr/knarr.yaml');
+    # Every API call is now traced in Langfuse.
+    # The proxy forwards requests 1:1 using the client's own API key.
+    # Knarr doesn't need one.
 
 =head1 DESCRIPTION
 
-Knarr is an LLM proxy that accepts requests in OpenAI, Anthropic, or Ollama
-format, routes them to any Langertha backend engine, and automatically records
-every request and response in Langfuse for observability and cost tracking.
+Knarr is an LLM proxy that sits between your client and the API, forwarding
+requests transparently while recording everything in Langfuse. The client's
+own API key is used — Knarr doesn't need API keys for the LLM providers, only
+Langfuse credentials to write the traces.
+
+The simplest use case: debug your AI coding agent. Start Knarr, point Claude
+Code or any other LLM client at it, and see every prompt, response, token
+count and error in your Langfuse dashboard.
 
 Named after the Norse cargo ship, Knarr carries your LLM calls safely to their
-destination.
+destination — with full cargo documentation.
+
+=head2 Quick Start
+
+Create a C<.env> file with your Langfuse credentials:
+
+    LANGFUSE_PUBLIC_KEY=pk-lf-...
+    LANGFUSE_SECRET_KEY=sk-lf-...
+    LANGFUSE_BASE_URL=https://cloud.langfuse.com
+
+Start the proxy:
+
+    docker run --env-file .env -p 8080:8080 raudssus/langertha-knarr
+
+Use it with Claude Code:
+
+    ANTHROPIC_BASE_URL=http://localhost:8080 claude
+
+Use it with any OpenAI SDK application:
+
+    OPENAI_BASE_URL=http://localhost:8080/v1 python my_app.py
+
+Every API call now shows up in your Langfuse dashboard with full input,
+output, token usage, latency, and error tracking. The proxy doesn't touch
+the API key — it just passes it through to the upstream API.
+
+=head2 Additional Docker Examples
+
+With provider API keys for engine routing (not just passthrough):
+
+    docker run --env-file .env \
+      -e OPENAI_API_KEY=sk-... \
+      -p 8080:8080 \
+      raudssus/langertha-knarr
+
+With a mounted config file:
+
+    docker run --env-file .env \
+      -v ./knarr.yaml:/app/knarr.yaml \
+      -p 8080:8080 \
+      raudssus/langertha-knarr \
+      container
+
+Local usage (without Docker):
+
+    knarr init > knarr.yaml
+    knarr start
+
+Programmatic usage:
+
+    use Langertha::Knarr;
+    my $app = Langertha::Knarr->build_app(config_file => 'knarr.yaml');
 
 =head2 Request Flow
 
-                         ┌─────────────────────────────────┐
-    Client               │           Knarr Proxy            │           Backend
-    ──────               │           ────────────           │           ───────
-    OpenAI format   ───► │  /v1/chat/completions            │
-    Anthropic format───► │  /v1/messages        ──Router──► │ ──► Langertha Engine ──► API
-    Ollama format   ───► │  /api/chat                       │
-                         │         │                        │
-                         │         ▼                        │
-                         │   Langfuse Tracing               │
-                         └─────────────────────────────────┘
+                       ┌─────────────────────────────────┐
+  Client               │           Knarr Proxy           │           Backend
+  ──────               │           ────────────          │           ───────
+  OpenAI format   ───► │  /v1/chat/completions           │
+  Anthropic format───► │  /v1/messages        ──Router──►│ ──► Langertha Engine ──► API
+  Ollama format   ───► │  /api/chat                      │
+                       │         │                       │
+                       │         ▼                       │
+                       │   Langfuse Tracing              │
+                       └─────────────────────────────────┘
 
 Every request is traced: the model name, engine used, full message input, output
 text, token usage, and any errors are sent to Langfuse automatically.
@@ -169,35 +220,6 @@ All three formats support streaming:
 
 For passthrough requests, the stream is piped byte-for-byte from the upstream
 API to the client with no buffering.
-
-=head2 Docker Usage
-
-The primary way to run Knarr is with Docker. The image is published at
-C<raudssus/langertha-knarr>.
-
-Zero-config start with just an API key:
-
-    docker run -e OPENAI_API_KEY=sk-... -p 8080:8080 raudssus/langertha-knarr
-
-With multiple providers and Langfuse:
-
-    docker run \
-      -e OPENAI_API_KEY=sk-... \
-      -e ANTHROPIC_API_KEY=sk-ant-... \
-      -e LANGFUSE_PUBLIC_KEY=pk-lf-... \
-      -e LANGFUSE_SECRET_KEY=sk-lf-... \
-      -e LANGFUSE_URL=https://cloud.langfuse.com \
-      -p 8080:8080 \
-      -p 11434:11434 \
-      raudssus/langertha-knarr
-
-With a mounted config file:
-
-    docker run \
-      -v ./knarr.yaml:/app/knarr.yaml \
-      -p 8080:8080 \
-      raudssus/langertha-knarr \
-      knarr start -c /app/knarr.yaml
 
 =head2 Configuration File
 
