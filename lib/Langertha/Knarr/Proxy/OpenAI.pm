@@ -1,5 +1,5 @@
 package Langertha::Knarr::Proxy::OpenAI;
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 # ABSTRACT: OpenAI API format proxy handler
 use strict;
 use warnings;
