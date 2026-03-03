@@ -1,0 +1,7 @@
+#!/usr/bin/env perl
+# PODNAME: knarr
+# ABSTRACT: Langertha LLM Proxy with Langfuse Tracing
+use strict;
+use warnings;
+use Langertha::Knarr::CLI;
+Langertha::Knarr::CLI->new_with_cmd;
