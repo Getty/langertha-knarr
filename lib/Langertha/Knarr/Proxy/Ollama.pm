@@ -1,4 +1,5 @@
 package Langertha::Knarr::Proxy::Ollama;
+our $VERSION = '0.002';
 # ABSTRACT: Ollama native API format proxy handler
 use strict;
 use warnings;

@@ -4,7 +4,7 @@ use Moo;
 use MooX::Cmd;
 use MooX::Options protect_argv => 0;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 option config => (
   is      => 'ro',

@@ -1,4 +1,5 @@
 package Langertha::Knarr::Router;
+our $VERSION = '0.002';
 # ABSTRACT: Model name to Langertha engine routing with caching
 use Moo;
 use Module::Runtime qw( require_module );
