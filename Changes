@@ -1,6 +1,6 @@
 Revision history for Langertha-Knarr
 
-{{$NEXT}}
+0.007     2026-03-10 20:05:00Z
 
   - Resolve configured engines through both `Langertha::Engine::*` and
     `LangerthaX::Engine::*` (including fully-qualified class names).
