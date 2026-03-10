@@ -1,6 +1,6 @@
 Revision history for Langertha-Knarr
 
-{{$NEXT}}
+0.005     2026-03-10 14:48:05Z
 
   - Add primary Knarr normalization modules (core-backed):
     `Langertha::Knarr::Input`, `Langertha::Knarr::Output`, `Langertha::Knarr::Metrics`.
