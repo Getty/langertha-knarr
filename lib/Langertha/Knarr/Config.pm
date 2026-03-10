@@ -201,6 +201,40 @@ sub _build_default_engine {
   return $self->data->{default} // undef;
 }
 
+has log_file => (
+  is      => 'lazy',
+  builder => '_build_log_file',
+);
+
+=attr log_file
+
+Path to a JSONL log file for request logging. Resolved from
+C<logging.file> in config or C<KNARR_LOG_FILE> environment variable.
+
+=cut
+
+sub _build_log_file {
+  my ($self) = @_;
+  return $self->data->{logging}{file} // _strip_quotes($ENV{KNARR_LOG_FILE}) // undef;
+}
+
+has log_dir => (
+  is      => 'lazy',
+  builder => '_build_log_dir',
+);
+
+=attr log_dir
+
+Path to a directory for per-request JSON log files. Resolved from
+C<logging.dir> in config or C<KNARR_LOG_DIR> environment variable.
+
+=cut
+
+sub _build_log_dir {
+  my ($self) = @_;
+  return $self->data->{logging}{dir} // _strip_quotes($ENV{KNARR_LOG_DIR}) // undef;
+}
+
 has langfuse => (
   is      => 'lazy',
   builder => '_build_langfuse',
@@ -545,6 +579,14 @@ sub generate_config {
   return join("\n", @lines) . "\n";
 }
 
+# Strip surrounding quotes from env values (Docker --env-file includes them literally)
+sub _strip_quotes {
+  my $v = shift;
+  return $v unless defined $v;
+  $v =~ s/^["']|["']$//g;
+  return $v;
+}
+
 =seealso
 
 =over
@@ -554,6 +596,8 @@ sub generate_config {
 =item * L<Langertha::Knarr::Router> — Uses config to resolve models to engines
 
 =item * L<Langertha::Knarr::Tracing> — Uses config for Langfuse credentials
+
+=item * L<Langertha::Knarr::RequestLog> — Uses config for request logging paths
 
 =back
 

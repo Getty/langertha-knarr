@@ -2,6 +2,21 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+  - Add primary Knarr normalization modules (core-backed):
+    `Langertha::Knarr::Input`, `Langertha::Knarr::Output`, `Langertha::Knarr::Metrics`.
+  - Bump `Langertha` dependency to `>= 0.306`.
+
+  - Add request policy hooks in `build_app`:
+    - `before_request` hook to inspect/mutate/block requests before routing
+    - `api_key_validator` hook for dynamic per-request key authorization
+  - Add cross-format tool bridging between OpenAI and Anthropic request/response shapes
+    (including `tools`, `tool_choice`, `tool_calls`, `tool_use`, and `tool_result`)
+  - Add Hermes tool XML bridging:
+    - Parse `<tool_call>{...}</tool_call>` into OpenAI `tool_calls`
+    - Parse `<tool_call>{...}</tool_call>` into Anthropic `tool_use` blocks
+  - Route OpenAI `tools` through Hermes-capable engines by normalizing tool schema
+  - Extend proxy/unit/integration tests for hook behavior and tool-bridge paths
+
 0.004     2026-03-03 05:22:38Z
 
   - Fix routing priority: passthrough before default engine fallback

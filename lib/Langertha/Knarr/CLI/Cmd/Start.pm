@@ -60,6 +60,20 @@ option trace_name => (
   predicate => 'has_trace_name',
 );
 
+option log_file => (
+  is      => 'ro',
+  format  => 's',
+  doc     => 'JSONL log file path (or KNARR_LOG_FILE env)',
+  predicate => 'has_log_file',
+);
+
+option log_dir => (
+  is      => 'ro',
+  format  => 's',
+  doc     => 'Directory for per-request JSON log files (or KNARR_LOG_DIR env)',
+  predicate => 'has_log_dir',
+);
+
 sub execute {
   my ($self, $args, $chain) = @_;
   my $main = $chain->[0];
@@ -94,6 +108,13 @@ sub execute {
   if ($self->has_trace_name) {
     $config->data->{langfuse} //= {};
     $config->data->{langfuse}{trace_name} = $self->trace_name;
+  }
+
+  # Inject CLI logging options into config
+  if ($self->has_log_file || $self->has_log_dir) {
+    $config->data->{logging} //= {};
+    $config->data->{logging}{file} = $self->log_file if $self->has_log_file;
+    $config->data->{logging}{dir}  = $self->log_dir  if $self->has_log_dir;
   }
 
   my $listen_addrs = $config->listen;

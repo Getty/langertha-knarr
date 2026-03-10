@@ -1,5 +1,5 @@
 
-requires 'Langertha', '>= 0.303';
+requires 'Langertha', '>= 0.306';
 requires 'Mojolicious', '>= 9.0';
 requires 'Moo';
 requires 'MooX::Cmd';
