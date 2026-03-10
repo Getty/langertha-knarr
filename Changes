@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+  - Resolve configured engines through both `Langertha::Engine::*` and
+    `LangerthaX::Engine::*` (including fully-qualified class names).
+  - Add router test coverage for `LangerthaX::Engine::*` custom engines.
+  - Tighten dependency minimums in cpanfile:
+    `Langertha 0.307`, `Mojolicious 9.0`.
+  - Update README and POD docs to describe custom engine resolution order.
+
 0.005     2026-03-10 14:48:05Z
 
   - Add primary Knarr normalization modules (core-backed):
