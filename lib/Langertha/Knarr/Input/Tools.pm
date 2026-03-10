@@ -1,5 +1,5 @@
 package Langertha::Knarr::Input::Tools;
-our $VERSION = '0.006';
+our $VERSION = '0.008';
 # ABSTRACT: Primary tool-input helpers for Knarr
 use strict;
 use warnings;

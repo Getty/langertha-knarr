@@ -1,5 +1,5 @@
 package Langertha::Knarr::Metrics;
-our $VERSION = '0.006';
+our $VERSION = '0.008';
 # ABSTRACT: Primary metrics/cost normalization API for Knarr
 use strict;
 use warnings;

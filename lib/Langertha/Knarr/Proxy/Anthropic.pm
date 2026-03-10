@@ -1,5 +1,5 @@
 package Langertha::Knarr::Proxy::Anthropic;
-our $VERSION = '0.006';
+our $VERSION = '0.008';
 # ABSTRACT: Anthropic Messages API format proxy handler
 use strict;
 use warnings;
