@@ -10,6 +10,15 @@ Revision history for Langertha-Knarr
   - Update README and POD docs to describe custom engine resolution order.
   - Dockerfile: add optional `LANGERTHA_SRC` build arg to inject unreleased
     Langertha source when CPAN indexers lag.
+  - dist.ini release Docker build supports optional
+    `KNARR_DOCKER_BUILD_ARGS='...'` passthrough for temporary build overrides,
+    including GitHub release-dist URL examples and a note against
+    `/archive/refs/*` source archives for dzil dists.
+  - dist.ini now uploads `Langertha-Knarr-%v.tar.gz` to GitHub releases
+    (`Getty/langertha-knarr`) via `gh` during post-release hooks.
+  - dist.ini now runs `${GH_BIN:-gh}` directly in separate `run_after_release`
+    steps (no pre-check, no chained `&&`), so hooks use invoking-shell runtime
+    environment/path.
 
 0.005     2026-03-10 14:48:05Z
 
