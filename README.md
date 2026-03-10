@@ -402,6 +402,12 @@ passthrough:
 Config values support `${ENV_VAR}` interpolation — variables are resolved
 at startup.
 
+`models.<name>.engine` resolves in this order:
+
+- `Langertha::Engine::<EngineName>`
+- `LangerthaX::Engine::<EngineName>`
+- Fully-qualified class name if you set one directly
+
 ### Passthrough Mode
 
 Passthrough is the default behavior: requests go directly to the upstream

@@ -288,7 +288,9 @@ Model config keys:
 
 =over
 
-=item * C<engine> (required) — Langertha engine name (e.g. C<OpenAI>, C<Anthropic>, C<OllamaOpenAI>)
+=item * C<engine> (required) — Engine class selector. Resolution order:
+C<Langertha::Engine::E<lt>NameE<gt>>, then
+C<LangerthaX::Engine::E<lt>NameE<gt>>, or a fully-qualified class name
 
 =item * C<model> — Model name to pass to the engine
 

@@ -2,9 +2,9 @@ package Langertha::Knarr::Router;
 our $VERSION = '0.006';
 # ABSTRACT: Model name to Langertha engine routing with caching
 use Moo;
-use Module::Runtime qw( require_module );
 use Carp qw( croak );
 use Log::Any qw( $log );
+use Langertha ();
 
 =head1 SYNOPSIS
 
@@ -22,6 +22,9 @@ use Log::Any qw( $log );
 Resolves a model name to a Langertha engine instance and canonical model
 identifier. Engine instances are cached and reused across requests to avoid
 repeated construction overhead.
+
+Engine classes are resolved from both C<Langertha::Engine::*> and
+C<LangerthaX::Engine::*>.
 
 When C<auto_discover> is enabled in the config, the router queries each
 configured engine for its full model list on first use, making all discovered
@@ -120,8 +123,7 @@ sub _get_engine {
     return $cached;
   }
 
-  my $full_class = "Langertha::Engine::$engine_class";
-  require_module($full_class);
+  my $full_class = Langertha->resolve_engine_class($engine_class);
 
   my %args;
 
