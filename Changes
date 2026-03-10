@@ -8,6 +8,8 @@ Revision history for Langertha-Knarr
   - Tighten dependency minimums in cpanfile:
     `Langertha 0.307`, `Mojolicious 9.0`.
   - Update README and POD docs to describe custom engine resolution order.
+  - Dockerfile: add optional `LANGERTHA_SRC` build arg to inject unreleased
+    Langertha source when CPAN indexers lag.
 
 0.005     2026-03-10 14:48:05Z
 

@@ -113,6 +113,24 @@ docker run --env-file .env -p 8080:8080 -p 11434:11434 raudssus/langertha-knarr
 Knarr reads the file, detects which providers have keys, configures them
 with sensible default models, and starts serving.
 
+## Docker Build (Temporary CPAN Indexer Bypass)
+
+Default build flow stays unchanged:
+
+```bash
+docker build -t raudssus/langertha-knarr .
+```
+
+If CPAN indexers lag behind new releases, inject a direct CPAN dist path for `Langertha`:
+
+```bash
+docker build -t raudssus/langertha-knarr \
+  --build-arg LANGERTHA_SRC='GETTY/Langertha-0.307.tar.gz' \
+  .
+```
+
+`LANGERTHA_SRC` is passed directly to `cpanm` (for example `AUTHOR/Dist-x.yyy.tar.gz` or a tarball URL).
+
 ## Docker Compose
 
 The included `docker-compose.yml` starts Knarr with Langfuse tracing
