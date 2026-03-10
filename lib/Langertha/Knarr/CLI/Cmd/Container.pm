@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Container;
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 # ABSTRACT: Auto-start Knarr from environment variables (Docker mode)
 use Moo;
 use MooX::Cmd;

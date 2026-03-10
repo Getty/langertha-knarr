@@ -1,5 +1,5 @@
 package Langertha::Knarr::Output;
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 # ABSTRACT: Primary output normalization API for Knarr
 use strict;
 use warnings;

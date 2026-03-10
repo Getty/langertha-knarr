@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Init;
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 # ABSTRACT: Scan environment and generate Knarr configuration
 use Moo;
 use MooX::Cmd;

@@ -1,5 +1,5 @@
 package Langertha::Knarr::Input;
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 # ABSTRACT: Primary input normalization API for Knarr
 use strict;
 use warnings;
