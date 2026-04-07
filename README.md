@@ -298,9 +298,11 @@ Clients must send `Authorization: Bearer my-secret-proxy-key` or
 
 ## API Formats
 
-Knarr accepts three API formats and routes them to any Langertha backend:
+Knarr 1.000 speaks **six** wire protocols on every listening port. The
+protocol is selected by URL path, so a single Knarr listening on
+`http://localhost:8080` answers all of them simultaneously:
 
-### OpenAI (Port 8080)
+### OpenAI
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -310,7 +312,7 @@ curl http://localhost:8080/v1/chat/completions \
 curl http://localhost:8080/v1/models
 ```
 
-### Anthropic (Port 8080)
+### Anthropic
 
 ```bash
 curl http://localhost:8080/v1/messages \
@@ -318,16 +320,35 @@ curl http://localhost:8080/v1/messages \
   -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"Hello"}],"max_tokens":1024}'
 ```
 
-### Ollama (Port 11434)
+### Ollama
 
 ```bash
-curl http://localhost:11434/api/chat \
+curl http://localhost:8080/api/chat \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
 
-curl http://localhost:11434/api/tags
+curl http://localhost:8080/api/tags
 ```
 
-All formats support streaming — SSE for OpenAI/Anthropic, NDJSON for Ollama.
+In container mode Knarr binds an extra `:11434` socket as well, so
+existing Ollama clients work without reconfiguration.
+
+### A2A (Google Agent2Agent)
+
+Knarr exposes the agent card at `/.well-known/agent.json` and accepts
+A2A JSON-RPC at `POST /` with methods `tasks/send` (sync) and
+`tasks/sendSubscribe` (streaming).
+
+### ACP (BeeAI / Linux Foundation)
+
+`POST /runs` with `mode: "sync"` or `mode: "stream"`; agent listing at
+`GET /agents`.
+
+### AG-UI (CopilotKit)
+
+`POST /awp` returning the AG-UI typed event stream.
+
+All six formats support streaming — SSE for OpenAI / Anthropic / A2A /
+ACP / AG-UI, NDJSON for Ollama.
 
 ### Tool Calling Bridge
 
@@ -580,46 +601,75 @@ knarr start
 
 ### Using Knarr Programmatically
 
+Knarr 1.000 is built around a `handler` and one or more wire protocols.
+You construct a handler (typically `Handler::Router` driven by your
+existing `knarr.yaml`), optionally wrap it in tracing/logging decorators,
+and pass it to a `Langertha::Knarr` instance:
+
 ```perl
+use IO::Async::Loop;
 use Langertha::Knarr;
 use Langertha::Knarr::Config;
+use Langertha::Knarr::Router;
+use Langertha::Knarr::Handler::Router;
 
-# Build from YAML config
+my $loop   = IO::Async::Loop->new;
 my $config = Langertha::Knarr::Config->new(file => 'knarr.yaml');
-my $app    = Langertha::Knarr->build_app(config => $config);
+my $router = Langertha::Knarr::Router->new(config => $config);
 
-# Or build from environment (like container mode)
-my $config = Langertha::Knarr::Config->from_env;
-my $app    = Langertha::Knarr->build_app(config => $config);
+my $handler = Langertha::Knarr::Handler::Router->new(router => $router);
 
-# $app is a Mojolicious app — embed, test, or run as you like
-use Mojo::Server::Daemon;
-Mojo::Server::Daemon->new(
-  app    => $app,
-  listen => ['http://127.0.0.1:8080'],
-)->run;
+my $knarr = Langertha::Knarr->new(
+  handler => $handler,
+  loop    => $loop,
+  listen  => $config->listen,   # arrayref of "host:port" strings
+);
+$knarr->run;   # blocks
 ```
 
-You can also add request policy hooks when building the app:
+#### Wrapping with tracing and logging
+
+Both `Tracing` and `RequestLog` are decorator handlers — they wrap any
+inner handler and forward chat/stream calls through, recording before
+and after:
 
 ```perl
-my $app = Langertha::Knarr->build_app(
-  config => $config,
-  before_request => sub ($c, $ctx) {
-    # $ctx: proxy_class, type, format, body, model_name, stream, messages, params
-    return {
-      stop    => 1,
-      status  => 418,
-      message => 'embeddings disabled by policy',
-      type    => 'policy_denied',
-    } if $ctx->{type} eq 'embedding';
-    return;
-  },
-  api_key_validator => sub ($c, $ctx) {
-    # $ctx: api_key, raw_auth, path, method, content_type
-    return { allow => 1 } if $ctx->{api_key} eq 'allow-key';
-    return { allow => 0, status => 403, message => 'forbidden' };
-  },
+use Langertha::Knarr::Tracing;
+use Langertha::Knarr::Handler::Tracing;
+use Langertha::Knarr::Handler::RequestLog;
+
+my $tracing = Langertha::Knarr::Tracing->new(config => $config);
+$handler = Langertha::Knarr::Handler::Tracing->new(
+  wrapped => $handler,
+  tracing => $tracing,
+) if $tracing->_enabled;
+
+my $rlog = Langertha::Knarr::RequestLog->new(config => $config);
+$handler = Langertha::Knarr::Handler::RequestLog->new(
+  wrapped     => $handler,
+  request_log => $rlog,
+) if $rlog->_enabled;
+```
+
+`knarr start` and `knarr container` apply both wrappers automatically
+when their respective config sections are present.
+
+#### Adding passthrough fallback
+
+To preserve the "configured models go through Langertha, everything else
+tunnels straight to the upstream API" behaviour, give the router a
+`Handler::Passthrough` fallback:
+
+```perl
+use Langertha::Knarr::Handler::Passthrough;
+
+my $passthrough = Langertha::Knarr::Handler::Passthrough->new(
+  upstreams => $config->passthrough,   # { openai => 'https://api.openai.com', ... }
+  loop      => $loop,
+);
+my $handler = Langertha::Knarr::Handler::Router->new(
+  router      => $router,
+  passthrough => $passthrough,
 );
 ```
 
@@ -645,7 +695,9 @@ my $response = $engine->simple_chat(
 ## Built With
 
 - [Langertha](https://metacpan.org/pod/Langertha) — Perl LLM framework with 22+ engine backends
-- [Mojolicious](https://mojolicious.org/) — Real-time web framework for Perl
+- [IO::Async](https://metacpan.org/pod/IO::Async) + [Net::Async::HTTP::Server](https://metacpan.org/pod/Net::Async::HTTP::Server) — Async event loop and HTTP server
+- [Future::AsyncAwait](https://metacpan.org/pod/Future::AsyncAwait) — Native async/await for Perl
+- [Moose](https://metacpan.org/pod/Moose) — Postmodern object system
 - [Langfuse](https://langfuse.com) — Open source LLM observability
 
 ## License
