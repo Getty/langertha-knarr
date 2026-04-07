@@ -65,23 +65,29 @@ every request gets traced automatically.
 
 ### How it works
 
-Knarr runs in **passthrough mode** by default: requests that don't match a
-configured model are forwarded to the upstream API (Anthropic, OpenAI)
-using the client's own API key. No key duplication, no configuration needed.
+Knarr starts in **mixed mode** by default: requests with a model name
+that's explicitly configured in `knarr.yaml` go through a Langertha
+engine (with full tracing, request logging, and value-object metrics);
+unknown model names tunnel straight through to the upstream API the
+client thinks it's talking to, using the client's own API key. No key
+duplication, no configuration required for the simple cases.
 
 ```
 Claude Code                                    Anthropic API
     │                                               ▲
-    │  ANTHROPIC_BASE_URL=http://localhost:8080      │
+    │  ANTHROPIC_BASE_URL=http://localhost:8080     │
     ▼                                               │
-  Knarr ──────── passthrough ──────────────────────►│
-    │                                               │
-    └── Langfuse trace (auto)
+  Knarr ──── Handler::Router ─┐                     │
+    │           │             └── Handler::Passthrough ──►
+    │           └── matches gpt-4o → Langertha::Engine::OpenAI
+    │
+    └── Tracing decorator → Langfuse
+    └── RequestLog decorator → JSONL
 ```
 
-For explicit routing (e.g., send "gpt-4o" requests to OpenAI, "cheap" to
-Groq), configure models in a YAML file or let Knarr auto-detect from
-environment variables.
+For explicit routing (send "gpt-4o" requests to OpenAI, "cheap" to
+Groq), configure models in a YAML file or let `knarr init` scan your
+environment variables and generate one.
 
 ### More examples
 
@@ -95,15 +101,22 @@ curl http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
 
-# Ollama clients (Open WebUI, etc.)
+# Ollama clients (Open WebUI, etc.) — point at port 11434 in container mode
 OLLAMA_HOST=http://localhost:11434 open-webui
+
+# A2A discovery
+curl http://localhost:8080/.well-known/agent.json
 ```
 
-Knarr listens on:
+In **container mode** (the default for the Docker image), Knarr binds
+two listening sockets simultaneously, both serving every protocol:
 
-- **Port 8080** — OpenAI + Anthropic API (passthrough + routing)
-- **Port 11434** — Ollama API (routing only)
-- **Health** — http://localhost:8080/health
+- **Port 8080** — primary, OpenAI / Anthropic / A2A / ACP / AG-UI clients
+- **Port 11434** — alias for Ollama clients that hardcode that port
+
+Both ports run the same handler chain — the second port is a
+convenience alias so existing Ollama clients work without
+reconfiguration.
 
 ## Windows
 
@@ -158,7 +171,7 @@ If CPAN indexers lag behind new releases, inject a direct CPAN dist path for `La
 
 ```bash
 docker build -t raudssus/langertha-knarr \
-  --build-arg LANGERTHA_SRC='GETTY/Langertha-0.307.tar.gz' \
+  --build-arg LANGERTHA_SRC='GETTY/Langertha-0.400.tar.gz' \
   .
 ```
 
@@ -294,7 +307,9 @@ KNARR_API_KEY=my-secret-proxy-key
 ```
 
 Clients must send `Authorization: Bearer my-secret-proxy-key` or
-`x-api-key: my-secret-proxy-key`. The `/health` endpoint is always open.
+`x-api-key: my-secret-proxy-key`. The A2A discovery endpoint
+(`/.well-known/agent.json`) stays anonymous so agent clients can
+introspect.
 
 ## API Formats
 

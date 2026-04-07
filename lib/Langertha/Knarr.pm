@@ -15,35 +15,48 @@ use Langertha::Knarr::Session;
 
 =head1 SYNOPSIS
 
+The fastest way to use Knarr is the Docker image:
+
+    docker run -e ANTHROPIC_API_KEY -p 8080:8080 raudssus/langertha-knarr
+    ANTHROPIC_BASE_URL=http://localhost:8080 claude
+
+The Perl API behind it:
+
     use IO::Async::Loop;
     use Langertha::Knarr;
-    use Langertha::Knarr::Handler::Raider;
+    use Langertha::Knarr::Config;
+    use Langertha::Knarr::Router;
+    use Langertha::Knarr::Handler::Router;
 
-    my $loop = IO::Async::Loop->new;
+    my $loop   = IO::Async::Loop->new;
+    my $config = Langertha::Knarr::Config->new(file => 'knarr.yaml');
+    my $router = Langertha::Knarr::Router->new(config => $config);
 
-    my $sb = Langertha::Knarr->new(
-        handler => Langertha::Knarr::Handler::Raider->new(
-            raider_factory => sub { build_raider_for_session(@_) },
-        ),
-        loop => $loop,
-        host => '0.0.0.0',
-        port => 8088,
+    my $knarr = Langertha::Knarr->new(
+        handler => Langertha::Knarr::Handler::Router->new(router => $router),
+        loop    => $loop,
+        listen  => $config->listen,
     );
-    $sb->run;  # blocks; OpenWebUI etc. can now connect
+    $knarr->run;   # blocks; OpenWebUI etc. can now connect
 
 =head1 DESCRIPTION
 
-Langertha::Knarr is a generic I/O hub that exposes any Steerboard
-B<handler> (a L<Langertha::Raider>, a raw L<Langertha::Engine>, or any
-custom backend) over the standard LLM HTTP wire protocols spoken by tools
-like OpenWebUI, the OpenAI/Anthropic/Ollama clients, and the agent
-ecosystems around A2A, ACP, and AG-UI.
+Langertha::Knarr is a universal LLM hub that exposes any backend — a
+L<Langertha::Raider>, a raw L<Langertha::Engine>, a remote A2A or ACP
+agent, or any custom L<Langertha::Knarr::Handler> — over the standard
+LLM HTTP wire protocols spoken by OpenWebUI, the OpenAI / Anthropic /
+Ollama SDKs, and the agent ecosystems around A2A, ACP, and AG-UI.
 
-By default the server loads every protocol it ships with, so a single
-running Steerboard answers OpenAI C</v1/chat/completions>, Anthropic
-C</v1/messages>, Ollama C</api/chat>, A2A's C</.well-known/agent.json>
-plus JSON-RPC C</>, ACP's C</runs>, and AG-UI's C</awp> simultaneously.
-The same handler implementation drives all of them.
+By default a single running Knarr answers OpenAI
+C</v1/chat/completions>, Anthropic C</v1/messages>, Ollama
+C</api/chat>, A2A's C</.well-known/agent.json> plus JSON-RPC C</>,
+ACP's C</runs>, and AG-UI's C</awp> simultaneously on every listening
+port. The same handler implementation drives all of them.
+
+Knarr 1.000 is built on L<IO::Async> and L<Net::Async::HTTP::Server>
+with native L<Future::AsyncAwait> integration into Langertha engines,
+so streaming works end-to-end token-by-token without any thread or
+event-loop bridges.
 
 =head1 ARCHITECTURE
 
@@ -53,27 +66,91 @@ Three pluggable layers:
 
 =item B<Protocols>
 
-Wire formats (OpenAI, Anthropic, Ollama, A2A, ACP, AG-UI) live in
-C<Langertha::Knarr::Protocol::*>. Each consumes
-L<Langertha::Knarr::Protocol> and is loaded by default.
+Wire formats live in C<Langertha::Knarr::Protocol::*>. Each consumes
+L<Langertha::Knarr::Protocol> and is loaded by default. See
+L<Langertha::Knarr::Protocol::OpenAI>,
+L<Langertha::Knarr::Protocol::Anthropic>,
+L<Langertha::Knarr::Protocol::Ollama>,
+L<Langertha::Knarr::Protocol::A2A>,
+L<Langertha::Knarr::Protocol::ACP>,
+L<Langertha::Knarr::Protocol::AGUI>.
 
 =item B<Handlers>
 
-Backend logic — what answers the request. Ships with
-L<Langertha::Knarr::Handler::Code>,
-L<Langertha::Knarr::Handler::Engine>,
-L<Langertha::Knarr::Handler::Raider>,
-L<Langertha::Knarr::Handler::A2AClient>, and
-L<Langertha::Knarr::Handler::ACPClient>. Implement
-L<Langertha::Knarr::Handler> to write your own.
+Backend logic — what answers the request. Knarr ships with
+L<Langertha::Knarr::Handler::Router> (the default, model→engine via
+L<Langertha::Knarr::Router>), L<Langertha::Knarr::Handler::Engine>
+(single engine), L<Langertha::Knarr::Handler::Raider> (per-session
+agent), L<Langertha::Knarr::Handler::Passthrough> (raw HTTP forward),
+L<Langertha::Knarr::Handler::A2AClient> /
+L<Langertha::Knarr::Handler::ACPClient> (consume remote agents), and
+L<Langertha::Knarr::Handler::Code> (coderef-backed for tests). Implement
+L<Langertha::Knarr::Handler> to write your own. Decorators
+(L<Langertha::Knarr::Handler::Tracing>,
+L<Langertha::Knarr::Handler::RequestLog>) wrap any inner handler and
+add behavior on top — they themselves consume the Handler role and
+compose freely.
 
 =item B<Transport>
 
-Default is L<Net::Async::HTTP::Server> with chunked SSE/NDJSON streaming.
-For environments that need PSGI, L<Langertha::Knarr::PSGI> wraps
-the same Steerboard instance into a PSGI app (buffered, no streaming).
+Default is L<Net::Async::HTTP::Server> with chunked SSE / NDJSON
+streaming on one or more listen sockets. For Plack deployments,
+L<Langertha::Knarr::PSGI> wraps the same Knarr instance into a PSGI
+app (buffered — see its docs for the streaming caveat).
 
 =back
+
+=attr handler
+
+Required. An object consuming L<Langertha::Knarr::Handler>.
+
+=attr listen
+
+ArrayRef of C<host:port> strings or C<< { host => ..., port => ... } >>
+hashes. Defaults to a single entry composed from L</host> and L</port>.
+
+=attr host
+
+Default C<127.0.0.1>. Used when L</listen> is not given.
+
+=attr port
+
+Default C<8088>. Used when L</listen> is not given.
+
+=attr loop
+
+Optional L<IO::Async::Loop> instance. Defaults to a fresh one.
+
+=attr protocols
+
+ArrayRef of protocol class basenames to load. Defaults to all six
+shipped protocols.
+
+=attr auth_token
+
+Optional shared secret. When set, every incoming request must present
+it as C<Authorization: Bearer> or C<x-api-key>. Discovery routes
+(C</.well-known/agent.json>) stay anonymous.
+
+=method start
+
+    $knarr->start;
+
+Binds all listen sockets and registers the dispatcher. Returns
+C<$self>. Does not enter the event loop.
+
+=method run
+
+    $knarr->run;   # blocks
+
+Calls L</start> if needed, then enters the L</loop> and blocks.
+
+=method session
+
+    my $session = $knarr->session($id);
+
+Returns the L<Langertha::Knarr::Session> for the given id, creating
+one on demand. Used internally by the dispatcher.
 
 =cut
 
