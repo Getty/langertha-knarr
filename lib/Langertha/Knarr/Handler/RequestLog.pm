@@ -9,6 +9,40 @@ use Langertha::Knarr::Stream;
 
 with 'Langertha::Knarr::Handler';
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::RequestLog;
+    use Langertha::Knarr::Handler::RequestLog;
+
+    my $rlog = Langertha::Knarr::RequestLog->new(config => $config);
+    $handler = Langertha::Knarr::Handler::RequestLog->new(
+        wrapped     => $handler,
+        request_log => $rlog,
+    );
+
+=head1 DESCRIPTION
+
+Decorator handler that writes a structured per-request log entry for
+every chat or stream request via L<Langertha::Knarr::RequestLog>.
+Sync requests log a single line with the result; streaming requests
+accumulate every delta and log one line with the assembled output
+when the stream closes.
+
+C<knarr start> and C<knarr container> mount this automatically when
+C<KNARR_LOG_FILE> / C<KNARR_LOG_DIR> (or the YAML C<logging:> section)
+is set.
+
+=attr wrapped
+
+Required. The inner L<Langertha::Knarr::Handler> being decorated.
+
+=attr request_log
+
+Required. A L<Langertha::Knarr::RequestLog> instance (or any object
+implementing C<start_request> / C<end_request>).
+
+=cut
+
 # Wraps an inner handler with structured per-request logging. Same shape
 # as Knarr::Handler::Tracing — opens a log handle on each request and
 # closes it with the assistant text once the inner handler resolves.

@@ -1,5 +1,5 @@
 package Langertha::Knarr::Handler::Code;
-# ABSTRACT: Coderef-backed Steerboard handler for fakes, tests, and custom logic
+# ABSTRACT: Coderef-backed Knarr handler for fakes, tests, and custom logic
 our $VERSION = "0.008";
 use Moose;
 use Future;
@@ -7,6 +7,44 @@ use Future::AsyncAwait;
 use Langertha::Knarr::Stream;
 
 with 'Langertha::Knarr::Handler';
+
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Handler::Code;
+
+    my $handler = Langertha::Knarr::Handler::Code->new(
+        code => sub {
+            my ($session, $request) = @_;
+            return 'echo: ' . $request->messages->[-1]{content};
+        },
+        stream_code => sub {
+            my @parts = ('hel', 'lo');
+            return sub { @parts ? shift @parts : undef };
+        },
+    );
+
+=head1 DESCRIPTION
+
+The simplest possible handler: pass coderefs that return strings (or
+chunk generators for streaming) and you get a working Knarr handler.
+Useful for tests, fakes, smoketests, and "fake LLM" demos.
+
+=attr code
+
+Required. Coderef called as C<< $code->($session, $request) >> for
+non-streaming requests; must return a scalar string.
+
+=attr stream_code
+
+Optional. Coderef returning another coderef that yields the next chunk
+per call, C<undef> to signal end.
+
+=attr models
+
+Optional. Arrayref of model descriptors. Defaults to a single
+C<steerboard-code> entry.
+
+=cut
 
 has code => (
   is => 'ro',

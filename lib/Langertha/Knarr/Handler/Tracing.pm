@@ -9,6 +9,46 @@ use Langertha::Knarr::Stream;
 
 with 'Langertha::Knarr::Handler';
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Tracing;
+    use Langertha::Knarr::Handler::Tracing;
+
+    my $tracing = Langertha::Knarr::Tracing->new(config => $config);
+    $handler = Langertha::Knarr::Handler::Tracing->new(
+        wrapped => $handler,
+        tracing => $tracing,
+    );
+
+=head1 DESCRIPTION
+
+Decorator handler that opens a Langfuse trace + generation around every
+chat or stream request and closes it with the assistant text once the
+inner handler resolves (or fails). Streaming requests accumulate every
+delta into a single output before closing the trace, so the Langfuse
+view shows the full assembled response.
+
+C<knarr start> and C<knarr container> mount this automatically when
+the config supplies Langfuse credentials.
+
+=attr wrapped
+
+Required. The inner L<Langertha::Knarr::Handler> being decorated. The
+attribute is named C<wrapped> rather than C<inner> because Moose
+imports an C<inner()> keyword used for augmented methods.
+
+=attr tracing
+
+Required. A L<Langertha::Knarr::Tracing> instance (or any object
+implementing C<start_trace> / C<end_trace>).
+
+=attr engine_label
+
+Optional. A string injected into the trace metadata's C<engine> field.
+Defaults to C<< ref($self->wrapped) >>.
+
+=cut
+
 # Wraps an inner Knarr::Handler with Langfuse tracing. Each chat or stream
 # request opens a trace+generation via $tracing->start_trace, then closes
 # it with the assistant text via end_trace once the wrapped handler is done.

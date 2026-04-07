@@ -1,5 +1,23 @@
 package Langertha::Knarr::Protocol::AGUI;
-# ABSTRACT: AG-UI (Agent-UI) event protocol for Steerboard
+# ABSTRACT: AG-UI (Agent-UI) event protocol for Knarr
+
+=head1 DESCRIPTION
+
+Implements the CopilotKit AG-UI agent-to-UI event protocol on top of
+L<Langertha::Knarr::Protocol>. Loaded by default.
+
+=over
+
+=item * C<POST /awp> — Agent Wire Protocol endpoint, always streaming
+
+=back
+
+Streaming emits the typed AG-UI event sequence:
+C<RUN_STARTED>, C<TEXT_MESSAGE_START>, C<TEXT_MESSAGE_CONTENT>×N,
+C<TEXT_MESSAGE_END>, C<RUN_FINISHED>. Sync mode synthesizes the same
+sequence into a single response body for non-streaming clients.
+
+=cut
 our $VERSION = "0.008";
 use Moose;
 use JSON::MaybeXS;

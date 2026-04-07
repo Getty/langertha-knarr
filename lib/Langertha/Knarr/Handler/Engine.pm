@@ -1,5 +1,5 @@
 package Langertha::Knarr::Handler::Engine;
-# ABSTRACT: Steerboard handler that proxies directly to a Langertha engine
+# ABSTRACT: Knarr handler that proxies directly to a Langertha engine
 our $VERSION = "0.008";
 use Moose;
 use Future;
@@ -8,6 +8,47 @@ use Scalar::Util qw( blessed );
 use Langertha::Knarr::Stream;
 
 with 'Langertha::Knarr::Handler';
+
+=head1 SYNOPSIS
+
+    use Langertha::Engine::Groq;
+    use Langertha::Knarr::Handler::Engine;
+
+    my $engine = Langertha::Engine::Groq->new(
+        api_key    => $ENV{GROQ_API_KEY},
+        chat_model => 'llama-3.3-70b-versatile',
+    );
+
+    my $handler = Langertha::Knarr::Handler::Engine->new(
+        engine   => $engine,
+        model_id => 'groq-llama-3.3-70b',
+    );
+
+=head1 DESCRIPTION
+
+Wraps a single L<Langertha::Engine::*> instance and exposes it as a
+Knarr handler. Streaming requests use the engine's
+C<simple_chat_stream_realtime_f> for native token-by-token streaming
+through Knarr's chunked response pump; engines that don't support
+streaming fall back to a single-chunk emission.
+
+For routing across multiple engines based on model name, use
+L<Langertha::Knarr::Handler::Router> with a L<Langertha::Knarr::Router>
+config instead.
+
+=attr engine
+
+Required. Any object consuming L<Langertha::Role::Chat>. Streaming
+support requires the engine to also implement
+C<simple_chat_stream_realtime_f> (most Langertha engines do).
+
+=attr model_id
+
+Optional. The id reported by L</list_models> and surfaced in responses.
+Defaults to the engine's C<chat_model>, falling back to a derived name
+from the engine class.
+
+=cut
 
 has engine => (
   is => 'ro',

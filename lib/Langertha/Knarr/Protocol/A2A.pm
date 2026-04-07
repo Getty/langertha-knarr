@@ -1,5 +1,32 @@
 package Langertha::Knarr::Protocol::A2A;
-# ABSTRACT: Google Agent2Agent (A2A) wire protocol for Steerboard
+# ABSTRACT: Google Agent2Agent (A2A) wire protocol for Knarr
+
+=head1 DESCRIPTION
+
+Implements the Google A2A protocol on top of
+L<Langertha::Knarr::Protocol>. Loaded by default.
+
+=over
+
+=item * C<GET /.well-known/agent.json> — agent card discovery (anonymous)
+
+=item * C<POST /> — JSON-RPC 2.0 method bus
+
+=back
+
+Supported methods: C<tasks/send> (sync) and C<tasks/sendSubscribe>
+(streaming). Streaming wraps every chunk in a JSON-RPC envelope with
+the original C<id> preserved, transitions C<status.state> from
+C<working> to C<completed>, and emits artifact append events for the
+text deltas.
+
+=attr agent_card
+
+The HashRef returned by the discovery endpoint. Defaults to a generic
+"Knarr Agent" card with C<streaming: true>; override to advertise
+specific skills, version, etc.
+
+=cut
 our $VERSION = "0.008";
 use Moose;
 use JSON::MaybeXS;

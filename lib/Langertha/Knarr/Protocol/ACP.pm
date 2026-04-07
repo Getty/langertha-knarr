@@ -1,5 +1,24 @@
 package Langertha::Knarr::Protocol::ACP;
-# ABSTRACT: BeeAI/IBM Agent Communication Protocol (ACP) for Steerboard
+# ABSTRACT: BeeAI/IBM Agent Communication Protocol (ACP) for Knarr
+
+=head1 DESCRIPTION
+
+Implements the IBM/BeeAI Linux Foundation ACP protocol on top of
+L<Langertha::Knarr::Protocol>. Loaded by default.
+
+=over
+
+=item * C<GET /agents> — list agents
+
+=item * C<POST /runs> — create a run (C<sync> or C<stream> mode)
+
+=back
+
+Streaming mode emits the standard ACP event sequence:
+C<run.created>, C<message.created>, C<message.part>×N,
+C<message.completed>, C<run.completed>.
+
+=cut
 our $VERSION = "0.008";
 use Moose;
 use JSON::MaybeXS;

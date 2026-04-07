@@ -1,5 +1,26 @@
 package Langertha::Knarr::Protocol::Ollama;
-# ABSTRACT: Ollama-compatible wire protocol (/api/chat, /api/tags) for Steerboard
+# ABSTRACT: Ollama-compatible wire protocol (/api/chat, /api/tags) for Knarr
+
+=head1 DESCRIPTION
+
+Implements the Ollama wire format on top of
+L<Langertha::Knarr::Protocol>. Loaded by default.
+
+=over
+
+=item * C<POST /api/chat>, C<POST /api/generate> — chat with NDJSON streaming
+
+=item * C<GET /api/tags> — model listing
+
+=item * C<GET /api/version> — version probe
+
+=back
+
+Streaming uses newline-delimited JSON (NDJSON) rather than SSE — the
+C<Content-Type> is C<application/x-ndjson> and each chunk is a single
+JSON object per line. The final chunk has C<done: true>.
+
+=cut
 our $VERSION = "0.008";
 use Moose;
 use JSON::MaybeXS;

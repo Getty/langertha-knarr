@@ -12,6 +12,50 @@ use Langertha::Knarr::Stream;
 
 with 'Langertha::Knarr::Handler';
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Handler::Passthrough;
+
+    my $handler = Langertha::Knarr::Handler::Passthrough->new(
+        upstreams => {
+            openai    => 'https://api.openai.com',
+            anthropic => 'https://api.anthropic.com',
+            ollama    => 'http://localhost:11434',
+        },
+    );
+
+=head1 DESCRIPTION
+
+Forwards the original wire-format request verbatim to a real upstream
+API. The protocol's parser already turned the body into a
+L<Langertha::Knarr::Request>; Passthrough rebuilds the upstream JSON
+from C<$request-E<gt>raw> and re-POSTs it.
+
+Both sync and streaming requests are supported. For streaming, the
+upstream's protocol-native chunks are extracted into plain text deltas
+which the front-side protocol then re-frames — keeping symmetry even
+when client and upstream use the same protocol.
+
+This is the building block behind Knarr's classic "configure your API
+keys once, point everything at me" use case.
+
+=attr upstreams
+
+Required. HashRef mapping protocol name (C<openai>, C<anthropic>,
+C<ollama>) to upstream base URL. The protocol's default chat path is
+appended.
+
+=attr default_auth
+
+Optional. An C<Authorization> header value to inject when the client
+didn't send one. Usually you let the client supply its own key.
+
+=attr model_id
+
+Optional. Defaults to C<passthrough>.
+
+=cut
+
 # Forwards the original wire-format request to a real upstream API. The
 # protocol's parser already turned the body into a Knarr::Request, so we
 # rebuild a body from $request->raw and re-POST it. Headers (especially

@@ -9,6 +9,46 @@ use Langertha::Knarr::Stream;
 
 with 'Langertha::Knarr::Handler';
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Config;
+    use Langertha::Knarr::Router;
+    use Langertha::Knarr::Handler::Router;
+    use Langertha::Knarr::Handler::Passthrough;
+
+    my $config = Langertha::Knarr::Config->new(file => 'knarr.yaml');
+    my $router = Langertha::Knarr::Router->new(config => $config);
+
+    my $handler = Langertha::Knarr::Handler::Router->new(
+        router      => $router,
+        passthrough => Langertha::Knarr::Handler::Passthrough->new(
+            upstreams => $config->passthrough,
+        ),
+    );
+
+=head1 DESCRIPTION
+
+Resolves incoming model names against a L<Langertha::Knarr::Router>
+(which knows your C<knarr.yaml>) and dispatches to the matched
+L<Langertha::Engine>. When a passthrough fallback handler is supplied,
+unknown model names tunnel through to it instead of failing — this
+preserves the classic Knarr behaviour where configured models go via
+Langertha and everything else passes straight to the upstream API.
+
+Streaming responses are pumped via the engine's
+C<simple_chat_stream_realtime_f> for native token-by-token delivery.
+
+=attr router
+
+Required. A L<Langertha::Knarr::Router> instance.
+
+=attr passthrough
+
+Optional. Any L<Langertha::Knarr::Handler> consumer used as a fallback
+when the router can't resolve a model.
+
+=cut
+
 # Wraps a Langertha::Knarr::Router (which is Moo) and uses it to resolve
 # incoming model names to Langertha engine instances. Also keeps the
 # upstream Knarr::Config visible for the rest of the request lifecycle.

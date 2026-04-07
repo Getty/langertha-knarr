@@ -10,6 +10,40 @@ use IO::Async::Loop;
 
 with 'Langertha::Knarr::Handler';
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Handler::ACPClient;
+
+    my $handler = Langertha::Knarr::Handler::ACPClient->new(
+        url        => 'https://some-acp-server.example',
+        agent_name => 'my-agent',
+    );
+
+=head1 DESCRIPTION
+
+Consumes a remote IBM/BeeAI Agent Communication Protocol (ACP) agent
+as a Knarr backend. Each chat request is sent as a synchronous
+C<POST /runs> with a single C<text/plain> input part; the returned
+run's output text becomes the response.
+
+Pair with a front-side Knarr speaking OpenAI to expose any ACP agent
+to OpenAI-format clients.
+
+=attr url
+
+Required. Base URL of the upstream ACP server (path C</runs> is
+appended).
+
+=attr agent_name
+
+Required. The C<agent_name> to send in each ACP run request.
+
+=attr model_id
+
+Optional. Defaults to L</agent_name>.
+
+=cut
+
 has url        => ( is => 'ro', isa => 'Str', required => 1 );  # base URL of ACP server
 has agent_name => ( is => 'ro', isa => 'Str', required => 1 );
 has model_id   => ( is => 'ro', isa => 'Str', lazy => 1, default => sub { $_[0]->agent_name } );

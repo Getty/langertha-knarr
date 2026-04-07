@@ -1,5 +1,25 @@
 package Langertha::Knarr::Protocol::OpenAI;
-# ABSTRACT: OpenAI-compatible wire protocol (chat/completions, models) for Steerboard
+# ABSTRACT: OpenAI-compatible wire protocol (chat/completions, models) for Knarr
+
+=head1 DESCRIPTION
+
+Implements the OpenAI Chat Completions wire format on top of
+L<Langertha::Knarr::Protocol>. Loaded by default in every
+L<Langertha::Knarr> instance.
+
+=over
+
+=item * C<POST /v1/chat/completions> — sync and SSE streaming
+
+=item * C<GET /v1/models> — model listing
+
+=back
+
+Streaming uses the standard SSE chunk format with C<data: [DONE]> as
+the terminator. Tool calls and tool choice pass through unchanged via
+the request's C<raw> hash.
+
+=cut
 our $VERSION = "0.008";
 use Moose;
 use JSON::MaybeXS;

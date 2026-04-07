@@ -5,6 +5,43 @@ use Moose;
 use JSON::MaybeXS;
 use Langertha::Knarr::Request;
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr;
+    use Langertha::Knarr::PSGI;
+
+    my $knarr = Langertha::Knarr->new( handler => $handler );
+    my $app = Langertha::Knarr::PSGI->new( steerboard => $knarr )->to_app;
+    # $app is now a Plack-compatible coderef
+
+    # Run with any PSGI server:
+    #   plackup -s Starman -p 8088 app.psgi
+
+=head1 DESCRIPTION
+
+Adapter that wraps a L<Langertha::Knarr> instance and exposes it as a
+PSGI app, so you can deploy Knarr behind any Plack server (Starman,
+Twiggy, Gazelle, mod_perl, etc.) instead of running its native
+L<Net::Async::HTTP::Server> loop.
+
+B<Streaming responses are buffered.> The PSGI streaming protocol's
+delayed-response form does work in theory but mixes badly with
+L<IO::Async> in the same process; for honesty's sake this adapter
+just drives the inner stream to completion in a blocking loop and
+returns the full assembled body. Use the native
+L<Langertha::Knarr/run> entry point if you need real-time streaming.
+
+=attr steerboard
+
+Required. The L<Langertha::Knarr> instance to expose. (Attribute name
+preserved from the upstream Steerboard prototype.)
+
+=method to_app
+
+Returns the PSGI coderef.
+
+=cut
+
 # Wraps a Langertha::Knarr instance and returns a PSGI app coderef.
 # Streaming requests are coerced into buffered responses: the full body is
 # assembled (open + chunks + close + done) before being returned to the

@@ -1,7 +1,69 @@
 package Langertha::Knarr::Protocol;
-# ABSTRACT: Base role for Steerboard wire protocols (OpenAI, Anthropic, Ollama)
+# ABSTRACT: Role for Knarr wire protocols (OpenAI, Anthropic, Ollama, A2A, ACP, AG-UI)
 our $VERSION = "0.008";
 use Moose::Role;
+
+=head1 DESCRIPTION
+
+The role every Knarr wire protocol must consume. A protocol declares
+its routes, parses incoming HTTP bodies into a normalized
+L<Langertha::Knarr::Request>, and formats outgoing
+L<Langertha::Knarr::Stream> chunks back into the protocol-native wire
+format. The Knarr core dispatches each request to the right handler
+via the matched protocol's parser/formatter.
+
+Knarr ships with six concrete protocols, all loaded by default:
+
+=over
+
+=item * L<Langertha::Knarr::Protocol::OpenAI> — C</v1/chat/completions>, SSE
+
+=item * L<Langertha::Knarr::Protocol::Anthropic> — C</v1/messages>, named SSE events
+
+=item * L<Langertha::Knarr::Protocol::Ollama> — C</api/chat>, NDJSON streaming
+
+=item * L<Langertha::Knarr::Protocol::A2A> — Google Agent2Agent JSON-RPC
+
+=item * L<Langertha::Knarr::Protocol::ACP> — IBM/BeeAI Agent Communication Protocol
+
+=item * L<Langertha::Knarr::Protocol::AGUI> — CopilotKit AG-UI event protocol
+
+=back
+
+=method protocol_name
+
+Required. Returns a short string identifier (e.g. C<'openai'>).
+
+=method protocol_routes
+
+Required. Returns an arrayref of route specs of the form
+C<< { method => 'POST', path => '/v1/chat/completions', action => 'chat' } >>.
+Action names map to C<_action_*> methods on the Knarr core.
+
+=method parse_chat_request
+
+    my $req = $proto->parse_chat_request($http_request, \$body);
+
+Required. Returns a L<Langertha::Knarr::Request>.
+
+=method format_chat_response
+
+    my ($status, \%headers, $body) = $proto->format_chat_response($response, $request);
+
+Required. Returns the HTTP response triple for sync mode.
+
+=method format_stream_open / format_stream_chunk / format_stream_close / format_stream_done
+
+Lifecycle hooks for streaming responses. Defaults are no-ops where the
+protocol doesn't need framing — Anthropic/A2A/ACP/AG-UI override these
+to emit their named events around the chunk stream.
+
+=method stream_content_type
+
+Returns the HTTP C<Content-Type> for streaming responses. Default
+C<text/event-stream>; Ollama overrides to C<application/x-ndjson>.
+
+=cut
 
 # Identifier (e.g. 'openai', 'anthropic', 'ollama').
 requires 'protocol_name';

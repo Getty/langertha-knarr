@@ -1,5 +1,22 @@
 package Langertha::Knarr::Protocol::Anthropic;
-# ABSTRACT: Anthropic-compatible wire protocol (/v1/messages) for Steerboard
+# ABSTRACT: Anthropic-compatible wire protocol (/v1/messages) for Knarr
+
+=head1 DESCRIPTION
+
+Implements the Anthropic Messages wire format on top of
+L<Langertha::Knarr::Protocol>. Loaded by default.
+
+=over
+
+=item * C<POST /v1/messages> — sync and named-event SSE streaming
+
+=back
+
+Streaming emits the full event sequence the Anthropic SDK expects:
+C<message_start>, C<content_block_start>, C<content_block_delta>×N,
+C<content_block_stop>, C<message_delta>, C<message_stop>.
+
+=cut
 our $VERSION = "0.008";
 use Moose;
 use JSON::MaybeXS;

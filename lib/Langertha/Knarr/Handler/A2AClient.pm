@@ -11,6 +11,35 @@ use IO::Async::Loop;
 
 with 'Langertha::Knarr::Handler';
 
+=head1 SYNOPSIS
+
+    use Langertha::Knarr::Handler::A2AClient;
+
+    my $handler = Langertha::Knarr::Handler::A2AClient->new(
+        url => 'https://some-agent.example/',
+    );
+
+=head1 DESCRIPTION
+
+Consumes a remote Google Agent2Agent (A2A) agent as a Knarr backend.
+Each chat request is wrapped in a JSON-RPC 2.0 C<tasks/send> envelope
+and POSTed to the upstream endpoint; the returned task's text artifacts
+become the response.
+
+Combined with a Knarr instance speaking OpenAI on the front side, this
+turns Knarr into a universal protocol translator: OpenWebUI → Knarr
+(OpenAI) → A2AClient → remote A2A agent.
+
+=attr url
+
+Required. Base URL of the upstream A2A agent.
+
+=attr model_id
+
+Optional. Defaults to C<a2a-remote>.
+
+=cut
+
 has url => ( is => 'ro', isa => 'Str', required => 1 );
 
 has model_id => ( is => 'ro', isa => 'Str', default => 'a2a-remote' );
