@@ -154,6 +154,11 @@ has _server => (
   is => 'rw',
 );
 
+has _servers => (
+  is => 'rw',
+  default => sub { [] },
+);
+
 sub _build_protocol_objects {
   my ($self) = @_;
   my @objs;
@@ -201,14 +206,15 @@ sub _listen_addrs {
 
 sub start {
   my ($self) = @_;
-  my $server = Net::Async::HTTP::Server->new(
-    on_request => sub {
-      my ($srv, $req) = @_;
-      $self->_dispatch($req);
-    },
-  );
-  $self->loop->add($server);
+  my @servers;
   for my $a ( $self->_listen_addrs ) {
+    my $server = Net::Async::HTTP::Server->new(
+      on_request => sub {
+        my ($srv, $req) = @_;
+        $self->_dispatch($req);
+      },
+    );
+    $self->loop->add($server);
     $server->listen(
       addr => {
         family   => 'inet',
@@ -217,8 +223,10 @@ sub start {
         ip       => $a->{host},
       },
     )->get;
+    push @servers, $server;
   }
-  $self->_server($server);
+  $self->_servers(\@servers);
+  $self->_server( $servers[0] );
   return $self;
 }
 
