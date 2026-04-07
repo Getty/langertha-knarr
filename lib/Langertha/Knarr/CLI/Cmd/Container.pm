@@ -192,27 +192,44 @@ sub execute {
 
   _log("");
 
-  # Container mode: always listen on all interfaces
+  # Container mode: always listen on all interfaces. Knarr 1.000 listens on a
+  # single port; the Ollama and OpenAI/Anthropic protocols share that port now
+  # because they live behind one Knarr server with all protocols loaded.
   my $h = $self->host;
-  my @listen_addrs = ("$h:8080", "$h:11434");
 
   require Langertha::Knarr;
-  my $app = Langertha::Knarr->build_app(config => $config);
+  require Langertha::Knarr::Router;
+  require Langertha::Knarr::Handler::Router;
+  require IO::Async::Loop;
 
-  my @listen_urls = map { "http://$_" } @listen_addrs;
+  my $loop = IO::Async::Loop->new;
+  my $router = Langertha::Knarr::Router->new( config => $config );
+  my $passthrough;
+  if ( my $upstreams = $config->passthrough ) {
+    if ( %$upstreams ) {
+      require Langertha::Knarr::Handler::Passthrough;
+      $passthrough = Langertha::Knarr::Handler::Passthrough->new(
+        upstreams => $upstreams,
+        loop      => $loop,
+      );
+    }
+  }
+  my $handler = Langertha::Knarr::Handler::Router->new(
+    router => $router,
+    ( $passthrough ? ( passthrough => $passthrough ) : () ),
+  );
+  my $knarr = Langertha::Knarr->new(
+    handler => $handler,
+    loop    => $loop,
+    listen  => [ "$h:8080", "$h:11434" ],
+  );
 
   _log("Starting server:");
-  _log("  Port 8080  — OpenAI / Anthropic API");
-  _log("  Port 11434 — Ollama API");
-  _log("  Health     — http://$h:8080/health");
+  _log("  http://$h:8080   — OpenAI / Anthropic / A2A / ACP / AG-UI");
+  _log("  http://$h:11434  — Ollama (alias)");
   _log("");
 
-  my $daemon = Mojo::Server::Daemon->new(
-    app    => $app,
-    listen => \@listen_urls,
-  );
-  $daemon->workers($self->workers) if $daemon->can('workers');
-  $daemon->run;
+  $knarr->run;
 }
 
 sub _log { print STDERR "[knarr] $_[0]\n" }

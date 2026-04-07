@@ -1,13 +1,46 @@
-# Knarr — Langertha LLM Proxy
+# Knarr — Universal Langertha LLM Hub
 
 ```
          .  *  .
         . _/|_ .          KNARR
-     .  /|    |\ .        Langertha LLM Proxy
+     .  /|    |\ .        Universal LLM Hub
    ~~~~~|______|~~~~~
-   ~~ ~~~~~~~~~~~~~ ~~    Cargo transport for your LLM calls
+   ~~ ~~~~~~~~~~~~~ ~~    Cargo transport for any LLM protocol
    ~~~~~~~~~~~~~~~~~~~~
 ```
+
+A universal hub that exposes any backend — a `Langertha::Raider`, a raw
+`Langertha::Engine`, a remote A2A or ACP agent, or your own custom logic —
+over the standard LLM HTTP wire protocols spoken by OpenWebUI, the OpenAI /
+Anthropic / Ollama clients, and the agent ecosystems around A2A, ACP, and
+AG-UI. One server, six protocols, any backend.
+
+## What's new in 1.000
+
+Knarr 1.000 is a major architectural rewrite. Mojolicious is gone; the new
+core is built on `IO::Async` + `Net::Async::HTTP::Server` for native async
+streaming and seamless integration with Langertha's `Future::AsyncAwait`
+engines.
+
+| Layer | Modules |
+|-------|---------|
+| Protocols | `Knarr::Protocol::OpenAI` / `Anthropic` / `Ollama` / `A2A` / `ACP` / `AGUI` |
+| Handlers  | `Knarr::Handler::Router` (model→engine via `Knarr::Router`) / `Engine` / `Raider` / `Code` / `A2AClient` / `ACPClient` |
+| Core      | `Langertha::Knarr` — single async event loop, chunked streaming for SSE / NDJSON |
+
+The classic Knarr use case — point a client at Knarr, get tracing — still
+works via `Knarr::Handler::Router`, which uses your existing `knarr.yaml`
+config to resolve models to Langertha engines.
+
+**Breaking changes:**
+
+- Knarr now listens on a single host/port; multi-listen support returns in a
+  later release.
+- Pure HTTP byte-level passthrough (forwarding raw upstream requests with
+  the client's own key) has been replaced by Langertha-engine-mediated
+  routing. Configure engines for the providers you want to use; Knarr will
+  speak any client protocol on top.
+- `Mojolicious` and `Test::Mojo` are no longer dependencies.
 
 An LLM proxy that routes requests from any client to any backend — with
 automatic [Langfuse](https://langfuse.com) tracing for every call.

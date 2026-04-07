@@ -1,0 +1,98 @@
+package Langertha::Knarr::Handler::Engine;
+# ABSTRACT: Steerboard handler that proxies directly to a Langertha engine
+our $VERSION = "0.008";
+use Moose;
+use Future;
+use Future::AsyncAwait;
+use Scalar::Util qw( blessed );
+use Langertha::Knarr::Stream;
+
+with 'Langertha::Knarr::Handler';
+
+has engine => (
+  is => 'ro',
+  required => 1,
+);
+
+has model_id => (
+  is => 'ro',
+  isa => 'Maybe[Str]',
+  default => sub { undef },
+);
+
+sub _model_id {
+  my ($self) = @_;
+  return $self->model_id if $self->model_id;
+  my $e = $self->engine;
+  return $e->chat_model if $e->can('chat_model') && $e->chat_model;
+  return ( ref($e) =~ /::([^:]+)$/ ) ? lc($1) : 'engine';
+}
+
+async sub handle_chat_f {
+  my ($self, $session, $request) = @_;
+  my @msgs = @{ $request->messages };
+  my $response = await $self->engine->simple_chat_f(@msgs);
+  my $content = blessed($response) ? "$response" : ( ref $response eq 'HASH' ? ( $response->{content} // '' ) : "$response" );
+  return { content => $content, model => $self->_model_id };
+}
+
+async sub handle_stream_f {
+  my ($self, $session, $request) = @_;
+  my $engine = $self->engine;
+  unless ( $engine->can('simple_chat_stream_realtime_f') && $engine->can('chat_stream_request') ) {
+    # Engine doesn't support native streaming — fall back to single-chunk.
+    my $r = await $self->handle_chat_f($session, $request);
+    return Langertha::Knarr::Stream->from_list( $r->{content} );
+  }
+
+  my @queue;
+  my $pending;     # Future awaiting the next chunk
+  my $finished = 0;
+  my $error;
+
+  my $deliver = sub {
+    my ($value) = @_;
+    if ( $pending ) {
+      my $p = $pending; $pending = undef;
+      $p->done($value);
+    } else {
+      push @queue, $value;
+    }
+  };
+
+  my $cb = sub {
+    my ($chunk) = @_;
+    my $text = blessed($chunk) && $chunk->can('content') ? $chunk->content : "$chunk";
+    return unless defined $text && length $text;
+    $deliver->($text);
+  };
+
+  my @msgs = @{ $request->messages };
+  my $f = $engine->simple_chat_stream_realtime_f( $cb, @msgs );
+  $f->on_done( sub { $finished = 1; $deliver->(undef) } );
+  $f->on_fail( sub { $error = $_[0]; $finished = 1; $deliver->(undef) } );
+  $f->retain;
+
+  return Langertha::Knarr::Stream->new(
+    source => sub {
+      if ( @queue ) {
+        my $v = shift @queue;
+        return Future->done($v);
+      }
+      if ( $finished ) {
+        return Future->fail($error) if $error;
+        return Future->done(undef);
+      }
+      $pending = Future->new;
+      return $pending;
+    },
+  );
+}
+
+sub list_models {
+  my ($self) = @_;
+  return [ { id => $self->_model_id, object => 'model' } ];
+}
+
+__PACKAGE__->meta->make_immutable;
+1;

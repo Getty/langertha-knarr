@@ -127,22 +127,43 @@ sub execute {
   }
 
   require Langertha::Knarr;
-  my $app = Langertha::Knarr->build_app(config => $config);
+  require Langertha::Knarr::Router;
+  require Langertha::Knarr::Handler::Router;
+  require IO::Async::Loop;
 
-  my @listen_urls = map { "http://$_" } @$listen_addrs;
+  my $loop = IO::Async::Loop->new;
+
+  my $router = Langertha::Knarr::Router->new( config => $config );
+
+  my $passthrough;
+  if ( my $upstreams = $config->passthrough ) {
+    if ( %$upstreams ) {
+      require Langertha::Knarr::Handler::Passthrough;
+      $passthrough = Langertha::Knarr::Handler::Passthrough->new(
+        upstreams => $upstreams,
+        loop      => $loop,
+      );
+    }
+  }
+
+  my $handler = Langertha::Knarr::Handler::Router->new(
+    router => $router,
+    ( $passthrough ? ( passthrough => $passthrough ) : () ),
+  );
+
+  my $knarr = Langertha::Knarr->new(
+    handler => $handler,
+    loop    => $loop,
+    listen  => [ @$listen_addrs ],
+  );
 
   print "Starting Knarr on:\n";
-  print "  $_\n" for @listen_urls;
+  print "  http://$_\n" for @$listen_addrs;
   print "Models: ", scalar(keys %{$config->models}), " configured";
   print ", auto-discover enabled" if $config->auto_discover;
   print "\n";
 
-  my $daemon = Mojo::Server::Daemon->new(
-    app    => $app,
-    listen => \@listen_urls,
-  );
-  $daemon->workers($self->workers) if $daemon->can('workers');
-  $daemon->run;
+  $knarr->run;
 }
 
 1;
