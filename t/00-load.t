@@ -20,6 +20,7 @@ my @modules = qw(
   Langertha::Knarr::Handler::ACPClient
   Langertha::Knarr::Handler::Passthrough
   Langertha::Knarr::Handler::Tracing
+  Langertha::Knarr::Handler::RequestLog
   Langertha::Knarr::Protocol
   Langertha::Knarr::Protocol::OpenAI
   Langertha::Knarr::Protocol::Anthropic

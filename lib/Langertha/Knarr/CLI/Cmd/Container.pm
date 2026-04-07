@@ -230,6 +230,17 @@ sub execute {
     _log("Tracing: Langfuse enabled");
   }
 
+  require Langertha::Knarr::RequestLog;
+  my $rlog = Langertha::Knarr::RequestLog->new( config => $config );
+  if ( $rlog->_enabled ) {
+    require Langertha::Knarr::Handler::RequestLog;
+    $handler = Langertha::Knarr::Handler::RequestLog->new(
+      wrapped     => $handler,
+      request_log => $rlog,
+    );
+    _log("RequestLog: enabled (file=" . ($rlog->log_file // '-') . " dir=" . ($rlog->log_dir // '-') . ")");
+  }
+
   my $knarr = Langertha::Knarr->new(
     handler => $handler,
     loop    => $loop,

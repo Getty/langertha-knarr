@@ -162,6 +162,17 @@ sub execute {
     );
   }
 
+  # Wrap with request log decorator when log_file or log_dir is configured.
+  require Langertha::Knarr::RequestLog;
+  my $rlog = Langertha::Knarr::RequestLog->new( config => $config );
+  if ( $rlog->_enabled ) {
+    require Langertha::Knarr::Handler::RequestLog;
+    $handler = Langertha::Knarr::Handler::RequestLog->new(
+      wrapped     => $handler,
+      request_log => $rlog,
+    );
+  }
+
   my $knarr = Langertha::Knarr->new(
     handler => $handler,
     loop    => $loop,
