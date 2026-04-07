@@ -177,6 +177,7 @@ sub execute {
     handler => $handler,
     loop    => $loop,
     listen  => [ @$listen_addrs ],
+    ( $config->has_proxy_api_key ? ( auth_token => $config->proxy_api_key ) : () ),
   );
 
   print "Starting Knarr on:\n";

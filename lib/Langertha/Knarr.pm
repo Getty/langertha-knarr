@@ -123,6 +123,16 @@ has protocols => (
   default => sub { [qw( OpenAI Anthropic Ollama A2A ACP AGUI )] },
 );
 
+# Optional shared secret. When set, every incoming request must present it
+# either as 'Authorization: Bearer <key>' or 'x-api-key: <key>'. The agent
+# card and well-known discovery routes are exempt because they need to be
+# anonymously fetchable.
+has auth_token => (
+  is => 'ro',
+  isa => 'Maybe[Str]',
+  default => sub { undef },
+);
+
 has _protocol_objects => (
   is => 'ro',
   lazy => 1,
@@ -245,6 +255,21 @@ sub _match_route {
   return undef;
 }
 
+sub _check_auth {
+  my ($self, $req, $action) = @_;
+  return 1 unless defined $self->auth_token && length $self->auth_token;
+  # Discovery endpoints stay anonymous so clients can introspect.
+  return 1 if $action eq 'a2a_card';
+  my $expected = $self->auth_token;
+  my $auth = scalar( $req->header('Authorization') ) // '';
+  if ( $auth =~ /^Bearer\s+(.+)$/i && $1 eq $expected ) {
+    return 1;
+  }
+  my $api_key = scalar( $req->header('x-api-key') ) // '';
+  return 1 if $api_key eq $expected && length $api_key;
+  return 0;
+}
+
 sub _dispatch {
   my ($self, $req) = @_;
   my $method = $req->method;
@@ -255,6 +280,10 @@ sub _dispatch {
       $self->_json->encode({ error => { message => "no route for $method $path" } }) );
   }
   my $action = $route->{action};
+  unless ( $self->_check_auth( $req, $action ) ) {
+    return $self->_send_simple( $req, 401, 'application/json',
+      $self->_json->encode({ error => { message => 'unauthorized' } }) );
+  }
   my $proto  = $route->{protocol};
   my $code = $self->can("_action_$action");
   unless ( $code ) {

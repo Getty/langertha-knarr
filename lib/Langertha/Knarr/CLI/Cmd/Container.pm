@@ -245,6 +245,7 @@ sub execute {
     handler => $handler,
     loop    => $loop,
     listen  => [ "$h:8080", "$h:11434" ],
+    ( $config->has_proxy_api_key ? ( auth_token => $config->proxy_api_key ) : () ),
   );
 
   _log("Starting server:");
