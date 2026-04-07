@@ -218,6 +218,18 @@ sub execute {
     router => $router,
     ( $passthrough ? ( passthrough => $passthrough ) : () ),
   );
+
+  require Langertha::Knarr::Tracing;
+  my $tracing = Langertha::Knarr::Tracing->new( config => $config );
+  if ( $tracing->_enabled ) {
+    require Langertha::Knarr::Handler::Tracing;
+    $handler = Langertha::Knarr::Handler::Tracing->new(
+      wrapped => $handler,
+      tracing => $tracing,
+    );
+    _log("Tracing: Langfuse enabled");
+  }
+
   my $knarr = Langertha::Knarr->new(
     handler => $handler,
     loop    => $loop,

@@ -19,6 +19,7 @@ my @modules = qw(
   Langertha::Knarr::Handler::A2AClient
   Langertha::Knarr::Handler::ACPClient
   Langertha::Knarr::Handler::Passthrough
+  Langertha::Knarr::Handler::Tracing
   Langertha::Knarr::Protocol
   Langertha::Knarr::Protocol::OpenAI
   Langertha::Knarr::Protocol::Anthropic

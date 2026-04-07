@@ -151,6 +151,17 @@ sub execute {
     ( $passthrough ? ( passthrough => $passthrough ) : () ),
   );
 
+  # Wrap with tracing decorator when langfuse credentials are configured.
+  require Langertha::Knarr::Tracing;
+  my $tracing = Langertha::Knarr::Tracing->new( config => $config );
+  if ( $tracing->_enabled ) {
+    require Langertha::Knarr::Handler::Tracing;
+    $handler = Langertha::Knarr::Handler::Tracing->new(
+      wrapped => $handler,
+      tracing => $tracing,
+    );
+  }
+
   my $knarr = Langertha::Knarr->new(
     handler => $handler,
     loop    => $loop,
