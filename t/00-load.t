@@ -8,9 +8,6 @@ my @modules = qw(
   Langertha::Knarr::Router
   Langertha::Knarr::Tracing
   Langertha::Knarr::RequestLog
-  Langertha::Knarr::Input
-  Langertha::Knarr::Output
-  Langertha::Knarr::Metrics
   Langertha::Knarr::Request
   Langertha::Knarr::Session
   Langertha::Knarr::Stream
