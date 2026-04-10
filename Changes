@@ -1,6 +1,6 @@
 Revision history for Langertha-Knarr
 
-{{$NEXT}}
+1.000     2026-04-10 00:00:20Z
 
     - MAJOR REWRITE. Mojolicious is gone; the new core is built on
       IO::Async + Net::Async::HTTP::Server + Future::AsyncAwait for
