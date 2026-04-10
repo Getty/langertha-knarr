@@ -1,6 +1,6 @@
 package Langertha::Knarr::Handler::Passthrough;
 # ABSTRACT: Knarr handler that forwards requests verbatim to an upstream HTTP API
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use Future;
 use Future::AsyncAwait;

@@ -1,6 +1,6 @@
 package Langertha::Knarr::Handler::Tracing;
 # ABSTRACT: Decorator handler that records every request as a Langfuse trace
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use Future;
 use Future::AsyncAwait;

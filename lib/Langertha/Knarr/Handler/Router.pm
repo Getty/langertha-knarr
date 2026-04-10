@@ -1,6 +1,6 @@
 package Langertha::Knarr::Handler::Router;
 # ABSTRACT: Knarr handler that resolves model names via Langertha::Knarr::Router and dispatches to engines
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use Future;
 use Future::AsyncAwait;

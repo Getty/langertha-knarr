@@ -1,6 +1,6 @@
 package Langertha::Knarr::Handler::ACPClient;
 # ABSTRACT: Steerboard handler that consumes a remote ACP (BeeAI) agent
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use Future::AsyncAwait;
 use JSON::MaybeXS;

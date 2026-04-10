@@ -17,7 +17,7 @@ C<message_start>, C<content_block_start>, C<content_block_delta>×N,
 C<content_block_stop>, C<message_delta>, C<message_stop>.
 
 =cut
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use JSON::MaybeXS;
 use Time::HiRes qw( time );

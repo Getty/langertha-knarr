@@ -18,7 +18,7 @@ C<TEXT_MESSAGE_END>, C<RUN_FINISHED>. Sync mode synthesizes the same
 sequence into a single response body for non-streaming clients.
 
 =cut
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use JSON::MaybeXS;
 use Data::UUID;

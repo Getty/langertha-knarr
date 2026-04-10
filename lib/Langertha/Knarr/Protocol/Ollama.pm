@@ -21,7 +21,7 @@ C<Content-Type> is C<application/x-ndjson> and each chunk is a single
 JSON object per line. The final chunk has C<done: true>.
 
 =cut
-our $VERSION = "0.008";
+our $VERSION = '1.001';
 use Moose;
 use JSON::MaybeXS;
 use Time::HiRes qw( time );
