@@ -1,6 +1,6 @@
 Revision history for Langertha-Knarr
 
-{{$NEXT}}
+1.001     2026-04-12 22:22:19Z
 
     - Raw passthrough: unconfigured models are now piped 1:1 as raw
       HTTP bytes to the upstream API. All protocol metadata (tool_use,
