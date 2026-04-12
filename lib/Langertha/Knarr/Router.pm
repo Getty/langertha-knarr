@@ -197,7 +197,7 @@ sub _discover_models {
       }
     };
     if ($@) {
-      $log->warnf("Model discovery failed for %s: %s", $engine_class, $@);
+      $log->debugf("Model discovery skipped for %s: %s", $engine_class, $@);
     }
   }
 }
@@ -242,6 +242,13 @@ sub list_models {
   }
 
   return \@models;
+}
+
+sub is_passthrough_model {
+  my ($self, $model) = @_;
+  return 0 unless defined $model && length $model;
+  my @r = eval { $self->resolve($model, skip_default => 1) };
+  return @r ? 0 : 1;
 }
 
 =seealso

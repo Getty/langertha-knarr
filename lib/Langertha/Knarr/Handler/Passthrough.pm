@@ -124,8 +124,14 @@ sub _build_upstream_request {
   my $url = $self->_upstream_url( $request->protocol );
   my $http_req = HTTP::Request->new( POST => $url );
   $http_req->header( 'Content-Type' => 'application/json' );
+  # Forward client auth headers (captured by protocol parsers)
+  if ( my $fwd = $request->extra->{forward_headers} ) {
+    for my $h (keys %$fwd) {
+      $http_req->header( $h => $fwd->{$h} );
+    }
+  }
   if ( my $auth = $self->default_auth ) {
-    $http_req->header( Authorization => $auth );
+    $http_req->header( Authorization => $auth ) unless $http_req->header('Authorization');
   }
   $http_req->content( $self->_json->encode($body) );
   return $http_req;

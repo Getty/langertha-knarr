@@ -32,15 +32,10 @@ The classic Knarr use case — point a client at Knarr, get tracing — still
 works via `Knarr::Handler::Router`, which uses your existing `knarr.yaml`
 config to resolve models to Langertha engines.
 
-**Breaking changes:**
+**Breaking changes from pre-1.000:**
 
-- Knarr now listens on a single host/port; multi-listen support returns in a
-  later release.
-- Pure HTTP byte-level passthrough (forwarding raw upstream requests with
-  the client's own key) has been replaced by Langertha-engine-mediated
-  routing. Configure engines for the providers you want to use; Knarr will
-  speak any client protocol on top.
 - `Mojolicious` and `Test::Mojo` are no longer dependencies.
+- `knarr container` is now a deprecated alias for `knarr start --from-env`.
 
 An LLM proxy that routes requests from any client to any backend — with
 automatic [Langfuse](https://langfuse.com) tracing for every call.
@@ -159,23 +154,13 @@ docker run --env-file .env -p 8080:8080 -p 11434:11434 raudssus/langertha-knarr
 Knarr reads the file, detects which providers have keys, configures them
 with sensible default models, and starts serving.
 
-## Docker Build (Temporary CPAN Indexer Bypass)
-
-Default build flow stays unchanged:
+## Docker Build
 
 ```bash
 docker build -t raudssus/langertha-knarr .
 ```
 
-If CPAN indexers lag behind new releases, inject a direct CPAN dist path for `Langertha`:
-
-```bash
-docker build -t raudssus/langertha-knarr \
-  --build-arg LANGERTHA_SRC='GETTY/Langertha-0.400.tar.gz' \
-  .
-```
-
-`LANGERTHA_SRC` is passed directly to `cpanm` (for example `AUTHOR/Dist-x.yyy.tar.gz` or a tarball URL).
+Dependencies are installed via `cpm` from the `cpanfile` using MetaCPAN.
 
 ## Docker Compose
 
@@ -224,7 +209,7 @@ docker run --env-file .env -p 8080:8080 -p 11434:11434 raudssus/langertha-knarr
 ```
 
 ```
-[knarr] Knarr LLM Proxy starting in container mode...
+[knarr] Knarr LLM Proxy starting...
 [knarr]
 [knarr] Config: auto-detecting from environment variables
 [knarr] Engines: 3 provider(s) configured
@@ -497,15 +482,17 @@ at startup.
 
 ### Passthrough Mode
 
-Passthrough is the default behavior: requests go directly to the upstream
-API (Anthropic, OpenAI) using the client's own API key. No key duplication,
-no model configuration needed. Knarr just sits in the middle and traces.
+Passthrough is the default behavior: requests for unconfigured models go
+directly to the upstream API using the client's own API key and headers.
+All HTTP bytes — including SSE chunks, tool_use blocks, usage data, and
+cache_control — are piped 1:1 to the client. No key duplication, no model
+configuration needed. Knarr just sits in the middle and traces.
 
 If you also configure explicit model routing (the `models:` section), those
 specific models are handled by Langertha engines. Everything else still
-passes through.
+passes through as raw bytes.
 
-**Enabled by default** in container mode. In a config file:
+**Enabled by default** with `--from-env`. In a config file:
 
 ```yaml
 # Enable with default upstream URLs
@@ -582,21 +569,27 @@ priority over bare names.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KNARR_API_KEY` | Require client authentication | — (open) |
+| `KNARR_DEBUG` | Enable verbose logging (`1` = on) | — (off) |
 
 ## CLI Reference
 
 ```
-knarr                     Show help
-knarr container           Auto-start from ENV (Docker default)
-knarr start               Start with config file (./knarr.yaml)
-knarr start -p 9090       Custom port
-knarr start -c prod.yaml  Custom config
-knarr init                Generate config from environment
-knarr init -e .env        Include .env file in scan
-knarr models              List configured models
+knarr                                      Show help
+knarr start                                Start with config file (./knarr.yaml)
+knarr start --from-env                     Auto-detect config from ENV (Docker default)
+knarr start --from-env -p 8080 -p 11434   ENV config, explicit ports
+knarr start -p 9090                        Custom port
+knarr start -c prod.yaml                   Custom config
+knarr start -v                             Verbose logging
+knarr init                                 Generate config from environment
+knarr init -e .env                         Include .env file in scan
+knarr models                               List configured models
 knarr models --format json
-knarr check               Validate config file
+knarr check                                Validate config file
 ```
+
+The `-p` / `--port` flag is repeatable — each occurrence adds a listen port.
+Default host is `0.0.0.0`. Set `KNARR_DEBUG=1` or use `-v` for verbose logging.
 
 ## Installing as a Perl Module
 
@@ -666,8 +659,8 @@ $handler = Langertha::Knarr::Handler::RequestLog->new(
 ) if $rlog->_enabled;
 ```
 
-`knarr start` and `knarr container` apply both wrappers automatically
-when their respective config sections are present.
+`knarr start` applies both wrappers automatically when their respective
+config sections are present.
 
 #### Adding passthrough fallback
 

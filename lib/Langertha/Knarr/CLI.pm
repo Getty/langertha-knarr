@@ -22,8 +22,6 @@ For full CLI documentation see L<knarr> and L<Langertha::Knarr>.
 
 =item * L<Langertha::Knarr::CLI::Cmd::Start> — C<knarr start>
 
-=item * L<Langertha::Knarr::CLI::Cmd::Container> — C<knarr container>
-
 =item * L<Langertha::Knarr::CLI::Cmd::Init> — C<knarr init>
 
 =item * L<Langertha::Knarr::CLI::Cmd::Models> — C<knarr models>
@@ -54,8 +52,8 @@ C<./knarr.yaml>. Applies to all subcommands.
 option verbose => (
   is      => 'ro',
   short   => 'v',
-  doc     => 'Enable verbose logging',
-  default => 0,
+  doc     => 'Enable verbose logging (or set KNARR_DEBUG=1)',
+  default => sub { $ENV{KNARR_DEBUG} ? 1 : 0 },
   negativable => 1,
 );
 
@@ -73,8 +71,7 @@ sub execute {
   print "USAGE\n";
   print "  knarr <command> [options]\n\n";
   print "COMMANDS\n";
-  print "  start       Start the proxy server (requires config file)\n";
-  print "  container   Auto-start from environment variables (Docker mode)\n";
+  print "  start       Start the proxy server\n";
   print "  init        Scan environment and generate configuration\n";
   print "  models      List configured models and their backends\n";
   print "  check       Validate configuration file\n\n";
@@ -89,7 +86,8 @@ sub execute {
   print "EXAMPLES\n";
   print "  knarr start                              # Start with ./knarr.yaml\n";
   print "  knarr start -c production.yaml -p 9090   # Custom config and port\n";
-  print "  knarr container                           # Auto-detect from ENV\n";
+  print "  knarr start --from-env                   # Auto-detect from ENV\n";
+  print "  knarr start --from-env -p 8080 -p 11434  # ENV config, custom ports\n";
   print "  knarr init > knarr.yaml                   # Generate config\n";
   print "  knarr models                              # List configured models\n";
   print "  knarr check                               # Validate config\n\n";

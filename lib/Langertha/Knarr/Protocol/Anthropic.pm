@@ -59,9 +59,23 @@ sub parse_chat_request {
   my ($self, $http_req, $body_ref) = @_;
   my $data = $self->_json->decode( $$body_ref || '{}' );
   # Anthropic puts system prompt outside messages.
+  # system can be a string or an array of content blocks [{type:"text",text:"..."},...]
+  my $system_raw = $data->{system};
+  my $system_str;
+  if (ref $system_raw eq 'ARRAY') {
+    $system_str = join("\n", map { $_->{text} // '' } @$system_raw);
+  } elsif (defined $system_raw) {
+    $system_str = $system_raw;
+  }
   my @msgs;
-  push @msgs, { role => 'system', content => $data->{system} } if defined $data->{system};
+  push @msgs, { role => 'system', content => $system_str } if defined $system_str;
   push @msgs, @{ $data->{messages} || [] };
+  # Capture auth headers for passthrough
+  my %fwd;
+  for my $h (qw( x-api-key anthropic-version authorization )) {
+    my $v = scalar $http_req->header($h);
+    $fwd{$h} = $v if defined $v && length $v;
+  }
   return Langertha::Knarr::Request->new(
     protocol    => 'anthropic',
     raw         => $data,
@@ -70,8 +84,9 @@ sub parse_chat_request {
     stream      => $data->{stream} ? 1 : 0,
     temperature => $data->{temperature},
     max_tokens  => $data->{max_tokens},
-    system      => $data->{system},
+    system      => $system_str,
     tools       => $data->{tools},
+    extra       => { forward_headers => \%fwd },
   );
 }
 

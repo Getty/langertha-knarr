@@ -77,12 +77,6 @@ L<Langertha::Knarr::Stream> whose C<next_chunk_f> yields chunk strings.
 Required. Returns an arrayref of model descriptors as hashes with at
 least an C<id> key.
 
-=method route_model
-
-    my $sub_handler = $handler->route_model($model_id);
-
-Optional. Default returns C<$self>.
-
 =cut
 
 requires 'handle_chat_f';
@@ -108,7 +102,5 @@ sub handle_transcription_f {
   die "transcription not supported by " . ref($self) . "\n";
 }
 
-# Returns the sub-handler responsible for a given model id, or self.
-sub route_model { return $_[0] }
 
 1;

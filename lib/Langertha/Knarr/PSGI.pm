@@ -113,7 +113,7 @@ sub _handle_psgi {
   my $fake_http = Langertha::Knarr::PSGI::FakeReq->new( $env );
   my $sb_req = $proto->parse_chat_request( $fake_http, \$body );
   my $session = $sb->session( $sb_req->session_id );
-  my $handler = $sb->handler->route_model( $sb_req->model );
+  my $handler = $sb->handler;
 
   if ( $sb_req->stream ) {
     # Buffered streaming: drive the stream to completion, concatenate frames.

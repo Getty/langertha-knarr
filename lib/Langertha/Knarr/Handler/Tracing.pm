@@ -28,7 +28,7 @@ inner handler resolves (or fails). Streaming requests accumulate every
 delta into a single output before closing the trace, so the Langfuse
 view shows the full assembled response.
 
-C<knarr start> and C<knarr container> mount this automatically when
+C<knarr start> mounts this automatically when
 the config supplies Langfuse credentials.
 
 =attr wrapped
@@ -171,11 +171,6 @@ async sub handle_stream_f {
 }
 
 sub list_models { $_[0]->wrapped->list_models }
-
-sub route_model {
-  my ($self, $model) = @_;
-  return $self->wrapped->route_model($model);
-}
 
 __PACKAGE__->meta->make_immutable;
 1;

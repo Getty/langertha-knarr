@@ -68,10 +68,16 @@ has passthrough => (
 sub _resolve {
   my ($self, $model) = @_;
   $model //= 'default';
+  if ($self->passthrough) {
+    # With passthrough: try without default engine first so unknown models
+    # go to passthrough instead of being routed to the default engine.
+    my @r = eval { $self->router->resolve($model, skip_default => 1) };
+    return @r if @r;
+    return ();  # not found or error → passthrough
+  }
   my @r = eval { $self->router->resolve($model) };
   return @r unless $@;
-  die $@ unless $self->passthrough;
-  return ();  # signal: use passthrough
+  die $@;
 }
 
 async sub handle_chat_f {
