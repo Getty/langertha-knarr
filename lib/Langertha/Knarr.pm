@@ -1,6 +1,6 @@
 package Langertha::Knarr;
 # ABSTRACT: Universal LLM hub — proxy, server, and translator across OpenAI/Anthropic/Ollama/A2A/ACP/AG-UI
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 use Moose;
 use Future::AsyncAwait;
 use IO::Async::Loop;

@@ -1,6 +1,6 @@
 package Langertha::Knarr::Handler::RequestLog;
 # ABSTRACT: Decorator handler that writes per-request JSON logs via Knarr::RequestLog
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 use Moose;
 use Future;
 use Future::AsyncAwait;

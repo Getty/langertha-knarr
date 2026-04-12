@@ -20,7 +20,7 @@ the terminator. Tool calls and tool choice pass through unchanged via
 the request's C<raw> hash.
 
 =cut
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 use Moose;
 use JSON::MaybeXS;
 use Time::HiRes qw( time );

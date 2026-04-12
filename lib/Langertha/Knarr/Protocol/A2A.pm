@@ -27,7 +27,7 @@ The HashRef returned by the discovery endpoint. Defaults to a generic
 specific skills, version, etc.
 
 =cut
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 use Moose;
 use JSON::MaybeXS;
 use Data::UUID;

@@ -1,6 +1,6 @@
 package Langertha::Knarr::Request;
 # ABSTRACT: Normalized chat request shared across all Knarr protocols
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 use Moose;
 
 =head1 DESCRIPTION

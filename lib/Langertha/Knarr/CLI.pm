@@ -32,7 +32,7 @@ For full CLI documentation see L<knarr> and L<Langertha::Knarr>.
 
 =cut
 
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 
 option config => (
   is      => 'ro',

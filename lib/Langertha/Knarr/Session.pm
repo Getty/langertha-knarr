@@ -1,6 +1,6 @@
 package Langertha::Knarr::Session;
 # ABSTRACT: Per-conversation state for a Knarr server
-our $VERSION = '1.001';
+our $VERSION = '1.002';
 use Moose;
 use Time::HiRes qw( time );
 
