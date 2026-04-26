@@ -1,6 +1,6 @@
 Revision history for Langertha-Knarr
 
-{{$NEXT}}
+1.100     2026-04-26 20:36:43Z
 
     - Langertha floor 0.500 — for ToolCall/Usage value objects,
       capability registry, and chat_f named-args entry point.
