@@ -33,10 +33,12 @@ ArrayRef of message hashes (C<< { role => ..., content => ... } >>).
 
 Boolean. Whether the client requested streaming.
 
-=attr temperature, max_tokens, tools, system
+=attr temperature, max_tokens, tools, tool_choice, response_format, system
 
 Optional generation parameters and tool definitions, if the protocol
-extracted them.
+extracted them. C<tool_choice> and C<response_format> are passed to
+L<Langertha::Engine> via C<chat_f> in their canonical form; Langertha
+normalizes them to the target engine's wire format.
 
 =attr session_id
 
@@ -91,6 +93,16 @@ has tools => (
   default => sub { undef },
 );
 
+has tool_choice => (
+  is => 'ro',
+  default => sub { undef },
+);
+
+has response_format => (
+  is => 'ro',
+  default => sub { undef },
+);
+
 has system => (
   is => 'ro',
   isa => 'Maybe[Str]',
@@ -120,6 +132,35 @@ has extra => (
   isa => 'HashRef',
   default => sub { {} },
 );
+
+=method chat_f_args
+
+    my @args = $request->chat_f_args($engine);
+    my $r    = await $engine->chat_f(@args);
+
+Builds a named-argument list suitable for L<Langertha::Role::Chat/chat_f>.
+Always includes C<messages>; conditionally adds C<tools>, C<tool_choice>,
+C<response_format>, C<temperature>, C<max_tokens> when set on the request
+B<and> the engine reports support for the matching capability via
+C<< $engine->supports($cap) >>. Engines without C<supports()> get every
+defined parameter — older Langertha versions accepted unknown args
+silently.
+
+=cut
+
+sub chat_f_args {
+  my ($self, $engine) = @_;
+  my $supports = $engine && $engine->can('supports')
+    ? sub { $engine->supports($_[0]) }
+    : sub { 1 };
+  my @args = ( messages => $self->messages );
+  push @args, tools           => $self->tools           if $self->tools           && $supports->('tools_native');
+  push @args, tool_choice     => $self->tool_choice     if defined $self->tool_choice && $supports->('tools_native');
+  push @args, response_format => $self->response_format if defined $self->response_format;
+  push @args, temperature     => $self->temperature     if defined $self->temperature && $supports->('temperature');
+  push @args, max_tokens      => $self->max_tokens      if defined $self->max_tokens  && $supports->('response_size');
+  return @args;
+}
 
 __PACKAGE__->meta->make_immutable;
 1;

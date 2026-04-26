@@ -11,7 +11,7 @@ use Langertha::Knarr::Request;
     use Langertha::Knarr::PSGI;
 
     my $knarr = Langertha::Knarr->new( handler => $handler );
-    my $app = Langertha::Knarr::PSGI->new( steerboard => $knarr )->to_app;
+    my $app = Langertha::Knarr::PSGI->new( knarr => $knarr )->to_app;
     # $app is now a Plack-compatible coderef
 
     # Run with any PSGI server:
@@ -31,10 +31,9 @@ just drives the inner stream to completion in a blocking loop and
 returns the full assembled body. Use the native
 L<Langertha::Knarr/run> entry point if you need real-time streaming.
 
-=attr steerboard
+=attr knarr
 
-Required. The L<Langertha::Knarr> instance to expose. (Attribute name
-preserved from the upstream Steerboard prototype.)
+Required. The L<Langertha::Knarr> instance to expose.
 
 =method to_app
 
@@ -46,9 +45,9 @@ Returns the PSGI coderef.
 # Streaming requests are coerced into buffered responses: the full body is
 # assembled (open + chunks + close + done) before being returned to the
 # PSGI server. Use the native Net::Async::HTTP::Server entrypoint
-# (Steerboard->run) if you need real streaming.
+# (Langertha::Knarr->run) if you need real streaming.
 
-has steerboard => ( is => 'ro', required => 1 );
+has knarr => ( is => 'ro', required => 1 );
 
 has _json => (
   is => 'ro',
@@ -82,7 +81,7 @@ sub _read_body {
 
 sub _handle_psgi {
   my ($self, $env) = @_;
-  my $sb = $self->steerboard;
+  my $sb = $self->knarr;
   my $method = $env->{REQUEST_METHOD};
   my $path   = $env->{PATH_INFO} // '/';
 

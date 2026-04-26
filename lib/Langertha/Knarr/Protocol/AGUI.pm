@@ -24,6 +24,7 @@ use JSON::MaybeXS;
 use Data::UUID;
 use Time::HiRes qw( time );
 use Langertha::Knarr::Request;
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -46,7 +47,6 @@ with 'Langertha::Knarr::Protocol';
 #   RUN_ERROR              { type, message, code }
 # ---------------------------------------------------------------------------
 
-has steerboard => ( is => 'ro', weak_ref => 1 );
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
 has _uuid => ( is => 'ro', default => sub { Data::UUID->new } );
 
@@ -84,7 +84,7 @@ sub format_chat_response {
   my ($self, $response, $request) = @_;
   # AG-UI doesn't really have a "non-stream" mode — emit a synthetic single
   # SSE-encoded sequence as the body for sync clients.
-  my $content = ref $response eq 'HASH' ? $response->{content} : "$response";
+  my $content = Langertha::Knarr::Response->coerce($response)->content;
   my $body = join( '',
     $self->format_stream_open($request),
     $self->format_stream_chunk($content, $request),

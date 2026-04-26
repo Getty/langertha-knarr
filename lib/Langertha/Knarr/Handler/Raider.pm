@@ -3,8 +3,8 @@ package Langertha::Knarr::Handler::Raider;
 our $VERSION = '1.002';
 use Moose;
 use Future::AsyncAwait;
-use Scalar::Util qw( blessed );
 use Storable qw( dclone );
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Handler';
 
@@ -47,7 +47,7 @@ the session and reused for subsequent turns.
 =attr model_id
 
 Optional. The id reported by L</list_models>. Defaults to
-C<steerboard-raider>.
+C<knarr-raider>.
 
 =cut
 
@@ -62,7 +62,7 @@ has raider_factory => (
 has model_id => (
   is => 'ro',
   isa => 'Str',
-  default => 'steerboard-raider',
+  default => 'knarr-raider',
 );
 
 sub _session_raider {
@@ -79,13 +79,8 @@ async sub handle_chat_f {
   my $last = $user_msgs[-1] or die "Raider handler: no user message in request\n";
 
   my $result = await $raider->raid_f( $last->{content} );
-
-  my $content = blessed($result) ? "$result" : ( ref $result eq 'HASH' ? ( $result->{content} // '' ) : "$result" );
-  return {
-    content => $content,
-    model   => $self->model_id,
-    raider_result => $result,
-  };
+  my $r = Langertha::Knarr::Response->coerce($result);
+  return $r->clone_with( model => $self->model_id );
 }
 
 sub list_models {

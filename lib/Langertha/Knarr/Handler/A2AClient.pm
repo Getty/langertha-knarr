@@ -8,6 +8,7 @@ use HTTP::Request;
 use Data::UUID;
 use Net::Async::HTTP;
 use IO::Async::Loop;
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Handler';
 
@@ -116,7 +117,11 @@ async sub handle_chat_f {
     die "A2A error: " . ( $data->{error}{message} // 'unknown' ) . "\n";
   }
   my $text = $self->_extract_text( $data->{result} );
-  return { content => $text, model => $self->model_id };
+  return Langertha::Knarr::Response->new(
+    content => $text,
+    model   => $self->model_id,
+    raw     => $data,
+  );
 }
 
 sub list_models {

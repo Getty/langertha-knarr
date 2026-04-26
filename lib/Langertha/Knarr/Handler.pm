@@ -4,6 +4,7 @@ our $VERSION = '1.002';
 use Moose::Role;
 use Future::AsyncAwait;
 use Langertha::Knarr::Stream;
+use Langertha::Knarr::Response;
 
 =head1 SYNOPSIS
 
@@ -14,7 +15,9 @@ use Langertha::Knarr::Stream;
 
     sub handle_chat_f {
         my ($self, $session, $request) = @_;
-        return Future->done({ content => 'hello', model => 'my-model' });
+        return Future->done(
+            Langertha::Knarr::Response->new( content => 'hello', model => 'my-model' )
+        );
     }
 
     sub list_models { [ { id => 'my-model', object => 'model' } ] }
@@ -59,8 +62,11 @@ consume this role, so they compose freely.
 
     my $future = $handler->handle_chat_f($session, $request);
 
-Required. Returns a L<Future> that resolves to a hashref with at least
-a C<content> key and optionally C<model>.
+Required. Returns a L<Future> that resolves to a
+L<Langertha::Knarr::Response>. Plain strings, C<{ content =E<gt> ..., model
+=E<gt> ... }> hashrefs, and L<Langertha::Response> objects are all accepted
+and coerced automatically by L<Langertha::Knarr::Response/coerce> at the
+protocol boundary.
 
 =method handle_stream_f
 
@@ -86,21 +92,8 @@ requires 'list_models';
 # Handlers that natively stream should override.
 async sub handle_stream_f {
   my ($self, $session, $request) = @_;
-  my $r = await $self->handle_chat_f($session, $request);
-  my $content = ref $r eq 'HASH' ? ($r->{content} // '') : "$r";
-  return Langertha::Knarr::Stream->from_list($content);
+  my $r = Langertha::Knarr::Response->coerce( await $self->handle_chat_f($session, $request) );
+  return Langertha::Knarr::Stream->from_list( $r->content );
 }
-
-# Optional capability hooks — handlers may override.
-sub handle_embedding_f {
-  my ($self) = @_;
-  die "embedding not supported by " . ref($self) . "\n";
-}
-
-sub handle_transcription_f {
-  my ($self) = @_;
-  die "transcription not supported by " . ref($self) . "\n";
-}
-
 
 1;

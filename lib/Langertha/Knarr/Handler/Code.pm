@@ -5,6 +5,7 @@ use Moose;
 use Future;
 use Future::AsyncAwait;
 use Langertha::Knarr::Stream;
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Handler';
 
@@ -42,7 +43,7 @@ per call, C<undef> to signal end.
 =attr models
 
 Optional. Arrayref of model descriptors. Defaults to a single
-C<steerboard-code> entry.
+C<knarr-code> entry.
 
 =cut
 
@@ -63,13 +64,14 @@ has stream_code => (
 has models => (
   is => 'ro',
   isa => 'ArrayRef',
-  default => sub { [ { id => 'steerboard-code', object => 'model' } ] },
+  default => sub { [ { id => 'knarr-code', object => 'model' } ] },
 );
 
 async sub handle_chat_f {
   my ($self, $session, $request) = @_;
   my $out = $self->code->( $session, $request );
-  return { content => "$out", model => $request->model // 'steerboard-code' };
+  my $r = Langertha::Knarr::Response->coerce($out);
+  return $r->clone_with( model => $r->model // $request->model // 'knarr-code' );
 }
 
 async sub handle_stream_f {

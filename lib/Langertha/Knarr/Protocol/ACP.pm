@@ -25,6 +25,7 @@ use JSON::MaybeXS;
 use Data::UUID;
 use Time::HiRes qw( time );
 use Langertha::Knarr::Request;
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -48,7 +49,6 @@ with 'Langertha::Knarr::Protocol';
 #   event: run.completed
 # ---------------------------------------------------------------------------
 
-has steerboard => ( is => 'ro', weak_ref => 1 );
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
 has _uuid => ( is => 'ro', default => sub { Data::UUID->new } );
 
@@ -86,7 +86,7 @@ sub parse_chat_request {
 
 sub format_chat_response {
   my ($self, $response, $request) = @_;
-  my $content = ref $response eq 'HASH' ? $response->{content} : "$response";
+  my $content = Langertha::Knarr::Response->coerce($response)->content;
   my $payload = {
     run_id => $request->extra->{run_id},
     agent_name => $request->extra->{agent_name},

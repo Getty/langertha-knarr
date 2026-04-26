@@ -15,6 +15,46 @@ over the standard LLM HTTP wire protocols spoken by OpenWebUI, the OpenAI /
 Anthropic / Ollama clients, and the agent ecosystems around A2A, ACP, and
 AG-UI. One server, six protocols, any backend.
 
+## What's new in 1.100
+
+- **Tool calls reach the engine.** Configured (non-passthrough) routes now
+  forward `tools`, `tool_choice`, `response_format`, `temperature`, and
+  `max_tokens` to the Langertha engine. Previously these were silently
+  dropped. Responses containing `tool_calls` are now serialised back to the
+  client in each protocol's native format (OpenAI `message.tool_calls`,
+  Anthropic `tool_use` content blocks, Ollama `message.tool_calls`).
+
+- **Real token counts.** When the engine returns a `Langertha::Usage` object
+  (all native Langertha 0.500 engines do), the usage fields in the response
+  carry actual numbers instead of zeros. Langfuse generations also get real
+  counts.
+
+- **Capability-aware parameter forwarding.** Parameters are only sent to
+  engines that support them (`$engine->supports($cap)`) so requests never
+  fail because an optional parameter reached an engine that rejects it.
+
+- **Tracing flush is non-blocking.** The previous `LWP::UserAgent` call in
+  `end_trace` blocked the event loop on every request. The flush now fires
+  via `Net::Async::HTTP` and returns immediately.
+
+- **`Langertha::Knarr::Response` value object.** Single typed shape every
+  handler returns and every protocol formatter consumes — replaces the
+  plain `{ content, model }` hashref that handlers used to emit. Handlers
+  that return a `Langertha::Response`, a hashref, or a bare string all get
+  coerced automatically.
+
+- **`Knarr::Request` carries `tool_choice` and `response_format`** as
+  first-class attributes (extracted by the OpenAI / Anthropic / Ollama
+  parsers) and exposes `chat_f_args($engine)` for building the named-arg
+  list suitable for Langertha's `chat_f` entry point.
+
+- **Langertha minimum bumped to 0.500** for `Langertha::ToolCall` value
+  objects (methods instead of hash keys), `Langertha::Usage`, and the
+  capability registry.
+
+- **Breaking in `Knarr::PSGI`:** constructor argument renamed from
+  `steerboard` to `knarr`.
+
 ## What's new in 1.000
 
 Knarr 1.000 is a major architectural rewrite. Mojolicious is gone; the new
@@ -350,22 +390,24 @@ A2A JSON-RPC at `POST /` with methods `tasks/send` (sync) and
 All six formats support streaming — SSE for OpenAI / Anthropic / A2A /
 ACP / AG-UI, NDJSON for Ollama.
 
-### Tool Calling Bridge
+### Tool Calling
 
-Knarr can bridge tool-calling payloads across API formats when a client format
-and backend engine format differ.
+For **configured (non-passthrough) models**, Knarr forwards `tools` and
+`tool_choice` to the Langertha engine via `chat_f`. Langertha normalises them
+to the engine's native wire format — so an OpenAI-format `tools` array reaches
+an Anthropic engine as `tools` + Anthropic `tool_choice`, and vice versa.
+Tool-call responses (`Langertha::ToolCall` objects) come back and are
+serialised to the client's protocol format:
 
-- OpenAI client format to Anthropic-compatible backend:
-  OpenAI `tools`/`tool_choice` and assistant `tool_calls` are mapped to
-  Anthropic `tools`/`tool_choice` + `tool_use`/`tool_result` blocks.
-- Anthropic client format to OpenAI-compatible backend:
-  Anthropic tool blocks are mapped to OpenAI `tool_calls` and `tool` messages.
-- Hermes-style tool output support:
-  If a backend emits Hermes XML (`<tool_call>{...}</tool_call>`), Knarr parses
-  it and exposes native tool-call structures to OpenAI and Anthropic clients.
+| Client protocol | Tool call format in response |
+|----------------|------------------------------|
+| OpenAI         | `message.tool_calls[]`, `finish_reason: "tool_calls"` |
+| Anthropic      | `content[]` with `type: "tool_use"` blocks, `stop_reason: "tool_use"` |
+| Ollama         | `message.tool_calls[]` |
 
-This lets you test tool behavior through one endpoint while targeting different
-engine families behind Knarr.
+For **passthrough models** (unknown model names), the raw request bytes are
+forwarded 1:1 to the upstream API, so whatever tool-call format the client
+sent arrives at the provider unchanged.
 
 ## Use Cases
 

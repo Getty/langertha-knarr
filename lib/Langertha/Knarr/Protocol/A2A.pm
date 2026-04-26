@@ -33,6 +33,7 @@ use JSON::MaybeXS;
 use Data::UUID;
 use Time::HiRes qw( time );
 use Langertha::Knarr::Request;
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -53,7 +54,6 @@ with 'Langertha::Knarr::Protocol';
 #   data: {"jsonrpc":"2.0","id":<reqid>,"result":{"id":"<task>","status":{"state":"completed"},"final":true}}\n\n
 # ---------------------------------------------------------------------------
 
-has steerboard => ( is => 'ro', weak_ref => 1 );
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
 has _uuid => ( is => 'ro', default => sub { Data::UUID->new } );
 
@@ -120,7 +120,7 @@ sub parse_chat_request {
 
 sub format_chat_response {
   my ($self, $response, $request) = @_;
-  my $content = ref $response eq 'HASH' ? $response->{content} : "$response";
+  my $content = Langertha::Knarr::Response->coerce($response)->content;
   my $task = {
     id => $request->extra->{task_id},
     sessionId => $request->session_id,

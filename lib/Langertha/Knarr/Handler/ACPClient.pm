@@ -7,6 +7,7 @@ use JSON::MaybeXS;
 use HTTP::Request;
 use Net::Async::HTTP;
 use IO::Async::Loop;
+use Langertha::Knarr::Response;
 
 with 'Langertha::Knarr::Handler';
 
@@ -95,7 +96,11 @@ async sub handle_chat_f {
   die "ACP remote failed: " . $resp->status_line . "\n" unless $resp->is_success;
 
   my $data = $self->_json->decode( $resp->decoded_content );
-  return { content => $self->_extract_text($data), model => $self->model_id };
+  return Langertha::Knarr::Response->new(
+    content => $self->_extract_text($data),
+    model   => $self->model_id,
+    raw     => $data,
+  );
 }
 
 sub list_models {

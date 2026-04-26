@@ -271,7 +271,7 @@ sub _build_protocol_objects {
   for my $name ( @{ $self->protocols } ) {
     my $class = $name =~ /::/ ? $name : "Langertha::Knarr::Protocol::$name";
     use_module($class);
-    push @objs, $class->new( steerboard => $self );
+    push @objs, $class->new;
   }
   return \@objs;
 }
