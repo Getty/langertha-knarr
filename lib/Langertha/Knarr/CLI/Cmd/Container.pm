@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Container;
-our $VERSION = '1.002';
+our $VERSION = '1.101';
 # ABSTRACT: Alias for 'knarr start --from-env' (Docker mode)
 use Moo;
 use MooX::Cmd;

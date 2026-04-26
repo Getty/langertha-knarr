@@ -19,7 +19,7 @@ C<run.created>, C<message.created>, C<message.part>×N,
 C<message.completed>, C<run.completed>.
 
 =cut
-our $VERSION = '1.002';
+our $VERSION = '1.101';
 use Moose;
 use JSON::MaybeXS;
 use Data::UUID;
