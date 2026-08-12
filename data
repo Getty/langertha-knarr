@@ -1,0 +1,45 @@
+---
+claimed_at: 2026-08-12T22:41:23Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-08-12T22:41:23Z
+created: 2026-08-12T21:46:26Z
+id: 3
+priority: medium
+started: 2026-08-12T21:47:40Z
+status: done
+tags:
+- tracing
+- drift
+title: Response-Timing und Metadaten in den Langfuse-Trace
+updated: 2026-08-12T22:41:23Z
+---
+
+## Problem
+
+Langertha::Response traegt inzwischen `timing` mit `ttft_seconds` und
+`total_seconds` (lib/Langertha/Response.pm:115,156,168 im Langertha-Repo);
+`chat_f` fuellt total_seconds selbst, der Streaming-Pfad misst TTFT.
+
+Knarr::Response::from_langertha_response (lib/Langertha/Knarr/Response.pm:141)
+holt nur content, model, usage, tool_calls, finish_reason. Timing faellt auf
+dem Boden, ebenso `id`, `thinking` und `rate_limit`.
+
+Entsprechend enthaelt die Langfuse-Generation (Tracing.pm, start_trace/end_trace)
+kein Latenz-Signal. TTFT und Gesamtlatenz pro Modell sind ziemlich genau das,
+wofuer man einen Proxy ueberhaupt tracet.
+
+## Umfang
+
+- Knarr::Response um die fehlenden Felder erweitern (mindestens timing, id;
+  rate_limit und thinking pruefen ob sinnvoll durchreichbar)
+- Tracing so erweitern, dass die Werte in der Langfuse-Generation landen
+- Passthrough hat kein Langertha::Response -- dort bleibt es bei der
+  Proxy-eigenen Messung, das ist ok, aber nicht stillschweigend: im POD
+  festhalten, welcher Pfad welche Timing-Quelle hat.
+
+## Erfolgskriterium
+
+Test mit Handler::Code, der eine Langertha::Response mit timing durchreicht und
+prueft, dass ttft/total im Trace-Payload auftauchen.
+Timing/id/thinking/rate_limit werden durchgereicht; Langfuse bekommt endTime + completionStartTime (Langfuse leitet Latenz aus Timestamps ab, hat kein Latenz-Feld) plus timing-Hash in metadata. Neuer Test t/78, 4 Seams mutationsgetestet. Worker musste zusaetzlich Handler/Tracing.pm:_close_trace anfassen -- der einzige Ort, wo eine Knarr::Response auf end_trace trifft; nicht im umkaempften Dateiset, akzeptiert. Offen und bewusst ausgeklammert: routed Streaming hat weiterhin kein TTFT.
