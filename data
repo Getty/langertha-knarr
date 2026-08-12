@@ -1,0 +1,89 @@
+---
+block_reason: 'Braucht kanonische per-Request-Controls in Langertha chat_f (Langertha
+  karr #46). Zusaetzlich fehlen Role::ReasoningEffort, Role::PromptCache und Role::CachedContent
+  in der installierten 0.502 komplett -- sie existieren nur im unreleased dev-Tree,
+  ein Round-Trip-Test waere heute nicht lauffaehig.'
+blocked: true
+claimed_at: 2026-08-12T22:42:33Z
+claimed_by: knarr-worker
+class: standard
+created: 2026-08-12T21:46:31Z
+id: 4
+priority: medium
+started: 2026-08-12T21:47:46Z
+status: backlog
+tags:
+- request
+- drift
+title: Neue Langertha-Kontrollparameter in Knarr::Request aufnehmen
+updated: 2026-08-12T22:42:33Z
+---
+
+## Problem
+
+Langertha hat seit dem Knarr-Release neue Kontroll-Rollen bekommen:
+  Role::ReasoningEffort (normalisierter reasoning_effort)
+  Role::PromptCache     (Anthropic cache_control / OpenAI prompt_cache_key)
+  Role::Seed
+  Role::ParallelToolUse
+  Role::CachedContent   (Gemini cachedContents)
+
+Knarr::Request hat dafuer keine Attribute (Request.pm:60-134). Clients schicken
+die Felder im Wire-Body; auf dem routed Pfad werden sie still verworfen.
+Ueber Passthrough kommen sie durch -- das ist die Byte-Pipe wie vorgesehen --
+konfigurierte Modelle verlieren sie also, unkonfigurierte nicht. Diese
+Asymmetrie ist das eigentlich Unangenehme daran.
+
+## Umfang
+
+Pro Parameter: Attribut in Knarr::Request, Parser-Support in Protocol::OpenAI /
+Anthropic / Ollama soweit das Wire-Format ihn kennt, und eine capability-gegatete
+Zeile in `chat_f_args`.
+
+Nicht spekulativ alles auf einmal -- reasoning_effort und Prompt-Caching sind die
+mit echtem Nutzen (Kosten + Qualitaet), Seed und ParallelToolUse nur wenn die
+Wire-Formate sie liefern.
+
+## Hinweis
+
+tool_choice muss NICHT als Langertha::ToolChoice gebaut werden: `chat_f`
+normalisiert Roh-Hashrefs selbst via ToolChoice->from_hash
+(Langertha lib/Langertha/Role/Chat.pm:402). Der aktuelle Knarr-Code ist da
+korrekt.
+
+## Erfolgskriterium
+
+Je Parameter ein Round-Trip-Test analog t/25_chat_f_params.t.
+
+## Analyse-Ergebnis: nichts implementiert, alle fuenf begruendet zurueckgestellt
+
+chat_f's %opts sind rohe Ziel-Wire-Kwargs, keine kanonischen Namen.
+OpenAICompatible::chat_request und AnthropicBase::chat_request spreaden %extra
+zuletzt in generate_request; Role::OpenAPI::generate_request validiert nichts --
+die Keys landen wortwoertlich im HTTP-Body ("any other engine-specific extras
+pass straight through", laut Langertha-POD). Nur messages/tools/tool_choice
+werden auf dem Weg normalisiert. Jeder Parameter dieses Tickets hat je Wire
+einen anderen Feldnamen und/oder eine andere Verschachtelung.
+
+Einzelbefunde:
+
+- reasoning_effort + prompt caching: Role::ReasoningEffort, Role::PromptCache,
+  Role::CachedContent fehlen in installiert 0.502 komplett (nachgeprueft), sie
+  existieren nur im unreleased dev-Tree. Ein naives `reasoning_effort =>` waere
+  auf 0.503 sogar aktiv schaedlich: Anthropic advertised das Flag dann auch,
+  das Gate liesse es durch, und es landete als ungueltiges Top-Level-Feld auf
+  der Anthropic-Wire. Korrekte Platzierung braucht Reasoning->to($wire):
+  openai -> reasoning_effort, anthropic -> output_config+thinking,
+  gemini -> thinkingLevel/thinkingBudget, ollama -> think.
+- seed: Capability existiert in 0.502, aber nur Engine::Ollama advertised sie --
+  und dort liegt seed unter `options`. Ein Top-Level-seed waere ein stiller
+  No-Op ausgerechnet bei der einzigen Engine, fuer die das Gate feuern wuerde.
+- parallel_tool_use: OpenAI ja (parallel_tool_calls), Anthropic nur
+  verschachtelt als tool_choice.disable_parallel_tool_use, Ollama gar nicht.
+  1 von 3 eingehenden Wire-Formaten.
+- cached_content: Gemini-only (cachedContents-Handle), kein Pendant im
+  eingehenden Wire-Format. Endgueltig verworfen, nicht nur zurueckgestellt.
+
+Konsequenz fuer den Zuschnitt: dieses Ticket ist erst sinnvoll, wenn Langertha
+einen kanonischen per-Request-Einstieg hat. Danach faellt der Grossteil hier
+trivial ab.
