@@ -1,0 +1,43 @@
+---
+block_reason: 'Braucht chat_stream_realtime_f(%opts) aus Langertha karr #42 -- die
+  API existiert dort noch nicht'
+blocked: true
+class: standard
+created: 2026-08-12T21:46:15Z
+id: 1
+priority: high
+status: backlog
+tags:
+- streaming
+- drift
+title: Streaming-Pfad reicht Generation-Parameter durch
+updated: 2026-08-12T21:47:29Z
+---
+
+## Problem
+
+Der in 1.100 fuer den nicht-streamenden Pfad behobene Bug steht auf dem
+Streaming-Pfad noch:
+
+  - lib/Langertha/Knarr/Handler/Router.pm:116
+  - lib/Langertha/Knarr/Handler/Engine.pm:99
+
+rufen beide `$engine->simple_chat_stream_realtime_f( $cb, @{ $request->messages } )`.
+tools, tool_choice, response_format, temperature, max_tokens werden still
+verworfen. Ein Client bekommt mit stream:true anderes Verhalten als ohne --
+insbesondere Tool-Calling funktioniert gestreamt nicht.
+
+## Blockiert von
+
+Langertha karr #42 -- dort fehlt die API (`chat_stream_realtime_f(%opts)`).
+Erst wenn die steht, kann hier `$request->chat_f_args($engine)` auch auf dem
+Streaming-Pfad benutzt werden.
+
+## Erfolgskriterium
+
+Beide Call-Sites nutzen dieselbe capability-gefilterte Argumentliste wie der
+nicht-streamende Pfad. Regressionstest, der mit Handler::Code einen
+gestreamten Request mit tools+temperature stellt und prueft, dass die
+Parameter am Engine ankommen -- der Test muss fehlschlagen, wenn jemand auf
+simple_chat_stream_realtime_f zurueckfaellt.
+Streaming-Aenderungen laufen `prove -lv t/40_streaming_live.t t/41_streaming_protocols_live.t`.
