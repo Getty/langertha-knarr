@@ -1,0 +1,25 @@
+---
+class: standard
+created: 2026-08-12T22:04:35Z
+id: 8
+priority: low
+status: backlog
+tags:
+- packaging
+title: cpanfile-Floor auf die Langertha-Version mit den neuen Engines anheben
+updated: 2026-08-12T22:04:35Z
+---
+
+cpanfile pinnt `requires 'Langertha', '0.500'`. Installiert ist hier 0.502, das
+Langertha-Repo steht auf 0.503 plus unreleased Batch.
+
+Konkrete Folge heute: die in #2 neu aufgenommenen Cloud-Engines XAI, Moonshot
+und Hetzner existieren in 0.502 noch nicht. `default_model_for` faellt sauber
+zurueck (die Klasse resolved nicht), `knarr init` schreibt deren Stanza dann
+ohne `model:`-Zeile. Harmlos, weil zur Laufzeit der Engine-Default greift --
+aber der Katalog ist erst mit der neueren Langertha vollstaendig.
+
+Kein Handlungsbedarf, solange Langertha nicht released ist. Beim naechsten
+Knarr-Release aber pruefen: Floor auf die dann aktuelle Langertha heben, und
+dabei mitnehmen, ob eins der Features aus #3/#4 ohnehin einen hoeheren Floor
+erzwingt.
