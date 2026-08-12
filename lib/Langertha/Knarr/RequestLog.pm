@@ -3,6 +3,7 @@ our $VERSION = '1.101';
 # ABSTRACT: Local disk logging of proxy requests
 use Moo;
 use Time::HiRes qw( gettimeofday tv_interval );
+use Scalar::Util qw( blessed );
 use JSON::MaybeXS ();
 use File::Spec;
 use Log::Any qw( $log );
@@ -128,6 +129,20 @@ sub _timestamp {
     $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0], int($us/1000));
 }
 
+# Flatten a Langertha::Usage into its canonical token counts. Langertha's
+# value objects carry no TO_JSON, so the object itself would die in the
+# encode below — and since both writers encode inside an eval that only
+# warns, the whole log entry would silently disappear. A plain hashref (the
+# shape end_request's own SYNOPSIS documents) passes through untouched; an
+# object we cannot flatten is dropped rather than costing the entry.
+sub _usage_hash {
+  my ($u) = @_;
+  return undef unless defined $u;
+  return $u->to_hash if blessed($u) && $u->can('to_hash');
+  return $u if ref($u) eq 'HASH';
+  return undef;
+}
+
 sub _file_timestamp {
   my ($s, $us) = gettimeofday;
   my @t = gmtime($s);
@@ -182,6 +197,11 @@ sub start_request {
 Completes the log entry with output, usage, duration and writes it to disk.
 Does nothing when C<$handle> is C<undef> (logging was disabled at start).
 
+C<usage> takes a L<Langertha::Usage> (the shape every routed response
+carries) or a plain hashref. Objects are flattened with C<to_hash> to
+C<input_tokens> / C<output_tokens> / C<total_tokens>; hashrefs are logged
+verbatim.
+
 =cut
 
 sub end_request {
@@ -201,7 +221,7 @@ sub end_request {
     messages    => $handle->{messages},
     params      => $handle->{params},
     output      => $opts{output},
-    usage       => $opts{usage},
+    usage       => _usage_hash( $opts{usage} ),
     duration_ms => $duration_ms,
     status      => $opts{error} ? 'error' : 'ok',
     error       => $opts{error},
