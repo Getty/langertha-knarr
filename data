@@ -1,0 +1,59 @@
+---
+claimed_at: 2026-08-12T22:41:33Z
+claimed_by: main
+class: standard
+completed: 2026-08-12T22:41:33Z
+created: 2026-08-12T21:46:41Z
+id: 6
+priority: low
+started: 2026-08-12T21:47:56Z
+status: done
+tags:
+- housekeeping
+title: 'Repo-Hygiene: .gitignore-Duplikate, src/, alte Release-Artefakte'
+updated: 2026-08-12T22:41:33Z
+---
+
+Kosmetik, kein Verhalten. Sammelticket.
+
+## .gitignore
+
+Zwei aneinandergeklebte Bloecke; doppelt vergeben sind
+`.env`, `.vscode/`, `.idea/`, `.DS_Store`, `/blib/`, `/_build/`, `/pm_to_blib`,
+`/MANIFEST.bak`. Zusammenfuehren, Reihenfolge des ersten Vorkommens behalten.
+
+## src/
+
+Leeres Verzeichnis im Repo-Root, gehoert root:root (Docker-Build-Rueckstand vom
+12.04.). Nicht in .gitignore -- unsichtbar nur, weil git leere Verzeichnisse
+ueberspringt. Loeschen braucht sudo.
+
+## Alte Release-Artefakte
+
+Langertha-Knarr-0.002 bis -1.100 als Verzeichnis + Tarball im Root, 11 Stueck,
+zusammen rund 800 KB. Alle gitignored. Reine Geschmacksfrage -- nur aufraeumen
+wenn getty das will, sie sind ein bequemes lokales Archiv.
+
+## .claude/skills/karr/SKILL.md
+
+Uncommitted modifiziert seit dem letzten Hardlink-Sync-Commit (4280885).
+ACHTUNG: hardlinked Skill -- niemals mit Edit/Write anfassen, nur
+Shell-Redirect (`cat > … <<EOF`), sonst reisst die Hardlink-Kette.
+Vor einem Commit klaeren, ob das die gewollte Upstream-Version ist.
+Erledigt:
+- .gitignore zusammengefuehrt, 8 Duplikate raus (.env, .vscode/, .idea/, .DS_Store,
+  blib, _build, pm_to_blib, MANIFEST.bak). Verhaltensneutral verifiziert: die Liste
+  aus `git ls-files --others --ignored --exclude-standard --directory` ist vorher und
+  nachher byte-identisch (23 Eintraege). Praefixlose Muster (.build/, blib/, _build/)
+  gewonnen, weil breiter als die /-Varianten; *.sw[op] als redundant zu *.swp/*.swo
+  entfallen; !.env.example steht korrekt nach .env.*.
+- src/ entfernt (war leer, rmdir reichte -- kein sudo noetig, weil das Parent getty gehoert).
+
+Bewusst NICHT gemacht:
+- Alte Release-Verzeichnisse und Tarballs (0.002 bis 1.100, ~800 KB) bleiben liegen.
+  Sind gitignored und ein bequemes lokales Archiv -- Loeschen ist getty's Entscheidung.
+- .claude/skills/karr/SKILL.md bleibt uncommitted. Diff geprueft: legitime
+  Upstream-Aktualisierung (--depends-on, show --last/--me/--agent, unlock, WIP-Anzeige
+  im board). Inode 274676837 mit 34 Hardlinks -- Datei ist ueber 34 Projekte geteilt und
+  im Working Tree bereits der aktuelle Stand. Gehoert in den naechsten Commit, nicht
+  angefasst.
