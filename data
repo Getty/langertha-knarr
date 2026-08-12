@@ -1,0 +1,66 @@
+---
+claimed_at: 2026-08-12T22:41:44Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-08-12T22:41:44Z
+created: 2026-08-12T22:21:34Z
+id: 10
+priority: high
+started: 2026-08-12T22:21:58Z
+status: done
+tags:
+- bug
+- tracing
+- requestlog
+title: 'Langertha::Usage ist nicht JSON-serialisierbar: Tracing stirbt, RequestLog
+  verliert Zeilen'
+updated: 2026-08-12T22:41:44Z
+---
+
+## Commit-Blocker fuer #7
+
+#7 macht `$resp->usage` auf dem routed Pfad zu einem geblessten
+Langertha::Usage -- das war immer der deklarierte Vertrag. Beide Dekoratoren
+reichen das Objekt aber roh ins JSON weiter, und Langertha::Usage hat kein
+TO_JSON, nur to_hash. Ein encode mit convert_blessed=>1 auf einer Struktur mit
+einem Langertha::Usage darin stirbt entsprechend mit:
+
+    encountered object 'Langertha::Usage=HASH(...)', but allow_blessed,
+    allow_stringify or TO_JSON/FREEZE method missing
+
+Nachgeprueft gegen die installierte Langertha 0.502.
+
+Zwei betroffene Stellen, unterschiedlich schlimm:
+
+- Tracing.pm:456 -- der encode des batch hat KEIN eval drum herum. flush
+  laeuft aus _close_trace heraus im Response-Pfad, also stirbt mit
+  konfiguriertem Langfuse der komplette Request.
+- RequestLog.pm:220 -- steht im eval, warnt nur. Kein Crash, aber die ganze
+  JSONL-Zeile faellt still weg.
+
+Der Defekt ist nicht neu und nicht durch #7 verursacht: vorher starb der
+Konstruktor eine Ebene frueher, das Encoding wurde nie erreicht. #7 macht ihn
+sichtbar. Ohne diesen Fix tauschen wir einen Crash gegen einen anderen.
+
+## Fix
+
+usage beim Uebergang ins JSON flachklopfen -- to_hash -- analog zu
+_rate_limit_hash, das in Tracing.pm direkt daneben schon genau das tut.
+Beide Dekorator-Pfade abdecken.
+
+Dabei pruefen, ob weitere Value-Objekte auf demselben Weg ins JSON geraten
+koennen. tool_calls werden von Protocol/* bereits zu Hashes formatiert, aber
+der Trace- und der Log-Pfad sind eigene Wege am Protokoll vorbei. Lieber
+einmal systematisch schauen als denselben Bug ein drittes Mal zu finden.
+
+## Erfolgskriterium
+
+Die Testluecke ist der eigentliche Punkt: t/73 nutzt einen MockTracer, t/74
+setzt nie usage -- deshalb faellt das nicht auf. Es braucht einen Test, der
+den echten Payload tatsaechlich durch JSON::MaybeXS encodiert, mit gesetztem
+usage, fuer Tracing UND RequestLog. Ein Test, der den Payload nur als
+Perl-Struktur inspiziert, wuerde den Bug erneut durchlassen.
+
+Verwandt: Langertha karr #47 waere die Wurzelbehandlung (TO_JSON auf den
+Value-Objekten). Knarr muss sich davon unabhaengig selbst schuetzen.
+_usage_hash in Tracing.pm und RequestLog.pm, analog zu _rate_limit_hash. Bewusst NICHT in den Dekoratoren: die JSON-Grenze ist die richtige Naht, und sie deckt zusaetzlich den dritten Aufrufer ab (raw-passthrough-Tracing in Knarr.pm, das an keinem Dekorator vorbeikommt). flush encode ist jetzt abgesichert mit errorf statt Exception -- Begruendung: der batch ist vor dem encode ohnehin schon aus _batch geloest und unrettbar, zwanzig Zeilen tiefer fuehrt ein kompletter Langfuse-Ausfall auch nur zu einem warn, und auf dem Streaming-Pfad haette die Exception nach dem letzten Chunk einen Client ohne Endmarker hinterlassen. Vier Mutationsstufen nachgewiesen, inkl. Reproduktion des Ausgangszustands. Mein eigener Verifikationslauf: 481 Tests, alle gruen.
