@@ -1,0 +1,58 @@
+---
+class: standard
+created: 2026-08-12T22:11:25Z
+id: 9
+priority: high
+status: backlog
+tags:
+- bug
+- drift
+- ollama
+title: Routed Ollama verliert temperature und max_tokens
+updated: 2026-08-12T22:11:25Z
+---
+
+## Befund
+
+Knarr reicht temperature und max_tokens als Top-Level-Kwargs an chat_f
+(Request.pm chat_f_args). Engine::Ollama::chat_request baut sein
+`options`-Hash aber ausschliesslich aus ENGINE-Attributen und spreadet %extra
+erst danach top-level (verifiziert in installiert 0.502,
+Engine/Ollama.pm:110-125):
+
+    options => {
+      $self->has_temperature   ? ( temperature => $self->temperature )   : (),
+      $self->has_context_size  ? ( num_ctx     => $self->get_context_size ) : (),
+      $self->get_response_size ? ( num_predict => $self->get_response_size ) : (),
+      $self->has_seed ? ( seed => $self->seed ) : ...,
+      $extra{options} ? (%{delete $extra{options}}) : (),
+    },
+    %extra,
+
+Ein per-Request `temperature => 0.7` landet also top-level im Ollama-Body, wo
+Ollama nicht hinschaut. `max_tokens` heisst dort ausserdem `num_predict`.
+Beide werden still verworfen -- kein Fehler, kein Log, der Client bekommt eine
+Antwort mit den Engine-Defaults.
+
+Gleiches Muster bei response_format: Ollama liest `$self->has_response_format`,
+nie `$extra->{response_format}`. Auf der Anthropic-Seite ist die Variante davon
+sogar ein 400 statt eines No-Ops (Langertha karr #45).
+
+## Einordnung
+
+Das ist dieselbe Klasse wie #7: Knarr wurde gegen eine angenommene
+Normalisierung gebaut, die Langertha nicht leistet. chat_f_args funktioniert
+heute nur dort, wo die Wire-Feldnamen zufaellig mit den kanonischen
+uebereinstimmen -- also bei OpenAI-kompatiblen Engines.
+
+## Empfehlung
+
+NICHT engine-spezifisch in Knarr loesen. Ein `if Ollama then options => {...}`
+in chat_f_args waere genau die Sonderfall-Drift, die wir mit #2 gerade
+ausgebaut haben, und bricht in dem Moment, in dem Langertha Role::Seed oder
+ein options-Mapping auf weitere Engines zieht.
+
+Richtige Reihenfolge: Langertha karr #46 (kanonische per-Request-Controls)
+abwarten, dann faellt das hier weg. Bis dahin: ein Test, der den Ist-Zustand
+festnagelt, damit die Reparatur spaeter nachweisbar greift, und ein Satz im
+POD von chat_f_args, der die Einschraenkung benennt statt sie zu verschweigen.
