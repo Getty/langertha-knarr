@@ -8,6 +8,8 @@
 !.claude/settings.local.json
 !.claude/agents/
 !.claude/agents/**
+!.claude/rules/
+!.claude/rules/**
 !.claude/skills/
 !.claude/skills/**
 !.claude/hooks/
@@ -101,3 +103,7 @@ docker-compose.override.yaml
 Thumbs.db
 
 .devcontainer.json
+
+# karr materialized task view -- never commit
+tasks/
+config.yml
