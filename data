@@ -1,0 +1,81 @@
+---
+claimed_at: 2026-08-12T22:41:39Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-08-12T22:41:39Z
+created: 2026-08-12T22:03:29Z
+id: 7
+priority: high
+started: 2026-08-12T22:05:23Z
+status: done
+tags:
+- bug
+- regression
+- drift
+title: Routed Pfad stirbt an echter Engine-Usage (Type-Mismatch)
+updated: 2026-08-12T22:41:39Z
+---
+
+## Schwere
+
+Jede Antwort einer echten Engine, die usage-Daten enthaelt, laesst den routed
+Pfad im Konstruktor sterben. Alle OpenAI-kompatiblen Engines liefern usage.
+Drin seit 1.100. Unentdeckt, weil Passthrough der Default ist -- nur explizit
+konfigurierte Modelle nehmen den routed Pfad.
+
+## Reproduktion
+
+    perl -Ilib -e 'use Langertha::Response; use Langertha::Knarr::Response;
+      Langertha::Knarr::Response->coerce(
+        Langertha::Response->new(content=>"x", usage=>{prompt_tokens=>1}))'
+
+    Attribute (usage) does not pass the type constraint because:
+    Validation failed for Maybe[Object] with value { prompt_tokens: 1 }
+
+Trifft Handler/Engine.pm:79 und Handler/Router.pm:91.
+
+## Ursache -- eine Asymmetrie in Langertha
+
+Langertha::Response behandelt seine beiden Value-Objekt-Felder ungleich
+(geprueft in installiert 0.502 UND dev 0.503, identisch):
+
+    has tool_calls => ( isa => 'Maybe[ArrayRef[Langertha::ToolCall]]' );
+    # + BUILDARGS-Upgrade von ArrayRef[HashRef] zu ToolCall-Objekten
+
+    has usage      => ( isa => 'Maybe[HashRef]' );
+    # kein Upgrade, obwohl Langertha::Usage existiert
+
+Engines schreiben den rohen JSON-Hashref durch
+(Role/OpenAICompatible.pm:169,235: `usage => $data->{usage}`).
+
+Knarr wurde gegen die erwartete Symmetrie gebaut: Knarr::Response hat
+`usage => Maybe[Object]` und Protocol/OpenAI.pm:82 ruft
+`$r->usage->can('to_openai_format')` -- auf einem unblessed Hashref waere auch
+das ein Fehler, es kommt nur nicht mehr so weit.
+
+Der Changes-Eintrag von 1.100 ("Langertha floor 0.500 -- for ToolCall/Usage
+value objects") beschreibt damit einen Zustand, den es nie gab.
+
+## Fix hier: coercen statt warten
+
+Nicht auf das Langertha-Ticket warten und nicht den Typ aufweichen -- in
+`from_langertha_response` (Response.pm:141) den Hashref zum Objekt hochziehen:
+
+    Langertha::Usage->from_hash($r->usage)   wenn ref eq 'HASH'
+    unveraendert                             wenn schon blessed
+
+`Langertha::Usage->from_hash` existiert und normalisiert prompt_tokens/
+input_tokens. Das funktioniert mit der installierten Langertha sofort und
+bleibt korrekt, falls Langertha spaeter selbst coerct. Protocol/* muss NICHT
+angefasst werden -- die Module bekommen dann genau das Objekt, das sie
+erwarten.
+
+## Erfolgskriterium
+
+t/27_usage_routing.t baut sich das Langertha::Usage-Objekt von Hand -- genau
+deshalb ist der Bug durchgerutscht. Der Test muss eine Langertha::Response mit
+einem rohen usage-HASHREF durchreichen, so wie Engines sie bauen, und pruefen
+dass OpenAI/Anthropic/Ollama korrekte Token-Zahlen ausgeben. Das handgebaute
+Objekt als zweiter Fall daneben ist ok, aber der Hashref-Fall ist der, der
+zaehlt.
+Fix sitzt in BUILDARGS statt in from_langertha_response -- deckt damit alle Eingaenge ab, nicht nur den einen. Der Ticket-Text hatte die engere Stelle vorgeschlagen; die Abweichung ist begruendet: coerce({content,usage}) und clone_with waren zwei weitere Tueren in denselben Crash. Typ bleibt Maybe[Object], nicht aufgeweicht; bereits geblesste usage geht als dieselbe Instanz durch (mit exact_ref geprueft), bleibt also korrekt falls Langertha #43 landet. t/27 komplett neu um formatted()/check_tokens(), 8 Subtests. Mutationsnachweis: ohne den Fix fallen 6 von 8 -- die zwei ueberlebenden sind genau der handgebaute Objektfall und der Fall ohne usage, also exakt der blinde Fleck, der den Bug ausliefern liess.
