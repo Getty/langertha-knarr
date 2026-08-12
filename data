@@ -1,0 +1,36 @@
+---
+claimed_at: 2026-08-12T22:41:28Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-08-12T22:41:28Z
+created: 2026-08-12T21:46:36Z
+id: 5
+priority: low
+started: 2026-08-12T21:47:51Z
+status: done
+tags:
+- request
+- consistency
+title: response_format ohne Capability-Gate in chat_f_args
+updated: 2026-08-12T22:41:28Z
+---
+
+lib/Langertha/Knarr/Request.pm:161
+
+    push @args, response_format => $self->response_format if defined $self->response_format;
+
+ist der einzige Parameter in chat_f_args ohne `$supports->(...)`-Gate, waehrend
+tools, tool_choice, temperature und max_tokens alle eines haben. Langertha fuehrt
+response_format als Capability (Role::ResponseFormat; chat_f prueft selbst
+`supports('response_format_json_schema')` im forced-tool-Fallback).
+
+Engines ohne json_schema-Support bekommen den Parameter also und koennen den
+Request ablehnen.
+
+Zu klaeren: der richtige Capability-Name (response_format_json_schema vs. ein
+allgemeineres Flag) -- json_object und json_schema sind in Langertha
+unterschiedlich gegatet. Einzeiler erst nach dieser Klaerung.
+
+Erfolgskriterium: Test mit einem Fake-Engine, dessen supports() das Flag
+verneint, und der prueft dass response_format nicht in den Args landet.
+Gate ist type-aware statt einflaggig: json_schema verlangt response_format_json_schema, json_object und Ollamas bare 'json' nur response_format_json_object -- sonst waere ein json_object-Request auf einer json_object-faehigen Engine faelschlich verworfen worden. Gate ist real wirksam, nicht kosmetisch: Engine::LMStudio komponiert Role::ResponseFormat gar nicht, gegen echte Engines verifiziert. Beide Fehlermodi mutationsgetestet (Gate weg / naives Schema-Gate).
