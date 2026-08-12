@@ -1,0 +1,59 @@
+---
+claimed_at: 2026-08-12T22:41:17Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-08-12T22:41:17Z
+created: 2026-08-12T21:46:21Z
+id: 2
+priority: high
+started: 2026-08-12T21:47:35Z
+status: done
+tags:
+- config
+- drift
+title: Modell- und Engine-Katalog aus Langertha ableiten statt hartcodieren
+updated: 2026-08-12T22:41:17Z
+---
+
+## Problem A -- veraltete Default-Modelle, doppelt gepflegt
+
+Zwei identische %default_models-Hashes im selben File:
+  - lib/Langertha/Knarr/Config.pm:113-123  (from_env)
+  - lib/Langertha/Knarr/Config.pm:513-523  (generate_config)
+
+Inhalt ist Stand April und teils tot:
+  gpt-4o-mini / claude-sonnet-4-6 / deepseek-chat / gemini-2.0-flash
+Langertha heute:
+  gpt-5.6-terra / claude-sonnet-5 / deepseek-v4-flash / gemini-3-flash-preview
+`deepseek-chat` wurde 2026-07-24 von DeepSeek retired -- ein damit generiertes
+Config-File zeigt auf ein nicht mehr existierendes Modell.
+
+## Problem B -- unvollstaendiger Engine-Katalog
+
+`scan_env` (Config.pm:459-470) kennt 12 Engines, Langertha hat 37 Engine-Klassen.
+Es fehlen u.a. XAI, Moonshot, MoonshotAnthropic, Hetzner, Scaleway, TSystems,
+NousResearch, AKI/AKIOpenAI, MiniMaxAnthropic, LMStudio*, vLLM/SGLang/LlamaCpp/
+VLLMHook, OpenAIResponses. `knarr init` und `--from-env` finden deren Keys nicht.
+
+## Loesung
+
+Werte nicht nachziehen -- Quelle wechseln. `default_model` ist in Langertha eine
+Klassenmethode ohne Instanz-Bedarf:
+
+    Langertha::Engine::Anthropic->default_model   # 'claude-sonnet-5'
+    (lib/Langertha/Engine/Anthropic.pm:41)
+
+Also: beide Hashes ersetzen durch einen Lookup ueber die Engine-Klasse, mit
+Fallback wenn die Klasse nicht ladbar ist. Danach kann der Katalog nicht mehr
+driften.
+
+Fuer Problem B die ENV-Var-Liste ebenfalls aus den Engine-Klassen ableiten,
+falls Langertha den api_key-ENV-Namen exponiert -- sonst die fehlenden Engines
+nachtragen und im Test gegen die Engine-Liste pruefen.
+
+## Erfolgskriterium
+
+Test, der fuer jede in scan_env gefuehrte Engine prueft, dass das Default-Modell
+mit `$class->default_model` uebereinstimmt. Der Test muss rot werden, sobald
+Langertha ein Default aendert -- genau der Drift, den wir gerade gefunden haben.
+Beide %default_models-Hashes ersetzt durch default_model_for() ueber Langertha->resolve_engine_class + $class->default_model, gecached (resolve_engine_class scannt @INC uncached, generate_config ruft ~19x). Katalog 12 -> 19 Engines: XAI, Moonshot, NousResearch, AKI, Scaleway, TSystems, Hetzner dazu. Hetzner bewusst OHNE bare HETZNER_API_KEY (kollidiert mit der Hetzner-Cloud-Infrastruktur-API). Abgelehnt mit Begruendung: Protokoll-Varianten auf gleichem Key (MoonshotAnthropic, MiniMaxAnthropic, AKIOpenAI, OpenAIResponses), lokale Engines ohne Key (LMStudio*, vLLM*, SGLang, LlamaCpp, Ollama*, Whisper), Basisklassen. Groq und OpenRouter behalten Hardcode-Fallback, weil ihre Langertha-Klassen absichtlich croaken statt einen Default zu nennen -- der Test prueft, dass sie das weiterhin tun, also ist auch der Fallback drift-ueberwacht. Nebenbei drei stille Fehler korrigiert: Mistral large->small, MiniMax M2.1->M2.7, Cerebras llama-3.3-70b->llama3.1-8b. Test 3x mutationsgetestet.
