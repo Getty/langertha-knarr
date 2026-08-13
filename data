@@ -1,0 +1,61 @@
+---
+class: standard
+created: 2026-08-12T22:38:48Z
+id: 11
+priority: low
+status: backlog
+tags:
+- tracing
+- requestlog
+- followup
+title: 'tool_calls in Trace und Log: dieselbe TO_JSON-Falle wie usage'
+updated: 2026-08-13T02:39:51Z
+---
+
+Beim Fix von #10 mitgefunden, bewusst nicht spekulativ mitrepariert.
+
+Langertha::ToolCall hat wie Langertha::Usage kein TO_JSON. Es ist damit
+dieselbe Mine: sobald jemand tool_calls in einen Trace oder eine
+JSONL-Zeile schreibt, stirbt der Langfuse-Encode (bzw. die Log-Zeile
+verschwindet still).
+
+Heute nicht erreichbar: weder Handler::Tracing noch Handler::RequestLog
+reichen tool_calls weiter, und Protocol/{OpenAI,Anthropic,Ollama}.pm rufen
+to_openai / to_anthropic_block / to_ollama -- aber nur auf dem routed
+Antwortpfad, nicht auf dem Trace- oder Logpfad.
+
+Das Unangenehme daran ist, dass es genau die Information ist, die man in
+einem Trace sehen will: welches Tool mit welchen Argumenten aufgerufen
+wurde. Wer das ergaenzt, muss daran denken, auf dem Weg to_hash zu rufen --
+sonst ist es der dritte Fund derselben Klasse.
+
+Zwei Moeglichkeiten:
+
+- Nur absichern: eine Flatten-Funktion analog _usage_hash / _rate_limit_hash
+  bereitstellen, damit die Falle entschaerft ist, bevor jemand hineintritt.
+- Gleich nutzen: tool_calls tatsaechlich in Trace und Log aufnehmen. Dann
+  braucht es eine Entscheidung, ob die Argumente vollstaendig mitgeschrieben
+  werden -- die koennen gross sein und Nutzerdaten enthalten.
+
+Verwandt: Langertha karr #47 (TO_JSON auf den Value-Objekten) wuerde die
+Klasse an der Wurzel schliessen.
+
+## Lage geaendert: Langertha #47 ist erledigt
+
+Langertha::ToolCall hat jetzt ein TO_JSON (Langertha main, noch nicht
+released). Die Falle ist damit an der Wurzel geschlossen -- aber erst fuer
+die Version, die das mitbringt. Knarrs cpanfile-Floor steht auf 0.500, die
+hier installierte Langertha ist 0.502 und hat es nicht.
+
+Damit zerfaellt das Ticket:
+
+- Der defensive Teil ("Flatten-Funktion bereitstellen, bevor jemand
+  hineintritt") ist nur noch fuer den Zeitraum interessant, in dem Knarr
+  gegen eine Langertha ohne TO_JSON laufen darf. Sobald der Floor auf die
+  neue Version geht (#8), erledigt sich das von selbst.
+- Der eigentliche Teil ("tool_calls tatsaechlich in Trace und Log aufnehmen")
+  bleibt und wird durch #47 sogar einfacher: kein eigenes Flatten mehr noetig,
+  der Encoder kommt jetzt allein damit klar.
+
+Die offene Entscheidung bleibt dieselbe: ob die Tool-Argumente vollstaendig
+in Trace und Log gehoeren. Die koennen gross sein und Nutzerdaten enthalten.
