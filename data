@@ -1,0 +1,45 @@
+---
+class: standard
+created: 2026-08-13T02:39:15Z
+id: 12
+priority: medium
+status: backlog
+tags:
+- tracing
+- streaming
+title: Routed Streaming hat kein TTFT im Trace
+updated: 2026-08-13T02:39:15Z
+---
+
+Beim Umsetzen von #3 bewusst ausgeklammert und dann von mir nicht als Ticket
+festgehalten -- hier nachgetragen, damit es nicht in der Handoff-Notiz eines
+erledigten Tickets verschwindet.
+
+## Stand
+
+#3 hat den routed nicht-streamenden Pfad mit echter Latenz versorgt: endTime
+aus total_seconds, completionStartTime aus ttft_seconds, beide an den
+hochaufloesenden Zeitpunkt aus start_trace verankert.
+
+Der routed STREAMING-Pfad hat weiterhin kein TTFT. Der Dekorator sammelt
+Deltas und sieht nie ein Response-Objekt, also gibt es dort kein timing;
+endTime ist der Wanduhr-Zeitpunkt, an dem der Stream erschoepft war, und
+completionStartTime wird gar nicht emittiert.
+
+Das ist unguenstig, weil TTFT beim Streaming die interessanteste Zahl
+ueberhaupt ist -- genau dort merkt der Nutzer die Verzoegerung.
+
+## Fix
+
+Handler::Tracing::handle_stream_f kann es billig selbst messen: Zeitstempel
+vor dem Start, Zeitstempel beim ersten Delta, Differenz als
+timing => { ttft_seconds => ... } an end_trace. Tracing.pm akzeptiert das
+bereits, es ist also nur die eine Datei.
+
+Wichtig dabei: die Quelle unterscheidet sich vom nicht-streamenden Pfad. Dort
+misst die Engine, hier der Proxy -- die Zahl enthaelt also unsere eigene
+Dispatch-Zeit. Der POD-Abschnitt "Timing sources" in Tracing.pm sagt das
+aktuell korrekt fuer den Ist-Zustand und muss beim Fix mitgezogen werden,
+sonst behauptet er etwas Falsches.
+
+Unabhaengig von Langertha, jederzeit machbar.
