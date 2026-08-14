@@ -54,7 +54,7 @@ C</api/chat>, A2A's C</.well-known/agent.json> plus JSON-RPC C</>,
 ACP's C</runs>, and AG-UI's C</awp> simultaneously on every listening
 port. The same handler implementation drives all of them.
 
-Knarr 1.000 is built on L<IO::Async> and L<Net::Async::HTTP::Server>
+Knarr is built on L<IO::Async> and L<Net::Async::HTTP::Server>
 with native L<Future::AsyncAwait> integration into Langertha engines,
 so streaming works end-to-end token-by-token without any thread or
 event-loop bridges.

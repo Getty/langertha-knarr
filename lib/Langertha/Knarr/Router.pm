@@ -12,7 +12,7 @@ use Langertha ();
 
     my $router = Langertha::Knarr::Router->new(config => $config);
 
-    my ($engine, $model) = $router->resolve('gpt-4o');
+    my ($engine, $model) = $router->resolve('gpt-5.6-terra');
     my $result = $engine->simple_chat(@messages);
 
     my $models = $router->list_models;

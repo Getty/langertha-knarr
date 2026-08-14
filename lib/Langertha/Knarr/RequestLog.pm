@@ -15,7 +15,7 @@ use Log::Any qw( $log );
     my $rlog = Langertha::Knarr::RequestLog->new(config => $config);
 
     my $handle = $rlog->start_request(
-      model    => 'gpt-4o',
+      model    => 'gpt-5.6-terra',
       format   => 'openai',
       engine   => 'Langertha::Engine::OpenAI',
       path     => '/v1/chat/completions',

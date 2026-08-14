@@ -19,7 +19,7 @@ use IO::Async::Loop;
     my $tracing = Langertha::Knarr::Tracing->new(config => $config);
 
     my $trace_id = $tracing->start_trace(
-      model    => 'gpt-4o',
+      model    => 'gpt-5.6-terra',
       engine   => 'Langertha::Engine::OpenAI',
       messages => \@messages,
       params   => \%params,
@@ -30,7 +30,7 @@ use IO::Async::Loop;
 
     $tracing->end_trace($trace_id,
       output => $response_text,
-      model  => 'gpt-4o',
+      model  => 'gpt-5.6-terra',
       usage  => { input => 100, output => 50, total => 150 },
     );
 
