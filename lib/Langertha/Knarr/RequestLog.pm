@@ -1,5 +1,5 @@
 package Langertha::Knarr::RequestLog;
-our $VERSION = '1.101';
+our $VERSION = '1.102';
 # ABSTRACT: Local disk logging of proxy requests
 use Moo;
 use Time::HiRes qw( gettimeofday tv_interval );

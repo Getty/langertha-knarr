@@ -1,5 +1,7 @@
 Revision history for Langertha-Knarr
 
+{{$NEXT}}
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

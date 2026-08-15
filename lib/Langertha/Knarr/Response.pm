@@ -1,6 +1,6 @@
 package Langertha::Knarr::Response;
 # ABSTRACT: Normalized chat response shared across all Knarr handlers and protocol formatters
-our $VERSION = '1.101';
+our $VERSION = '1.102';
 use Moose;
 use Scalar::Util qw( blessed );
 use Langertha::Usage;

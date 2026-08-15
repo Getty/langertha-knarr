@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Models;
-our $VERSION = '1.101';
+our $VERSION = '1.102';
 # ABSTRACT: List configured models and their backends
 use Moo;
 use MooX::Cmd;
