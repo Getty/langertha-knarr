@@ -5,14 +5,14 @@ model: inherit
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
-    - perl-core
+    - getty-perl-core
     - perl-ai-langertha
-    - perl-moose
-    - perl-moo
+    - getty-perl-moose
+    - getty-perl-moo
     - perl-io-async-future
-    - perl-release-author-getty
-    - git-commit-style
-    - karr
+    - getty-perl-release-author-getty
+    - getty-git-commit-style
+    - kanban-issues-karr-cli
 ---
 
 You are the knarr-worker for **Knarr, the Langertha LLM proxy** (accepts OpenAI /

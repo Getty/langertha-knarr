@@ -5,9 +5,9 @@ model: sonnet
 allowed-tools: Read, Bash, Glob, Grep
 briefing:
   skills:
-    - perl-release-author-getty
+    - getty-perl-release-author-getty
     - perl-release-dist-ini
-    - karr
+    - kanban-issues-karr-cli
 ---
 
 You are the knarr-release-checker for **Knarr, the Langertha LLM proxy**. Conventions from

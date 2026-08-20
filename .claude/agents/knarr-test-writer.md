@@ -5,10 +5,10 @@ model: sonnet
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
-    - perl-core
+    - getty-perl-core
     - perl-ai-langertha
     - perl-io-async-future
-    - karr
+    - kanban-issues-karr-cli
 ---
 
 You are the knarr-test-writer for **Knarr, the Langertha LLM proxy**.
