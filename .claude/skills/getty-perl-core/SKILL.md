@@ -116,10 +116,11 @@ repeating the declaration.
 
 Getty's `dist.ini` uses `[@Author::GETTY]`, which sets `$VERSION` in the repo to the **next, unreleased** version (`0.402` while CPAN is at `0.401`). The repo is ALWAYS one ahead of CPAN.
 
-1. **NEVER copy a version number from a Getty repo into a `cpanfile`.** It is not released, `cpanm` cannot install it, the build breaks.
-2. **Check `cpanm --info Module::Name`** for the actual released version.
-3. **Pin every Getty-authored distribution to the latest release.** Not stale, not omitted — current.
-4. **Re-check on upgrade.**
+1. **Pin what the code actually needs, not the number that happened to be in front of you.** Opening a sibling repo, reading its `$VERSION` and pinning that — while depending on nothing that version introduced — is the mistake this section exists for. It names an unreleased version for no reason and breaks the build for everyone off this machine.
+2. **Check `cpanm --info Module::Name`** for the released version. If the released one carries what you use, that is the pin.
+3. **Pinning the next, unreleased version is correct when the change spans both repos** — the sibling gained what this code calls, or a release is being prepared and the distributions are tested together from their working trees. It commits you to one thing: the dependency is released first. Until it is, `cpanm` cannot resolve the pin, so nothing may go out ahead of it.
+4. **Pin every Getty-authored distribution.** Not stale, not omitted — current.
+5. **Re-check on upgrade.**
 
 ```bash
 cpanm --info Module::Name | tail -1
@@ -134,6 +135,7 @@ Every distribution ships a `Changes` file with a `{{$NEXT}}` token at the top (D
 
 - **Add a bullet under `{{$NEXT}}` in the SAME commit as any user-facing change** — new bindings, behaviour changes, bug fixes, deprecations. If a CPAN consumer would notice, it belongs there.
 - **Match the existing style:** two-space indent, `  - ` bullets, wrap near 78 columns, present-tense imperative ("New binding X", "Fix Y on macOS").
+- **One topic, one bullet, one to three lines** — touching an area again rewrites the bullet that is already there instead of adding a second. Wording and length: `getty-git-commit-style`.
 - **Skip pure dev-tooling noise** — skill hardlinks, editor config, internal CI refactors. A CI fix that unbreaks the build for everyone IS worth a line.
 - **Never hand-edit the version line or timestamp** — `[NextRelease]` owns those.
 

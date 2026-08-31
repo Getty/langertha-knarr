@@ -36,7 +36,7 @@ This rule depends on whether the Agent/Task tool is available to you.
   Knarr code yourself — delegate to `knarr-worker`. Your lane: coordinate, inspect, plan,
   review diffs, run tests, manage git, edit non-behavioral docs. When in doubt, delegate.
   Why: the `knarr-*` agents get their skills force-loaded via `briefing.skills`
-  (perl-ai-langertha, perl-moose, perl-moo, …); you get no briefing and would touch the
+  (perl-ai-langertha, getty-perl-moose, getty-perl-moo, …); you get no briefing and would touch the
   proxy internals with too little context. Specialist lanes:
 
   | Task | Agent |
@@ -55,7 +55,7 @@ error handling, tests, performance. Pure prose docs and `Changes` notes are not.
 ## Coordination — karr board (always in scope)
 
 Ticket coordination is the orchestrating agent's job, so `karr` is always in scope — don't
-invoke the `karr` skill first, just use it. Git-native kanban; board state lives in
+invoke the `kanban-issues-karr-cli` skill first, just use it. Git-native kanban; board state lives in
 `refs/karr/*` in this repo (own board; the sibling Langertha repos each have their own —
 cross-repo work is a ticket on that repo's board, never a direct edit). Day-to-day:
 
@@ -101,6 +101,6 @@ and `gh release`. For anything heading toward release: stop and ask.
 ## Perl specifics — reference, don't restate
 
 Module loading, Moose vs. Moo house patterns, cpanfile versioning, POD directives, and
-commit style live in the briefed skills (`perl-core`, `perl-moose`, `perl-moo`,
-`perl-io-async-future`, `perl-release-author-getty`, `git-commit-style`). The Moose/Moo
+commit style live in the briefed skills (`getty-perl-core`, `getty-perl-moose`, `getty-perl-moo`,
+`perl-io-async-future`, `getty-perl-release-author-getty`, `getty-git-commit-style`). The Moose/Moo
 module split itself is in CLAUDE.md. Do not duplicate that content here.
