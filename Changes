@@ -2,6 +2,14 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Routed streaming responses now record time-to-first-token in the
+      Langfuse trace. The decorator measures it in the proxy: the clock
+      starts before the upstream stream opens and stops at the first
+      delta, so completionStartTime is emitted for streamed requests too.
+      This figure is the proxy's own view and includes its dispatch
+      overhead, unlike the engine-measured non-streaming path. An empty
+      or failed stream records no timing.
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

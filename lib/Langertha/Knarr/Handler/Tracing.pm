@@ -4,6 +4,7 @@ our $VERSION = '1.102';
 use Moose;
 use Future;
 use Future::AsyncAwait;
+use Time::HiRes qw( gettimeofday tv_interval );
 use Langertha::Knarr::Stream;
 use Langertha::Knarr::Response;
 
@@ -134,6 +135,13 @@ async sub handle_stream_f {
   my ($self, $session, $request) = @_;
   my $trace = $self->_open_trace($request);
 
+  # TTFT for the routed streaming path is measured here, in the proxy: the
+  # decorator only ever sees deltas and never a Langertha::Response, so unlike
+  # the non-streaming path there is no engine-measured timing to hand off. The
+  # clock starts before the upstream stream is opened, so this ttft includes
+  # the proxy's own dispatch overhead.
+  my $stream_start = [ gettimeofday ];
+
   my $upstream_stream;
   my $err = do {
     local $@;
@@ -146,6 +154,7 @@ async sub handle_stream_f {
   }
 
   my $accumulated = '';
+  my $ttft;
   my $closed = 0;
 
   return Langertha::Knarr::Stream->new(
@@ -153,15 +162,19 @@ async sub handle_stream_f {
       $upstream_stream->next_chunk_f->then( sub {
         my ($delta) = @_;
         if ( defined $delta ) {
+          $ttft = tv_interval($stream_start) unless defined $ttft;
           $accumulated .= $delta;
           return Future->done($delta);
         }
         unless ( $closed ) {
           $closed = 1;
+          # Only claim a ttft when a delta actually arrived; an empty stream
+          # leaves $ttft undef and end_trace keeps its wall-clock fallback.
           $self->tracing->end_trace(
             $trace,
             output => $accumulated,
             model  => $request->model,
+            ( defined $ttft ? ( timing => { ttft_seconds => $ttft } ) : () ),
           );
         }
         return Future->done(undef);

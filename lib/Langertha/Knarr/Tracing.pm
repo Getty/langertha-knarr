@@ -62,9 +62,15 @@ time-to-first-token, and the durations exclude the proxy's own
 formatting overhead.
 
 =item * B<Routed, streaming> — the decorator accumulates deltas and never
-sees a response object, so there is no C<timing>. C<endTime> is the
-wall-clock moment the stream was exhausted and no C<completionStartTime>
-is emitted.
+sees a response object, so it measures time-to-first-token itself in the
+proxy: L<Langertha::Knarr::Handler::Tracing> starts its clock before
+opening the upstream stream and stops at the first non-C<undef> delta,
+then passes that C<ttft_seconds> to L</end_trace> as C<timing>.
+C<completionStartTime> is therefore emitted, but — unlike the
+non-streaming path, where the engine measures — this figure is the
+proxy's own view and includes its dispatch overhead. C<endTime> stays the
+wall-clock moment the stream was exhausted; a stream that yields no delta
+(empty or failed) produces no C<timing> and no C<completionStartTime>.
 
 =item * B<Raw passthrough> — bytes are piped 1:1 and never parsed, so no
 L<Langertha::Response> exists at all. C<endTime> is again the proxy's own
