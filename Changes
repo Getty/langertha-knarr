@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Routed streaming now forwards the same capability-filtered
+      generation parameters as the non-streaming path: both streaming
+      handlers call the engine's chat_stream_realtime_f with chat_f_args
+      (tools, tool_choice, response_format, temperature, max_tokens), so a
+      stream:true request behaves like stream:false, and tool-calling
+      works while streaming.
+
     - Routed streaming responses now record time-to-first-token in the
       Langfuse trace. The decorator measures it in the proxy: the clock
       starts before the upstream stream opens and stops at the first

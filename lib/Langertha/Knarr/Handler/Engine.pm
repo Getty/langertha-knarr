@@ -32,9 +32,9 @@ C<< $engine->chat_f >> with the full set of generation parameters
 (C<tools>, C<tool_choice>, C<response_format>, C<temperature>,
 C<max_tokens>) forwarded from the client request — subject to the
 engine's reported capabilities. Streaming requests use
-C<simple_chat_stream_realtime_f> for native token-by-token delivery;
-engines that don't support streaming fall back to a single-chunk
-emission.
+C<chat_stream_realtime_f> with the same capability-filtered generation
+parameters for native token-by-token delivery; engines that don't
+support streaming fall back to a single-chunk emission.
 
 For routing across multiple engines based on model name, use
 L<Langertha::Knarr::Handler::Router> with a L<Langertha::Knarr::Router>
@@ -96,7 +96,7 @@ async sub handle_stream_f {
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
       $emit->($text);
     };
-    my $f = $engine->simple_chat_stream_realtime_f( $cb, @{ $request->messages } );
+    my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );
     $f->on_fail( $fail );
     $f->retain;

@@ -36,7 +36,8 @@ preserves the classic Knarr behaviour where configured models go via
 Langertha and everything else passes straight to the upstream API.
 
 Streaming responses are pumped via the engine's
-C<simple_chat_stream_realtime_f> for native token-by-token delivery.
+C<chat_stream_realtime_f> for native token-by-token delivery, with the
+same capability-filtered generation parameters as the non-streaming path.
 
 =attr router
 
@@ -113,7 +114,7 @@ async sub handle_stream_f {
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
       $emit->($text);
     };
-    my $f = $engine->simple_chat_stream_realtime_f( $cb, @{ $request->messages } );
+    my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );
     $f->on_fail( $fail );
     $f->retain;
