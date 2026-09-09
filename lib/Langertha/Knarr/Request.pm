@@ -33,12 +33,14 @@ ArrayRef of message hashes (C<< { role => ..., content => ... } >>).
 
 Boolean. Whether the client requested streaming.
 
-=attr temperature, max_tokens, tools, tool_choice, response_format, system
+=attr temperature, max_tokens, reasoning_effort, tools, tool_choice, response_format, system
 
 Optional generation parameters and tool definitions, if the protocol
 extracted them. C<tool_choice> and C<response_format> are passed to
 L<Langertha::Engine> via C<chat_f> in their canonical form; Langertha
-normalizes them to the target engine's wire format.
+normalizes them to the target engine's wire format. C<reasoning_effort>
+is the per-request reasoning effort (e.g. C<low>/C<medium>/C<high>),
+capability-gated like the other generation parameters.
 
 =attr session_id
 
@@ -84,6 +86,12 @@ has temperature => (
 has max_tokens => (
   is => 'ro',
   isa => 'Maybe[Int]',
+  default => sub { undef },
+);
+
+has reasoning_effort => (
+  is => 'ro',
+  isa => 'Maybe[Str]',
   default => sub { undef },
 );
 
@@ -140,11 +148,16 @@ has extra => (
 
 Builds a named-argument list suitable for L<Langertha::Role::Chat/chat_f>.
 Always includes C<messages>; conditionally adds C<tools>, C<tool_choice>,
-C<response_format>, C<temperature>, C<max_tokens> when set on the request
-B<and> the engine reports support for the matching capability via
-C<< $engine->supports($cap) >>. Engines without C<supports()> get every
-defined parameter — older Langertha versions accepted unknown args
+C<response_format>, C<temperature>, C<max_tokens>, C<reasoning_effort> when
+set on the request B<and> the engine reports support for the matching
+capability via C<< $engine->supports($cap) >>. Engines without C<supports()>
+get every defined parameter — older Langertha versions accepted unknown args
 silently.
+
+Per-request generation controls are handed to C<chat_f> as canonical
+named arguments; Langertha extracts them as controls and places each on
+the target engine's own wire (top-level C<reasoning_effort> on OpenAI,
+C<output_config> plus C<thinking> on Anthropic, and so on).
 
 C<response_format> is gated on the capability matching the I<kind> of
 format requested, because Langertha registers the two separately
@@ -180,6 +193,7 @@ sub chat_f_args {
   push @args, response_format => $rf                    if defined $rf              && $supports->( _response_format_cap($rf) );
   push @args, temperature     => $self->temperature     if defined $self->temperature && $supports->('temperature');
   push @args, max_tokens      => $self->max_tokens      if defined $self->max_tokens  && $supports->('response_size');
+  push @args, reasoning_effort => $self->reasoning_effort if defined $self->reasoning_effort && $supports->('reasoning_effort');
   return @args;
 }
 

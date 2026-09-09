@@ -62,6 +62,7 @@ sub parse_chat_request {
     stream          => $data->{stream}      ? 1 : 0,
     temperature     => $data->{temperature},
     max_tokens      => $data->{max_tokens},
+    reasoning_effort => $data->{reasoning_effort},
     tools           => $data->{tools},
     tool_choice     => $data->{tool_choice},
     response_format => $data->{response_format},

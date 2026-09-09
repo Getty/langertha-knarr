@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - The routed path now forwards a per-request reasoning_effort from an
+      OpenAI-format request, capability-gated like temperature and
+      max_tokens. A configured model honours the client's reasoning effort
+      (raw passthrough always did); Langertha places it on the target
+      engine's wire, top-level on OpenAI and output_config plus thinking on
+      Anthropic.
+
     - Routed streaming now forwards the same capability-filtered
       generation parameters as the non-streaming path: both streaming
       handlers call the engine's chat_stream_realtime_f with chat_f_args
