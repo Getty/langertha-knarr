@@ -2,12 +2,16 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
-    - The routed path now forwards a per-request reasoning_effort from an
-      OpenAI-format request, capability-gated like temperature and
-      max_tokens. A configured model honours the client's reasoning effort
-      (raw passthrough always did); Langertha places it on the target
-      engine's wire, top-level on OpenAI and output_config plus thinking on
-      Anthropic.
+    - The routed path now forwards per-request generation controls from the
+      client body, capability-gated like temperature and max_tokens:
+      reasoning_effort, seed, parallel_tool_use and prompt_cache_key. A
+      configured model honours them (raw passthrough always did); each
+      protocol parser reads a control only where its wire carries the field
+      (OpenAI top-level seed / parallel_tool_calls / prompt_cache_key,
+      Ollama options.seed), and Langertha places each on the target engine's
+      own wire. The gate is strict: a control is dropped onto an engine
+      whose role inventory does not advertise it, even where the engine's
+      wire would accept the field.
 
     - Routed streaming now forwards the same capability-filtered
       generation parameters as the non-streaming path: both streaming

@@ -33,7 +33,7 @@ ArrayRef of message hashes (C<< { role => ..., content => ... } >>).
 
 Boolean. Whether the client requested streaming.
 
-=attr temperature, max_tokens, reasoning_effort, tools, tool_choice, response_format, system
+=attr temperature, max_tokens, reasoning_effort, seed, parallel_tool_use, prompt_cache_key, tools, tool_choice, response_format, system
 
 Optional generation parameters and tool definitions, if the protocol
 extracted them. C<tool_choice> and C<response_format> are passed to
@@ -41,6 +41,14 @@ L<Langertha::Engine> via C<chat_f> in their canonical form; Langertha
 normalizes them to the target engine's wire format. C<reasoning_effort>
 is the per-request reasoning effort (e.g. C<low>/C<medium>/C<high>),
 capability-gated like the other generation parameters.
+
+C<seed>, C<parallel_tool_use> and C<prompt_cache_key> are further
+per-request controls, each extracted by a protocol parser only where the
+inbound wire format actually carries the field (OpenAI's top-level
+C<seed> / C<parallel_tool_calls> / C<prompt_cache_key>, and Ollama's
+C<options.seed>) and each capability-gated in L</chat_f_args>. Knarr only
+validates and forwards them; Langertha does the honoring and places each
+on the target engine's own wire.
 
 =attr session_id
 
@@ -90,6 +98,24 @@ has max_tokens => (
 );
 
 has reasoning_effort => (
+  is => 'ro',
+  isa => 'Maybe[Str]',
+  default => sub { undef },
+);
+
+has seed => (
+  is => 'ro',
+  isa => 'Maybe[Int]',
+  default => sub { undef },
+);
+
+has parallel_tool_use => (
+  is => 'ro',
+  isa => 'Maybe[Bool]',
+  default => sub { undef },
+);
+
+has prompt_cache_key => (
   is => 'ro',
   isa => 'Maybe[Str]',
   default => sub { undef },
@@ -148,16 +174,22 @@ has extra => (
 
 Builds a named-argument list suitable for L<Langertha::Role::Chat/chat_f>.
 Always includes C<messages>; conditionally adds C<tools>, C<tool_choice>,
-C<response_format>, C<temperature>, C<max_tokens>, C<reasoning_effort> when
-set on the request B<and> the engine reports support for the matching
-capability via C<< $engine->supports($cap) >>. Engines without C<supports()>
-get every defined parameter — older Langertha versions accepted unknown args
+C<response_format>, C<temperature>, C<max_tokens>, C<reasoning_effort>,
+C<seed>, C<parallel_tool_use>, C<prompt_cache_key> when set on the request
+B<and> the engine reports support for the matching capability via
+C<< $engine->supports($cap) >>. Engines without C<supports()> get every
+defined parameter — older Langertha versions accepted unknown args
 silently.
 
 Per-request generation controls are handed to C<chat_f> as canonical
 named arguments; Langertha extracts them as controls and places each on
 the target engine's own wire (top-level C<reasoning_effort> on OpenAI,
-C<output_config> plus C<thinking> on Anthropic, and so on).
+C<output_config> plus C<thinking> on Anthropic, C<seed> under Ollama's
+C<options>, OpenAI's C<parallel_tool_calls> / C<prompt_cache_key>, and so
+on). The capability gate is strict: a control is forwarded only to an
+engine whose wire actually advertises it, so e.g. a C<seed> is dropped
+onto an engine that does not compose C<Langertha::Role::Seed> even where
+its wire would technically accept the field.
 
 C<response_format> is gated on the capability matching the I<kind> of
 format requested, because Langertha registers the two separately
@@ -194,6 +226,9 @@ sub chat_f_args {
   push @args, temperature     => $self->temperature     if defined $self->temperature && $supports->('temperature');
   push @args, max_tokens      => $self->max_tokens      if defined $self->max_tokens  && $supports->('response_size');
   push @args, reasoning_effort => $self->reasoning_effort if defined $self->reasoning_effort && $supports->('reasoning_effort');
+  push @args, seed              => $self->seed              if defined $self->seed              && $supports->('seed');
+  push @args, parallel_tool_use => $self->parallel_tool_use if defined $self->parallel_tool_use && $supports->('parallel_tool_use');
+  push @args, prompt_cache_key  => $self->prompt_cache_key  if defined $self->prompt_cache_key  && $supports->('prompt_cache_key');
   return @args;
 }
 

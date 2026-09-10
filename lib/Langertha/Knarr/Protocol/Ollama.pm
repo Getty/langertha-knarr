@@ -71,6 +71,7 @@ sub parse_chat_request {
     messages        => \@msgs,
     stream          => exists $data->{stream} ? ( $data->{stream} ? 1 : 0 ) : 1,  # Ollama defaults to stream
     temperature     => $data->{options}{temperature},
+    seed            => $data->{options}{seed},
     tools           => $data->{tools},
     response_format => $data->{format},
   );
