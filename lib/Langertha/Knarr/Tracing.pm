@@ -256,6 +256,25 @@ sub _usage_hash {
   return undef;
 }
 
+# Flatten the response's tool calls into plain hashes for the trace metadata.
+# The trace is the detailed view, so it records the full
+# { id, name, arguments, synthetic } shape -- the whole point of putting tool
+# calls in a trace is seeing which tool ran with which arguments. Langertha
+# 0.503's ToolCall carries a TO_JSON (so it would survive flush's
+# convert_blessed encode either way), but flattening here keeps the metadata a
+# plain structure like usage and rate_limit.
+sub _tool_calls_full {
+  my ($tcs) = @_;
+  return undef unless ref $tcs eq 'ARRAY' && @$tcs;
+  my @out;
+  for my $tc (@$tcs) {
+    if    ( blessed($tc) && $tc->can('to_hash') ) { push @out, $tc->to_hash }
+    elsif ( blessed($tc) && $tc->can('TO_JSON') ) { push @out, $tc->TO_JSON }
+    elsif ( ref $tc eq 'HASH' )                   { push @out, $tc }
+  }
+  return @out ? \@out : undef;
+}
+
 =method start_trace
 
     my $trace_info = $tracing->start_trace(
@@ -367,6 +386,12 @@ carries) or a plain hashref. Objects are flattened with C<to_hash> to
 C<input_tokens> / C<output_tokens> / C<total_tokens>; hashrefs are recorded
 verbatim.
 
+=item * C<tool_calls> — the response's L<Langertha::ToolCall> list. The trace
+is the detailed view, so it records the B<full> tool calls — C<id>, C<name>,
+the complete C<arguments> and C<synthetic> — flattened to plain hashes. The
+JSONL request log keeps only a trimmed form (see
+L<Langertha::Knarr::RequestLog/end_request>).
+
 =back
 
 =cut
@@ -415,6 +440,9 @@ sub end_trace {
       if defined $opts{thinking} && length $opts{thinking};
     if ( my $rl = _rate_limit_hash( $opts{rate_limit} ) ) {
       $metadata{rate_limit} = $rl;
+    }
+    if ( my $tcs = _tool_calls_full( $opts{tool_calls} ) ) {
+      $metadata{tool_calls} = $tcs;
     }
 
     push @{$self->_batch}, {

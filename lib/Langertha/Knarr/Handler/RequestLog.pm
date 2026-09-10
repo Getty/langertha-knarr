@@ -91,7 +91,8 @@ async sub handle_chat_f {
     $self->request_log->end_request(
       $handle,
       output => $resp->content,
-      ( $resp->usage ? ( usage => $resp->usage ) : () ),
+      ( $resp->usage         ? ( usage      => $resp->usage )      : () ),
+      ( $resp->has_tool_calls ? ( tool_calls => $resp->tool_calls ) : () ),
     );
     return Future->done($r);
   })->else( sub {

@@ -8,6 +8,12 @@ use JSON::MaybeXS ();
 use File::Spec;
 use Log::Any qw( $log );
 
+# The JSONL log is the running operational record, not the detailed trace, so
+# tool-call arguments are capped: enough to see what was called, without
+# spilling large or user-data-bearing payloads onto disk on every request.
+# The full arguments live in the Langfuse trace (see Langertha::Knarr::Tracing).
+my $ARG_PREVIEW_MAX = 200;
+
 =head1 SYNOPSIS
 
     use Langertha::Knarr::RequestLog;
@@ -122,6 +128,18 @@ sub _build__json_pretty {
   return JSON::MaybeXS->new(utf8 => 1, convert_blessed => 1, pretty => 1, canonical => 1);
 }
 
+has _json_compact => (
+  is      => 'lazy',
+  builder => '_build__json_compact',
+);
+
+# Character-string (no utf8) canonical encoder used only to render a stable
+# preview of tool-call arguments; the preview then rides inside the entry that
+# _json / _json_pretty encode to bytes.
+sub _build__json_compact {
+  return JSON::MaybeXS->new(canonical => 1, convert_blessed => 1);
+}
+
 sub _timestamp {
   my ($s, $us) = gettimeofday;
   my @t = gmtime($s);
@@ -141,6 +159,39 @@ sub _usage_hash {
   return $u->to_hash if blessed($u) && $u->can('to_hash');
   return $u if ref($u) eq 'HASH';
   return undef;
+}
+
+# Trim the response's tool calls for the JSONL entry: tool name + call id plus
+# an arguments preview capped at $ARG_PREVIEW_MAX characters. The full
+# arguments are recorded in the Langfuse trace instead.
+sub _tool_calls_trimmed {
+  my ($self, $tcs) = @_;
+  return undef unless ref $tcs eq 'ARRAY' && @$tcs;
+  my @out;
+  for my $tc (@$tcs) {
+    my ($id, $name, $args);
+    if ( blessed($tc) ) {
+      $id   = $tc->can('id')        ? $tc->id        : undef;
+      $name = $tc->can('name')      ? $tc->name      : undef;
+      $args = $tc->can('arguments') ? $tc->arguments : undef;
+    }
+    elsif ( ref $tc eq 'HASH' ) {
+      ($id, $name, $args) = @{$tc}{qw( id name arguments )};
+    }
+    else { next }
+    my $preview = ref $args      ? $self->_json_compact->encode($args)
+                : defined $args  ? "$args"
+                :                  '';
+    my $truncated = length($preview) > $ARG_PREVIEW_MAX ? \1 : \0;
+    $preview = substr( $preview, 0, $ARG_PREVIEW_MAX ) if ${$truncated};
+    push @out, {
+      id        => $id,
+      name      => $name,
+      arguments => $preview,
+      truncated => $truncated,
+    };
+  }
+  return @out ? \@out : undef;
 }
 
 sub _file_timestamp {
@@ -202,6 +253,13 @@ carries) or a plain hashref. Objects are flattened with C<to_hash> to
 C<input_tokens> / C<output_tokens> / C<total_tokens>; hashrefs are logged
 verbatim.
 
+C<tool_calls> takes the response's L<Langertha::ToolCall> list and is logged
+B<trimmed>: each call keeps its C<name> and C<id> plus an C<arguments> preview
+capped at 200 characters (C<truncated> flags whether it was cut). The full
+arguments are recorded in the Langfuse trace instead (see
+L<Langertha::Knarr::Tracing/end_trace>), because the JSONL log is the running
+operational record and tool arguments can be large or carry user data.
+
 =cut
 
 sub end_request {
@@ -222,6 +280,7 @@ sub end_request {
     params      => $handle->{params},
     output      => $opts{output},
     usage       => _usage_hash( $opts{usage} ),
+    tool_calls  => $self->_tool_calls_trimmed( $opts{tool_calls} ),
     duration_ms => $duration_ms,
     status      => $opts{error} ? 'error' : 'ok',
     error       => $opts{error},

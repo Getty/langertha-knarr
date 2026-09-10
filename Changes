@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Tool calls are now recorded in both observability sinks on the routed
+      path. The Langfuse trace keeps the full call (tool name, call id and
+      complete arguments); the JSONL request log keeps a trimmed form (tool
+      name, call id and an arguments preview capped at 200 characters, with a
+      truncated flag), because the log is the running operational record and
+      arguments can be large or carry user data.
+
     - The routed path now forwards per-request generation controls from the
       client body, capability-gated like temperature and max_tokens:
       reasoning_effort, seed, parallel_tool_use and prompt_cache_key. A

@@ -108,6 +108,7 @@ sub _close_trace {
     ( defined $resp->id         ? ( response_id => $resp->id )         : () ),
     ( defined $resp->thinking   ? ( thinking    => $resp->thinking )   : () ),
     ( $resp->rate_limit         ? ( rate_limit  => $resp->rate_limit ) : () ),
+    ( $resp->has_tool_calls     ? ( tool_calls  => $resp->tool_calls ) : () ),
   );
 }
 
