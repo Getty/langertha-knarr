@@ -1,5 +1,5 @@
 
-requires 'Langertha', '0.500';
+requires 'Langertha', '0.503';
 requires 'Moose';
 requires 'Moo';
 requires 'MooX::Cmd';

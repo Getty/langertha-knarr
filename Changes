@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Langertha floor raised from 0.500 to 0.503, matching the real
+      runtime dependency. Knarr requires the canonical per-request
+      controls chat_f extracts (reasoning_effort, seed, parallel_tool_use,
+      prompt_cache_key) and Langertha::ToolCall's TO_JSON, all of which
+      land in 0.503; a clean install against 0.500-0.502 runs the control
+      and streaming paths red or degrades them silently.
+
     - Tool calls are now recorded in both observability sinks on the routed
       path. The Langfuse trace keeps the full call (tool name, call id and
       complete arguments); the JSONL request log keeps a trimmed form (tool
