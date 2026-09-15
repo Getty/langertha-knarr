@@ -1,0 +1,33 @@
+---
+class: standard
+completed: 2026-09-15T20:04:42Z
+created: 2026-08-12T22:04:35Z
+id: 8
+priority: low
+started: 2026-09-15T20:04:42Z
+status: done
+tags:
+- packaging
+title: cpanfile-Floor auf die Langertha-Version mit den neuen Engines anheben
+updated: 2026-09-15T20:04:42Z
+---
+
+cpanfile pinnt `requires 'Langertha', '0.500'`. Installiert ist hier 0.502, das
+Langertha-Repo steht auf 0.503 plus unreleased Batch.
+
+Konkrete Folge heute: die in #2 neu aufgenommenen Cloud-Engines XAI, Moonshot
+und Hetzner existieren in 0.502 noch nicht. `default_model_for` faellt sauber
+zurueck (die Klasse resolved nicht), `knarr init` schreibt deren Stanza dann
+ohne `model:`-Zeile. Harmlos, weil zur Laufzeit der Engine-Default greift --
+aber der Katalog ist erst mit der neueren Langertha vollstaendig.
+
+Kein Handlungsbedarf, solange Langertha nicht released ist. Beim naechsten
+Knarr-Release aber pruefen: Floor auf die dann aktuelle Langertha heben, und
+dabei mitnehmen, ob eins der Features aus #3/#4 ohnehin einen hoeheren Floor
+erzwingt.
+
+2026-09-09 06:28 Stand aktualisiert nach k1/k9/k4: der cpanfile-Floor steht auf Langertha 0.500, aber k1 (chat_stream_realtime_f mit %opts), k9 (Ollama controls) und k4 (reasoning_effort) haengen jetzt hart an den kanonischen per-Request-Controls, die erst in Langertha main stehen (installiert 0.503, batch noch unreleased). Der Floor-Bump ist damit nicht mehr nur Katalog-Kosmetik (XAI, Moonshot, Hetzner aus k2), sondern eine harte Runtime-Abhaengigkeit: ein Clean-Install gegen eine aeltere Langertha laesst t 28, t 29 und den Streaming-Pfad rot werden bzw. degradiert still. BLEIBT release-gebunden: der Floor darf erst auf die Version gehoben werden, die die kanonischen Controls tatsaechlich CPAN-released mitbringt -- ein Requires auf eine unreleaste Version waere falsch. Aktion beim naechsten Knarr-Release: zuerst Langertha mit den Controls releasen, dann Floor hier auf diese Version heben. Nicht eigenmaechtig gebumpt.
+
+2026-09-10 01:32 Reihenfolge bestaetigt (Maintainer): cpanfile-Floor JETZT NICHT bumpen. Langertha 0.503 (kanonische Controls) ist noch nicht CPAN-released; ein requires darauf waere falsch. Zuerst Langertha mit den Controls releasen, DANN Floor hier heben. Bleibt backlog/release-gebunden. (Es liegt eine uncommittete 0.500->0.503 Floor-Aenderung im main-Working-Tree, bewusst NICHT committet.)
+
+Maintainer-Entscheidung (2026-09-15): Floor-Bump ist NICHT release-blockiert -- der Floor soll die reale Runtime-Abhaengigkeit abbilden. cpanfile Langertha 0.500 -> 0.503 (die Version, die die kanonischen per-Request-Controls via chat_f UND ToolCall::TO_JSON mitbringt; Clean-Install gegen 0.500-0.502 lief die Control-/Streaming-Pfade rot bzw. still degradiert). Commit 93dbcef (lokal auf main, nicht gepusht), Changes gepflegt, prove -lr t/ gruen (519). Floor stand nur in cpanfile:2 (dist.ini 0.307 = auskommentiertes Docker-Build-Arg, unangetastet). RELEASE-SEQUENCING (Info, kein Blocker): CPAN-latest ist derzeit Langertha 0.502; der Pin auf 0.503 verlangt, dass Langertha 0.503 vor/mit einem Knarr-Release auf CPAN geht -- ein Clean-Install von fremder Maschine resolved den Pin erst dann. Ticket geschlossen.
