@@ -1,0 +1,76 @@
+---
+claimed_at: 2026-09-10T01:52:16Z
+claimed_by: worker-a
+class: standard
+completed: 2026-09-15T20:03:20Z
+created: 2026-08-12T22:38:48Z
+id: 11
+priority: low
+started: 2026-09-10T01:32:19Z
+status: done
+tags:
+- tracing
+- requestlog
+- followup
+title: 'tool_calls in Trace und Log: dieselbe TO_JSON-Falle wie usage'
+updated: 2026-09-15T20:03:20Z
+---
+
+Beim Fix von #10 mitgefunden, bewusst nicht spekulativ mitrepariert.
+
+Langertha::ToolCall hat wie Langertha::Usage kein TO_JSON. Es ist damit
+dieselbe Mine: sobald jemand tool_calls in einen Trace oder eine
+JSONL-Zeile schreibt, stirbt der Langfuse-Encode (bzw. die Log-Zeile
+verschwindet still).
+
+Heute nicht erreichbar: weder Handler::Tracing noch Handler::RequestLog
+reichen tool_calls weiter, und Protocol/{OpenAI,Anthropic,Ollama}.pm rufen
+to_openai / to_anthropic_block / to_ollama -- aber nur auf dem routed
+Antwortpfad, nicht auf dem Trace- oder Logpfad.
+
+Das Unangenehme daran ist, dass es genau die Information ist, die man in
+einem Trace sehen will: welches Tool mit welchen Argumenten aufgerufen
+wurde. Wer das ergaenzt, muss daran denken, auf dem Weg to_hash zu rufen --
+sonst ist es der dritte Fund derselben Klasse.
+
+Zwei Moeglichkeiten:
+
+- Nur absichern: eine Flatten-Funktion analog _usage_hash / _rate_limit_hash
+  bereitstellen, damit die Falle entschaerft ist, bevor jemand hineintritt.
+- Gleich nutzen: tool_calls tatsaechlich in Trace und Log aufnehmen. Dann
+  braucht es eine Entscheidung, ob die Argumente vollstaendig mitgeschrieben
+  werden -- die koennen gross sein und Nutzerdaten enthalten.
+
+Verwandt: Langertha karr #47 (TO_JSON auf den Value-Objekten) wuerde die
+Klasse an der Wurzel schliessen.
+
+## Lage geaendert: Langertha #47 ist erledigt
+
+Langertha::ToolCall hat jetzt ein TO_JSON (Langertha main, noch nicht
+released). Die Falle ist damit an der Wurzel geschlossen -- aber erst fuer
+die Version, die das mitbringt. Knarrs cpanfile-Floor steht auf 0.500, die
+hier installierte Langertha ist 0.502 und hat es nicht.
+
+Damit zerfaellt das Ticket:
+
+- Der defensive Teil ("Flatten-Funktion bereitstellen, bevor jemand
+  hineintritt") ist nur noch fuer den Zeitraum interessant, in dem Knarr
+  gegen eine Langertha ohne TO_JSON laufen darf. Sobald der Floor auf die
+  neue Version geht (#8), erledigt sich das von selbst.
+- Der eigentliche Teil ("tool_calls tatsaechlich in Trace und Log aufnehmen")
+  bleibt und wird durch #47 sogar einfacher: kein eigenes Flatten mehr noetig,
+  der Encoder kommt jetzt allein damit klar.
+
+Die offene Entscheidung bleibt dieselbe: ob die Tool-Argumente vollstaendig
+in Trace und Log gehoeren. Die koennen gross sein und Nutzerdaten enthalten.
+
+2026-09-09 06:29 Stand: der defensive Teil ist gegenstandslos -- Langertha::ToolCall und Langertha::Usage haben jetzt beide TO_JSON (installiert 0.503, verifiziert), die Encode-Mine ist an der Wurzel geschlossen; sobald der Floor auf diese Version geht (k8), erledigt sich das von selbst, keine eigene Flatten-Funktion noetig. Der eigentliche Teil (tool_calls tatsaechlich in Trace und Log aufnehmen) BLEIBT offen und ist eine Produkt- bzw. Privacy-Entscheidung, nicht eigenmaechtig zu treffen: Tool-Argumente koennen gross sein und Nutzerdaten enthalten. Zu entscheiden vom Maintainer: ob Argumente vollstaendig, gekuerzt oder nur Tool-Name plus Call-id in Trace und Log gehen, und ob Trace (Langfuse, extern) und JSONL-Log dieselbe Policy bekommen. Bis dahin offen gelassen.
+
+2026-09-10 01:46 IMPLEMENTIERT (commit c64e9e2, worktree lane-a-knarr; prove -lr 519 Tests gruen, t/33_tool_calls_trace_log.t): tool_calls jetzt in BEIDEN Sinks. Handler::Tracing -> Knarr::Tracing::end_trace: VOLLE Calls (name+id+komplette arguments+synthetic) in generation-metadata.tool_calls, via to_hash zu Plain-Hashes geflacht. Handler::RequestLog -> Knarr::RequestLog::end_request: GETRIMMTE Calls (name+id+arguments-Preview auf 200 Zeichen gekappt + truncated-Flag) in der JSONL-Zeile. Encode-Mine zu (to_hash/TO_JSON-Flatten, keine blessed ToolCall in den Encoder). Test faehrt durch die ECHTEN Encoder (Tracing-flush baut den echten Langfuse-POST; RequestLog schreibt echte tempdir-JSONL) plus no-tool-calls-Fall.
+INTERPRETATION zur Bestaetigung: 'Auf TRACE-Log-Level voll, sonst getrimmt' als SINK-basiert gelesen — Langfuse-Trace (die detaillierte Ebene) = voll, JSONL-Request-Log = getrimmt. Knarr hat KEIN Log-Level-/is_trace-Plumbing, deshalb kein neues Level-Infra gebaut; falls stattdessen ein echtes Log-Level (z.B. KNARR_DEBUG) das Voll/Getrimmt steuern soll, kurz sagen. Cap=200 Zeichen (Konstante in RequestLog.pm).
+
+2026-09-10 01:47 tool_calls in Trace (voll) + JSONL-Log (getrimmt, 200-Zeichen-Cap + truncated-Flag), via to_hash geflacht, durch echte Encoder getestet. Bitte Interpretation bestaetigen: Voll/Getrimmt ist SINK-basiert (Trace vs Log), nicht ein echtes Log-Level (Knarr hat keins).
+
+ORCHESTRATOR-REVIEW (worker-a, 2026-09-10): Code freigegeben. tool_calls jetzt in beiden Sinks, has_tool_calls-gated: Langfuse-Trace = VOLL (name/id/komplette Args/synthetic, flach via to_hash); JSONL-Log = GETRIMMT (name+id+Args-Preview 200 Zeichen + truncated-Flag), mit dokumentierter Begruendung (Log = operativer Record, Args koennen gross/Userdaten sein). Encode-Mine via Flatten geschlossen. t/33 treibt die echten Encoder. prove -lr t/ gruen (519). Liegt auf Branch lane-a-knarr. BLEIBT in review. GEFLAGGT fuer Maintainer (nicht geraten): 'im Tracen voll, sonst gekuerzt' als SINK-basiert ausgelegt (Trace=voll, RequestLog/JSONL=getrimmt), weil Knarr keine Log-Level/is_trace-Verkabelung hat und ein KNARR_DEBUG-Level-Knopf spekulative Infrastruktur waere. Passt zur User-Formulierung; falls stattdessen ein echter Level-Knopf full-vs-trimmed steuern soll, ist es eine kleine Aenderung.
+
+Maintainer-Entscheidung (2026-09-15): Sink-basierte Auslegung bestaetigt -- Langfuse-Trace = voll (name/id/komplette args), JSONL-Log = getrimmt (args-preview 200-Zeichen-Cap + truncated-Flag). Kein Log-Level-Knopf: Knarr hat keine Level-Verkabelung, ein KNARR_DEBUG-Schalter waere spekulative Infra. Code auf main (c64e9e2), via echte Encoder getestet, 519 Tests gruen. Ticket geschlossen.
