@@ -1,0 +1,28 @@
+---
+class: standard
+created: 2026-09-15T20:02:44Z
+id: 13
+priority: low
+status: backlog
+tags:
+- request
+- reasoning
+- followup
+- drift
+- needs:langertha#173
+title: Reasoning-Inbound-Mapping fuer Anthropic/Ollama (verlustbehaftet, zurueckgestellt)
+updated: 2026-09-16T04:43:47Z
+---
+
+Follow-up aus k4. Beim Zuschnitt von k4 bewusst NICHT umgesetzt (Maintainer-Entscheidung: als eigenes Ticket festhalten), weil es Felder erfinden bzw. eine Croak-Mine treffen wuerde:
+
+- Anthropic-Wire traegt thinking.budget_tokens. Der kanonische Langertha-Control dafuer ist thinking_budget -- der ist Gemini-2.5-only und CROAKT beim Bauen auf Anthropic-Engines, hat zudem keine Capability zum Gaten. Ein Mapping budget_tokens -> reasoning_effort-Enum waere verlustbehaftet (kontinuierliches Budget auf 3-4 Enum-Stufen).
+- Ollama-Wire traegt think (Boolean bzw. Level). Boolean -> reasoning_effort-Enum erfindet eine Stufe.
+
+Heute abgedeckt: reasoning_effort parst vom einzigen Wire, der den Enum nativ traegt (OpenAI top-level, commit 0ebbe19), capability-gegated, forwardet korrekt auf Anthropic-Engines und dropt fuer natives Ollama.
+
+Erst sinnvoll umzusetzen, wenn (a) Langertha einen sauberen, nicht-croakenden per-Engine-Einstieg fuer Reasoning-Budget/Level mit Capability liefert, oder (b) der Maintainer eine explizite, dokumentiert verlustbehaftete Mapping-Policy festlegt (budget_tokens/think -> reasoning_effort-Enum). Bis dahin bewusst offen, kein Feld erfinden.
+
+Verwandt: k4 (erledigt).
+
+Entblockt durch langertha#173 (Reasoning-Profil als echter Datentyp). Sobald das Profil steht, wird k13 der duenne Consumer: Inbound budget_tokens/think -> normalisiertes Level per Profil-Query, statt hier eine eigene verlustbehaftete Mapping-Policy zu erfinden. Maintainer-Richtung 2026-09-16: gute Defaults + exakt ueberschreibbare Parameter, Boolean -> Default-Level (Mitte).
