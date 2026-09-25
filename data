@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T17:28:17Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T17:28:17Z
+created: 2026-09-25T17:22:15Z
+id: 32
+priority: low
+started: 2026-09-25T17:28:17Z
+status: done
+tags:
+- ollama
+- compat
+- vision
+title: /api/show advertises vision from core's image_input capability
+updated: 2026-09-25T17:28:17Z
+---
+
+Core k266 (unreleased) adds model-scoped image_input. /api/show (k29) should add 'vision' to capabilities when the routed engine supports('image_input') for that model (probe like the manifest does); absent flag (core 0.503) -> no vision. Also verify the manifest (k14) now publishes image_input per model under dev core. Tests under both cores.
