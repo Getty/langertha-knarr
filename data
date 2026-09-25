@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T16:53:37Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:53:37Z
+created: 2026-09-25T16:31:13Z
+id: 30
+priority: low
+started: 2026-09-25T16:53:37Z
+status: done
+tags:
+- router
+- context
+title: 'Router: pass a model config''s context_size to the engine (decide num_ctx
+  wire effect first)'
+updated: 2026-09-25T16:53:37Z
+---
+
+From k29: /api/show can only report context_length from engine defaults because Router doesn't pass a model's configured context_size to the engine. Passing it would also send num_ctx (Ollama) / equivalent on the wire. Decide: a separate knob for advertised context vs sent context, or pass through (it's what the operator configured). Then implement + test.
