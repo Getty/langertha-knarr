@@ -15,6 +15,11 @@ Revision history for Langertha-Knarr
       Needs a Langertha with Langertha::Manifest; with an older one the
       route answers 404.
 
+    - Non-streaming OpenAI answers encode tool-call arguments once:
+      non-ASCII values in function.arguments no longer reach the client
+      double-encoded ("KÃ¶ln" instead of "Köln"), with any Langertha
+      version.
+
     - Non-streaming Handler::Passthrough answers now carry the upstream's
       tool calls (OpenAI message.tool_calls, Anthropic tool_use blocks,
       Ollama message.tool_calls) and its finish reason, so the client gets

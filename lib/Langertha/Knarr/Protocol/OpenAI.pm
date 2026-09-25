@@ -128,7 +128,7 @@ sub format_chat_response {
   my $message = { role => 'assistant', content => $r->content };
   my $finish = _finish_reason( $r->finish_reason, $r->has_tool_calls );
   if ( $r->has_tool_calls ) {
-    $message->{tool_calls} = [ map { $_->to_openai } @{ $r->tool_calls } ];
+    $message->{tool_calls} = [ map { $self->_wire_call($_) } @{ $r->tool_calls } ];
   }
   my $usage = $r->usage && $r->usage->can('to_openai_format')
     ? $r->usage->to_openai_format
@@ -148,6 +148,22 @@ sub format_chat_response {
     usage => $usage,
   };
   return ( 200, { 'Content-Type' => 'application/json' }, $self->_json->encode($payload) );
+}
+
+# The arguments string is built here from the structured arguments, not taken
+# from core's to_openai: core up to 0.503 returned it as UTF-8 bytes, which
+# _json then encoded a second time (a non-ASCII value arrived mangled);
+# later cores return characters. Encoding it ourselves gives one encoding on every core (k24).
+sub _wire_call {
+  my ($self, $tc, @fallback) = @_;
+  my $wire = $tc->to_openai(@fallback);
+  return {
+    %$wire,
+    function => {
+      %{ $wire->{function} },
+      arguments => $self->_args_json->encode( $tc->arguments // {} ),
+    },
+  };
 }
 
 sub format_models_response {
@@ -182,15 +198,12 @@ sub format_stream_close {
   if (@calls) {
     my @delta_calls;
     for my $index ( 0 .. $#calls ) {
-      my $wire = $calls[$index]->to_openai( fallback_id => 'call_knarr_' . ( $index + 1 ) );
+      my $wire = $self->_wire_call( $calls[$index], fallback_id => 'call_knarr_' . ( $index + 1 ) );
       push @delta_calls, {
         index    => $index,
         id       => $wire->{id},
         type     => 'function',
-        function => {
-          name      => $wire->{function}{name},
-          arguments => $self->_args_json->encode( $calls[$index]->arguments // {} ),
-        },
+        function => $wire->{function},
       };
     }
     $out .= $self->_stream_chunk( $request,

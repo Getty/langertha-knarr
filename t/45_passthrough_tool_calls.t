@@ -26,6 +26,9 @@ use Langertha::Knarr::Request;
 use Langertha::Knarr::Handler::Passthrough;
 
 my $json = JSON::MaybeXS->new( utf8 => 1, canonical => 1 );
+# function.arguments is JSON nested in an already-decoded body: characters.
+# A byte decoder here only passed while the wire was encoded twice (k24).
+my $args_json = JSON::MaybeXS->new( canonical => 1 );
 my $loop = IO::Async::Loop->new;
 
 my %UPSTREAM = (
@@ -138,7 +141,7 @@ sub post_json {
 subtest 'Knarr re-frames the upstream calls for the client' => sub {
   my $openai = post_json('/v1/chat/completions');
   is $openai->{choices}[0]{finish_reason}, 'tool_calls', 'openai: finish_reason';
-  is [ map { [ $_->{id}, $_->{function}{name}, $json->decode( $_->{function}{arguments} ) ] }
+  is [ map { [ $_->{id}, $_->{function}{name}, $args_json->decode( $_->{function}{arguments} ) ] }
       @{ $openai->{choices}[0]{message}{tool_calls} } ],
     [ [ call_x => weather => { city => 'Köln' } ], [ call_y => time => {} ] ], 'openai: calls';
 
