@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T17:44:05Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T17:44:05Z
+created: 2026-09-25T17:37:25Z
+id: 34
+priority: low
+started: 2026-09-25T17:44:05Z
+status: done
+tags:
+- vision
+- protocol
+title: Ollama /api/generate drops top-level images
+updated: 2026-09-25T17:44:05Z
+---
+
+Found during k33: Protocol::Ollama parse_chat_request turns /api/generate prompt into one user message but ignores the request-level images array, so a vision request via /api/generate loses its images silently (also on passthrough-less routed models). Fix: attach data->{images} to that user message before Langertha::Knarr::Image::ollama_messages. Test in t/84_image_translation.t.
