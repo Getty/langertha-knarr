@@ -2,6 +2,7 @@ package Langertha::Knarr;
 # ABSTRACT: Universal LLM hub — proxy, server, and translator across OpenAI/Anthropic/Ollama/A2A/ACP/AG-UI
 our $VERSION = '1.102';
 use Moose;
+use Future;
 use Future::AsyncAwait;
 use IO::Async::Loop;
 use Net::Async::HTTP::Server;
@@ -191,6 +192,14 @@ provider manifest. When unset, the base URL is taken from the request
 Binds all listen sockets and registers the dispatcher. Returns
 C<$self>. Does not enter the event loop.
 
+Once the sockets listen, it starts
+L<Langertha::Knarr::Router/probe_capabilities_f> on the L</loop> when a
+L</router> that has it is set (see
+L<Langertha::Knarr::Config/probe_capabilities>). The probe runs in the
+background; until it has finished, C<POST /api/show> and the manifest answer
+from Langertha's static capability tables. L<Langertha::Knarr::PSGI> does not
+call L</start>, so under PSGI the probe runs only when you call it.
+
 =method run
 
     $knarr->run;   # blocks
@@ -354,6 +363,11 @@ has _server => (
   is => 'rw',
 );
 
+# The startup capability probe (k37), held until it is ready.
+has _capability_probe => (
+  is => 'rw',
+);
+
 has _servers => (
   is => 'rw',
   default => sub { [] },
@@ -430,7 +444,27 @@ sub start {
   }
   $self->_servers(\@servers);
   $self->_server( $servers[0] );
+  $self->_start_capability_probe;
   return $self;
+}
+
+# k37: once the server listens, ask each routed engine for its model's
+# capabilities (Router->probe_capabilities_f). Deferred to the running loop
+# so start() does not block on discovery; the Future is held here until it
+# is ready. It never fails: probe errors are logged by the router.
+sub _start_capability_probe {
+  my ($self) = @_;
+  my $router = $self->router;
+  return unless $router && $router->can('probe_capabilities_f');
+  return if $self->_capability_probe;
+  my $loop = $self->loop;
+  $self->_capability_probe( $loop->delay_future( after => 0 )->then(sub {
+    $router->probe_capabilities_f( loop => $loop );
+  })->else(sub {
+    $log->warnf( "Capability probe failed: %s", $_[0] );
+    Future->done(0);
+  }) );
+  return;
 }
 
 sub run {

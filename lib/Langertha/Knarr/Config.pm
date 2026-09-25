@@ -490,6 +490,56 @@ sub _build_upstream_stall_timeout {
     $self->data->{upstream_stall_timeout} // _strip_quotes($ENV{KNARR_UPSTREAM_STALL_TIMEOUT}), 120 );
 }
 
+has probe_capabilities => (
+  is      => 'lazy',
+  builder => '_build_probe_capabilities',
+);
+
+=attr probe_capabilities
+
+Boolean, default C<1>. When true, L<Langertha::Knarr/start> asks every routed
+engine that can read its provider's model metadata (OpenRouter, Mistral,
+LM Studio, Ollama, llama.cpp; Langertha core's C<probe_model_capabilities_f>)
+which capabilities its model has, once at startup, after auto-discovery. What
+it learns (today: whether the model sees images) then shows as C<vision> in
+C<POST /api/show> and as C<image_input> in the provider manifest. Engines
+without such metadata and a Langertha too old to probe (0.503) send nothing.
+A failed probe is logged and changes nothing. Set C<0> (or
+C<KNARR_PROBE_CAPABILITIES=0>) to never send these requests. See
+L<Langertha::Knarr::Router/probe_capabilities_f>.
+
+=cut
+
+sub _build_probe_capabilities {
+  my ($self) = @_;
+  my $value = $self->data->{probe_capabilities};
+  unless ( defined $value ) {
+    $value = _strip_quotes($ENV{KNARR_PROBE_CAPABILITIES});
+    return 1 unless defined $value && length $value;
+  }
+  return !$value || $value =~ /\A(?:false|no|off)\z/i ? 0 : 1;
+}
+
+has probe_timeout => (
+  is      => 'lazy',
+  builder => '_build_probe_timeout',
+);
+
+=attr probe_timeout
+
+Seconds one capability probe (see L</probe_capabilities>) may take before it
+is given up and logged. Default C<10>; C<0> leaves only the engine's own
+C<user_agent_timeout>. Falls back to C<KNARR_PROBE_TIMEOUT>. A value that is
+not a non-negative number croaks when read, and L</validate> reports it.
+
+=cut
+
+sub _build_probe_timeout {
+  my ($self) = @_;
+  return _seconds( probe_timeout =>
+    $self->data->{probe_timeout} // _strip_quotes($ENV{KNARR_PROBE_TIMEOUT}), 10 );
+}
+
 sub _seconds {
   my ($name, $value, $default) = @_;
   return $default unless defined $value && length $value;
@@ -586,7 +636,8 @@ that at least one model or default engine is configured, that a model's
 C<context_size> (and the default engine's), when set, is a positive integer, and its
 C<user_agent_timeout> a non-negative number, and that
 L</ollama_compat_version>, when set, is three dot-separated numbers, and that
-L</upstream_timeout> and L</upstream_stall_timeout> are non-negative numbers.
+L</upstream_timeout>, L</upstream_stall_timeout> and L</probe_timeout> are
+non-negative numbers.
 
 =cut
 
@@ -624,7 +675,7 @@ sub validate {
     push @errors, "No models configured and no default engine set";
   }
 
-  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout )) {
+  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout probe_timeout )) {
     next if eval { $self->$attr; 1 };
     ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
     push @errors, $err;

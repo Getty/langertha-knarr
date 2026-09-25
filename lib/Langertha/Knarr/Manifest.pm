@@ -49,7 +49,9 @@ model names and passthrough targets never enter the document. Without a
 router (a single custom handler), model entries claim only C<chat>.
 
 The model part is cached and rebuilt when the listed model surface changes
-(for example once auto-discovery has run); the envelope around it is built
+(for example once auto-discovery has run) or a capability probe
+(L<Langertha::Knarr::Router/probe_capabilities_f>) has finished, so learned
+facts such as C<image_input> appear without a restart; the envelope around it is built
 per request, because the base URL can come from the request.
 
 =attr knarr
@@ -146,7 +148,8 @@ L</available> is true.
 =cut
 
 # The listed surface, one entry per model id with the capabilities of the
-# engine that serves it. Cached until the listing changes.
+# engine that serves it. Cached until the listing changes or a capability
+# probe finishes.
 sub _model_entries {
   my ($self) = @_;
   my $knarr  = $self->knarr;
@@ -155,6 +158,9 @@ sub _model_entries {
   my @rows   = map { ref $_ eq 'HASH' ? $_ : { id => "$_" } } @{ $listed || [] };
 
   my $key = join "\0", map { join "\1", map { $_ // '' } @{$_}{qw( id engine model )} } @rows;
+  # A capability probe (k37) can change what an engine supports.
+  $key .= "\2" . $router->capabilities_generation
+    if $router && $router->can('capabilities_generation');
   my $cache = $self->_cache;
   return $cache->{entries} if $cache && $cache->{key} eq $key;
 

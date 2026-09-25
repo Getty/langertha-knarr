@@ -351,7 +351,10 @@ curl http://localhost:8080/api/show -d '{"model":"gpt-5.6-terra"}'
 `/api/tags` lists: `capabilities` holds `completion`, plus `tools` when the
 routed engine takes tools, plus `vision` when the routed engine claims
 `image_input` for that model (needs a Langertha core with that flag); never
-`thinking`. A context length
+`thinking`. For gateway and self-hosted models (OpenRouter, Mistral,
+LM Studio, Ollama, llama.cpp) Knarr asks the provider's own model metadata
+once after startup whether the model sees images (needs a Langertha core with
+`probe_model_capabilities_f`; `probe_capabilities: 0` turns it off). A context length
 appears in `model_info` only when the engine knows one.
 
 In container mode Knarr binds an extra `:11434` socket as well, so
@@ -708,6 +711,8 @@ priority, and the `TEST_LANGERTHA_*` variant is the last resort:
 | `KNARR_DEBUG` | Enable verbose logging (`1` = on) | — (off) |
 | `KNARR_UPSTREAM_TIMEOUT` | Seconds an upstream may take for a non-streaming request; also the routed engines' `user_agent_timeout` (`0` disables) | `300` |
 | `KNARR_UPSTREAM_STALL_TIMEOUT` | Seconds a passthrough stream may go without data (`0` disables) | `120` |
+| `KNARR_PROBE_CAPABILITIES` | Ask gateway / self-hosted engines' model metadata once at startup which models see images (`0` disables) | `1` |
+| `KNARR_PROBE_TIMEOUT` | Seconds one such capability probe may take before it is logged and given up (`0`: only the engine's own timeout) | `10` |
 | `KNARR_OLLAMA_COMPAT_VERSION` | Ollama version reported at `GET /api/version` (a compatibility claim, not Knarr's version); digits and dots only (`x.y.z`), at least `0.6.4` for VS Code Copilot | `0.34.4` |
 
 ## CLI Reference

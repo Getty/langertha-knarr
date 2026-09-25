@@ -2,6 +2,18 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - /api/show "vision" and the manifest's image_input are now right for
+      gateway and self-hosted models. Once the server listens (after
+      auto-discovery), Knarr asks each routed OpenRouter, Mistral,
+      LM Studio, Ollama and llama.cpp engine once, concurrently and in the
+      background, whether its model sees images, using the provider's own
+      model metadata (needs a Langertha with probe_model_capabilities_f;
+      older ones send nothing). A probe that fails or exceeds probe_timeout
+      (KNARR_PROBE_TIMEOUT, default 10 seconds) is logged and not retried,
+      and the model keeps its previous answer. probe_capabilities: 0
+      (KNARR_PROBE_CAPABILITIES=0) turns it off; under PSGI call the
+      router's probe_capabilities_f yourself.
+
     - An upstream that never answers no longer holds a client forever.
       Passthrough, the A2A and ACP clients and routed engines now time out:
       upstream_timeout (KNARR_UPSTREAM_TIMEOUT, default 300 seconds) is the

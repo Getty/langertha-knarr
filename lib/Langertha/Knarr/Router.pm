@@ -4,6 +4,9 @@ our $VERSION = '1.102';
 use Moo;
 use Carp qw( croak );
 use Log::Any qw( $log );
+use Scalar::Util qw( blessed refaddr );
+use Future;
+use Future::Utils qw( fmap_void );
 use Langertha ();
 
 =head1 SYNOPSIS
@@ -91,6 +94,26 @@ has _discovery_done => (
   is      => 'rw',
   default => 0,
 );
+
+# Engine instances a capability probe was started on (k37), by refaddr: each
+# cached instance is probed once, whether the probe succeeded or not.
+has _probed => (
+  is      => 'ro',
+  default => sub { {} },
+);
+
+has capabilities_generation => (
+  is      => 'rw',
+  default => 0,
+);
+
+=attr capabilities_generation
+
+A counter that grows every time L</probe_capabilities_f> finishes probing an
+engine instance. What an engine reports through C<supports()> may have
+changed then, so anything that caches capabilities (the manifest) keys on it.
+
+=cut
 
 =method resolve
 
@@ -311,6 +334,90 @@ sub list_models {
   }
 
   return \@models;
+}
+
+=method probe_capabilities_f
+
+    $router->probe_capabilities_f( loop => $loop )->get;
+
+Asks each routed engine instance once which capabilities its model has, from
+the provider's own model metadata (Langertha core's
+C<probe_model_capabilities_f>, ADR 0032; today that is C<image_input>). The
+facts are stored on the very instance L</resolve> hands out, so
+C<POST /api/show> (C<vision>) and the provider manifest (C<image_input>) pick
+them up without further work.
+
+Every model L</list_models> shows is resolved (running auto-discovery first
+when it is enabled and has not run yet), and every distinct engine instance
+behind them is probed for its upstream model. An instance is skipped when the
+installed core has no probe (Langertha 0.503), when its engine implements
+none (C<model_metadata_format> is undefined: only OpenRouter, Mistral, LM
+Studio, Ollama and llama.cpp read model metadata; the others would answer
+C<{}> without a request anyway), when it has no model to ask about, or when
+it was probed before. Calling the method again therefore probes only engine
+instances that are new since the last call, such as the ones a later
+discovery added.
+
+The probes run concurrently, at most four at a time. A probe that fails or
+takes longer than L<Langertha::Knarr::Config/probe_timeout> seconds (only
+when C<loop> is given) is logged as a warning and not retried; its engine
+keeps the capabilities it had. The returned Future never fails and resolves
+to the number of engine instances probed. With
+L<Langertha::Knarr::Config/probe_capabilities> off it resolves to C<0> at
+once.
+
+L<Langertha::Knarr/start> calls this once the server listens.
+
+=cut
+
+sub probe_capabilities_f {
+  my ($self, %args) = @_;
+  my $config = $self->config;
+  return Future->done(0)
+    unless !$config->can('probe_capabilities') || $config->probe_capabilities;
+  my $loop    = $args{loop};
+  my $timeout = $args{timeout}
+    // ( $config->can('probe_timeout') ? $config->probe_timeout : 0 );
+
+  my @targets;
+  for my $row (@{ $self->list_models }) {
+    my ($engine, $model, $alias_only) = eval { $self->resolve( $row->{id}, skip_default => 1 ) };
+    next unless blessed $engine && $engine->can('probe_model_capabilities_f')
+      && $engine->can('model_metadata_format')
+      && defined eval { $engine->model_metadata_format };
+    next if $self->_probed->{ refaddr $engine };
+    # An alias without model: key asks about the engine's own default (k22).
+    my $upstream = $alias_only ? eval { $engine->chat_model } : $model;
+    next unless defined $upstream && !ref $upstream && length $upstream;
+    $self->_probed->{ refaddr $engine } = 1;
+    push @targets, [ $engine, $upstream, $row->{id} ];
+  }
+  return Future->done(0) unless @targets;
+
+  return ( fmap_void {
+    my ($engine, $upstream, $id) = @{ $_[0] };
+    my $probe = eval { $engine->probe_model_capabilities_f( models => [ $upstream ] ) }
+      // Future->fail( $@ || 'probe did not start' );
+    $probe = Future->wait_any( $probe,
+      $loop->delay_future( after => $timeout )
+        ->then_fail("capability probe timed out after ${timeout}s") )
+      if $loop && $timeout && $timeout > 0;
+    $probe->then(sub {
+      my ($learned) = @_;
+      $log->debugf( "Capability probe for %s (%s): %s", $id, $upstream,
+        join( ', ', map { my $m = $_; map { "$m $_=$learned->{$m}{$_}" } sort keys %{ $learned->{$m} } }
+          sort keys %{ $learned || {} } ) || 'nothing learned' );
+      Future->done;
+    })->else(sub {
+      my ($err) = @_;
+      ( my $text = "$err" ) =~ s/\s+\z//;
+      $log->warnf( "Capability probe for %s (%s) failed: %s", $id, $upstream, $text );
+      Future->done;
+    })->on_ready(sub {
+      $self->capabilities_generation( $self->capabilities_generation + 1 );
+    });
+  } foreach => [ @targets ], concurrent => 4 )   # fmap consumes the array it is given
+    ->then(sub { Future->done( scalar @targets ) });
 }
 
 sub is_passthrough_model {
