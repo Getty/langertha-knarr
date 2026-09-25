@@ -33,7 +33,10 @@ API. The protocol's parser already turned the body into a
 L<Langertha::Knarr::Request>; Passthrough rebuilds the upstream JSON
 from C<$request-E<gt>raw> and re-POSTs it.
 
-Both sync and streaming requests are supported. For streaming, the
+Both sync and streaming requests are supported. A sync answer carries
+the upstream's text, its tool calls as L<Langertha::ToolCall> objects
+and its finish reason (verbatim; the front-side protocol maps it). For
+streaming, the
 upstream's protocol-native chunks are extracted into plain text deltas,
 the upstream's tool calls are assembled into complete
 L<Langertha::ToolCall> objects on the stream's C<tool_calls>
@@ -141,27 +144,34 @@ sub _build_upstream_request {
   return $http_req;
 }
 
-# Extract assistant text from an upstream response body for the protocol it
-# came from. Bare-minimum extractor for sync mode; the streaming path
-# forwards bytes verbatim and doesn't need this.
-sub _extract_text {
+# Read an upstream response body for the protocol it came from: the
+# assistant text, the tool calls as Langertha::ToolCall objects (through
+# core's canonical inbound door, the same one the streaming path uses) and
+# the terminal reason verbatim -- the client-side protocol maps it (k21).
+sub _parse_response {
   my ($self, $protocol_name, $resp_body) = @_;
+  my %parsed = ( content => '', tool_calls => [], finish_reason => undef );
   my $data = eval { $self->_json->decode($resp_body) };
-  return '' unless ref $data eq 'HASH';
+  return %parsed unless ref $data eq 'HASH';
   if ( $protocol_name eq 'openai' ) {
-    return $data->{choices}[0]{message}{content} // '';
+    $parsed{content}       = $data->{choices}[0]{message}{content} // '';
+    $parsed{finish_reason} = $data->{choices}[0]{finish_reason};
   }
-  if ( $protocol_name eq 'anthropic' ) {
-    my $bits = '';
+  elsif ( $protocol_name eq 'anthropic' ) {
     for my $b ( @{ $data->{content} || [] } ) {
-      $bits .= $b->{text} // '' if ($b->{type} // '') eq 'text';
+      $parsed{content} .= $b->{text} // '' if ($b->{type} // '') eq 'text';
     }
-    return $bits;
+    $parsed{finish_reason} = $data->{stop_reason};
   }
-  if ( $protocol_name eq 'ollama' ) {
-    return $data->{message}{content} // '';
+  elsif ( $protocol_name eq 'ollama' ) {
+    $parsed{content}       = $data->{message}{content} // '';
+    $parsed{finish_reason} = $data->{done_reason};
   }
-  return '';
+  else {
+    return %parsed;
+  }
+  $parsed{tool_calls} = [ Langertha::ToolCall->extract( $protocol_name, $data ) ];
+  return %parsed;
 }
 
 async sub handle_chat_f {
@@ -169,10 +179,9 @@ async sub handle_chat_f {
   my $http_req = $self->_build_upstream_request( $request, 0 );
   my $resp = await $self->_http->do_request( request => $http_req );
   die "Passthrough upstream failed: " . $resp->status_line . "\n" unless $resp->is_success;
-  my $text = $self->_extract_text( $request->protocol, $resp->decoded_content );
   return Langertha::Knarr::Response->new(
-    content => $text,
-    model   => $request->model // $self->model_id,
+    $self->_parse_response( $request->protocol, $resp->decoded_content ),
+    model => $request->model // $self->model_id,
   );
 }
 

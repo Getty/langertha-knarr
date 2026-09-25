@@ -2,6 +2,12 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Non-streaming Handler::Passthrough answers now carry the upstream's
+      tool calls (OpenAI message.tool_calls, Anthropic tool_use blocks,
+      Ollama message.tool_calls) and its finish reason, so the client gets
+      the calls in its own protocol's shape with a tool-call stop reason
+      instead of a text-only answer.
+
     - Routed streams now deliver the backend's tool calls. They arrive
       whole when the stream closes, before the terminal frames: Anthropic
       as one tool_use content block per call (content_block_start, one
