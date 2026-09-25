@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T16:31:05Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:31:05Z
+created: 2026-09-25T16:18:07Z
+id: 28
+priority: low
+started: 2026-09-25T16:31:05Z
+status: done
+tags:
+- ollama
+- compat
+title: Pick a verified default ollama_compat_version (0.12.6 came from a spec example)
+updated: 2026-09-25T16:31:05Z
+---
+
+From k27: ollama_compat_version defaults to 0.12.6, taken from the example in share/ollama.yaml, not verified against current Ollama releases. Some Ollama clients gate features on /api/version (e.g. think, tools, structured format). llm-advisor: which version gates matter in popular clients (Open WebUI, ollama-python/js, Continue, Enchanted…), and which default avoids clients enabling features knarr lacks (think) while keeping ones it has (tools, format).
+
+2026-09-25 16:19 llm-advisor (2026-09-25, public sources only, no live calls): Current Ollama release = v0.34.4 (GitHub releases API, published 2026-09-23). No surveyed client gates think/tools/format/keep_alive/ps on /api/version. They decide per model: /api/show 'capabilities' (tools/vision/thinking) or a user option. Findings: (1) VS Code Copilot BYOK ollamaProvider.ts has a hard floor MINIMUM_OLLAMA_VERSION='0.6.4' (it throws below that, '0.0.0' passes as dev); tool calling and vision come from /api/show capabilities. (2) Open WebUI routers/ollama.py uses /api/version to verify the connection and to pick the lowest backend version. It parses re.sub(r'^v|-.*','',v) and then int() on each dotted part, so the value must be plain numeric x.y.z (a knarr-ish suffix like '0.34.4+knarr' would crash it). (3) ollama-js exposes version() but never gates on it. ollama-python has no version gate. langchain-ollama only validates models via /api/tags (list). Continue sends think from the user's reasoning option and reads /api/show for num_ctx/stop/FIM, with no version check. Enchanted and Msty are not verified (closed or not inspected, GitHub code-search rate limit). RECOMMENDATION: default ollama_compat_version = '0.34.4' (current release). The think concern cannot be solved via the version, because no client gates think on it. Knarr already ignores think (parse_chat_request drops it), so think-capable clients just get no thinking field. Anything >= 0.6.4 and plain-numeric is safe. Keep it pure digits+dots. BIGGER GAP: knarr has no POST /api/show. VS Code Copilot calls it per model (and fails without it), Continue calls it with graceful fallback. Consider a minimal /api/show returning capabilities ['completion','tools'] (no 'thinking') as the real lever for not advertising think. Separate ticket suggested.
