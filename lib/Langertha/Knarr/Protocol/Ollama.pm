@@ -240,6 +240,12 @@ sub format_stream_chunk {
 
 sub stream_content_type { 'application/x-ndjson' }
 
+# Ollama ends a failed stream with an {"error":"..."} line.
+sub format_stream_error {
+  my ($self, $status, $message) = @_;
+  return $self->_json->encode({ error => "$message" }) . "\n";
+}
+
 # The routed stream carries the backend's tool calls complete; Ollama's own
 # wire sends message.tool_calls whole, so they ride on the done line (k19).
 sub format_stream_done {

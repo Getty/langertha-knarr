@@ -231,8 +231,10 @@ sub execute {
     if ( %$upstreams ) {
       require Langertha::Knarr::Handler::Passthrough;
       $passthrough = Langertha::Knarr::Handler::Passthrough->new(
-        upstreams => $upstreams,
-        loop      => $loop,
+        upstreams     => $upstreams,
+        loop          => $loop,
+        timeout       => $config->upstream_timeout,
+        stall_timeout => $config->upstream_stall_timeout,
       );
     }
   }

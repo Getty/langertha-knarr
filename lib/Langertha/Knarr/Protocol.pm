@@ -2,6 +2,7 @@ package Langertha::Knarr::Protocol;
 # ABSTRACT: Role for Knarr wire protocols (OpenAI, Anthropic, Ollama, A2A, ACP, AG-UI)
 our $VERSION = '1.102';
 use Moose::Role;
+use JSON::MaybeXS ();
 
 =head1 DESCRIPTION
 
@@ -72,6 +73,25 @@ can carry tool calls emits them before its terminal frames: Anthropic
 as C<tool_use> content blocks, OpenAI as one C<delta.tool_calls> chunk,
 Ollama as C<message.tool_calls> on the done line.
 
+=method format_error_response
+
+    my ($status, \%headers, $body) = $proto->format_error_response( 504, 'upstream timed out' );
+
+An error answer in this protocol's shape. Default: the OpenAI wire's
+C<{"error":{"message":...}}>; Anthropic answers
+C<{"type":"error","error":{"type":...,"message":...}}>, Ollama a plain
+C<{"error":"..."}>.
+
+=method format_stream_error
+
+    my $bytes = $proto->format_stream_error( 504, 'upstream timed out' );
+
+The frame that tells a client its stream failed after the response
+headers went out, or C<''> (the default) when the protocol has none.
+OpenAI sends C<data: {"error":{...}}>, Anthropic an C<event: error>,
+Ollama an C<{"error":"..."}> line. The raw passthrough writes it before
+closing a stream the upstream stopped feeding.
+
 =method stream_content_type
 
 Returns the HTTP C<Content-Type> for streaming responses. Default
@@ -135,6 +155,17 @@ sub format_stream_done {
 # Default: empty — protocols like OpenAI / Ollama don't need them.
 sub format_stream_open  { '' }
 sub format_stream_close { '' }
+
+# An error answer in the protocol's own shape; default is the OpenAI wire's.
+sub format_error_response {
+  my ($self, $status, $message) = @_;
+  return ( $status, { 'Content-Type' => 'application/json' },
+    JSON::MaybeXS->new( utf8 => 1, canonical => 1 )->encode({ error => { message => "$message" } }) );
+}
+
+# The frame that marks a stream as failed once its headers are out; ''
+# when the protocol has none.
+sub format_stream_error { '' }
 
 # Content-Type for streaming responses. Default is SSE; Ollama overrides.
 sub stream_content_type { 'text/event-stream' }

@@ -6,11 +6,9 @@ use Future::AsyncAwait;
 use JSON::MaybeXS;
 use HTTP::Request;
 use Data::UUID;
-use Net::Async::HTTP;
-use IO::Async::Loop;
 use Langertha::Knarr::Response;
 
-with 'Langertha::Knarr::Handler';
+with 'Langertha::Knarr::Handler', 'Langertha::Knarr::Role::UpstreamHTTP';
 
 =head1 SYNOPSIS
 
@@ -35,6 +33,11 @@ turns Knarr into a universal protocol translator: OpenWebUI → Knarr
 
 Required. Base URL of the upstream A2A agent.
 
+=attr timeout
+
+Seconds the remote agent may take to answer, in total. Default C<300>;
+C<0> disables it. See L<Langertha::Knarr::Role::UpstreamHTTP>.
+
 =attr model_id
 
 Optional. Defaults to C<a2a-remote>.
@@ -44,25 +47,6 @@ Optional. Defaults to C<a2a-remote>.
 has url => ( is => 'ro', isa => 'Str', required => 1 );
 
 has model_id => ( is => 'ro', isa => 'Str', default => 'a2a-remote' );
-
-has loop => (
-  is => 'ro',
-  lazy => 1,
-  default => sub { IO::Async::Loop->new },
-);
-
-has _http => (
-  is => 'ro',
-  lazy => 1,
-  builder => '_build_http',
-);
-
-sub _build_http {
-  my ($self) = @_;
-  my $h = Net::Async::HTTP->new;
-  $self->loop->add($h);
-  return $h;
-}
 
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
 has _uuid => ( is => 'ro', default => sub { Data::UUID->new } );
@@ -109,7 +93,7 @@ async sub handle_chat_f {
   $http_req->header( 'Content-Type' => 'application/json' );
   $http_req->content( $self->_json->encode($envelope) );
 
-  my $resp = await $self->_http->do_request( request => $http_req );
+  my $resp = await $self->_upstream_request_f( request => $http_req );
   die "A2A remote failed: " . $resp->status_line . "\n" unless $resp->is_success;
 
   my $data = $self->_json->decode( $resp->decoded_content );

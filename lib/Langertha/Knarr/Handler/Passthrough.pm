@@ -5,14 +5,12 @@ use Moose;
 use Future;
 use Future::AsyncAwait;
 use HTTP::Request;
-use Net::Async::HTTP;
-use IO::Async::Loop;
 use JSON::MaybeXS;
 use Langertha::Knarr::Stream;
 use Langertha::Knarr::Response;
 use Langertha::ToolCall;
 
-with 'Langertha::Knarr::Handler';
+with 'Langertha::Knarr::Handler', 'Langertha::Knarr::Role::UpstreamHTTP';
 
 =head1 SYNOPSIS
 
@@ -61,6 +59,17 @@ didn't send one. Usually you let the client supply its own key.
 
 Optional. Defaults to C<passthrough>.
 
+=attr timeout
+
+=attr stall_timeout
+
+Upstream timeouts in seconds from L<Langertha::Knarr::Role::UpstreamHTTP>:
+C<timeout> (default C<300>) is the total time of a non-streaming request,
+C<stall_timeout> (default C<120>) the time a streaming one may go without
+data. C<0> disables either. They also apply to the raw passthrough of
+L<Langertha::Knarr> and L<Langertha::Knarr::PSGI>, which answer an expired
+one with C<504> in the client protocol's error shape.
+
 =cut
 
 # Forwards the original wire-format request to a real upstream API. The
@@ -88,20 +97,6 @@ has default_auth => (
 );
 
 has model_id => ( is => 'ro', isa => 'Str', default => 'passthrough' );
-
-has loop => (
-  is => 'ro',
-  lazy => 1,
-  default => sub { IO::Async::Loop->new },
-);
-
-has _http => ( is => 'ro', lazy => 1, builder => '_build_http' );
-sub _build_http {
-  my ($self) = @_;
-  my $h = Net::Async::HTTP->new;
-  $self->loop->add($h);
-  return $h;
-}
 
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
 
@@ -177,7 +172,7 @@ sub _parse_response {
 async sub handle_chat_f {
   my ($self, $session, $request) = @_;
   my $http_req = $self->_build_upstream_request( $request, 0 );
-  my $resp = await $self->_http->do_request( request => $http_req );
+  my $resp = await $self->_upstream_request_f( request => $http_req );
   die "Passthrough upstream failed: " . $resp->status_line . "\n" unless $resp->is_success;
   return Langertha::Knarr::Response->new(
     $self->_parse_response( $request->protocol, $resp->decoded_content ),
@@ -296,7 +291,7 @@ async sub handle_stream_f {
     return undef;
   };
 
-  my $f = $self->_http->do_request(
+  my $f = $self->_upstream_request_f(
     request => $http_req,
     on_header => sub {
       my ($r) = @_;
@@ -322,7 +317,13 @@ async sub handle_stream_f {
       };
     },
   );
-  $f->on_fail( sub { $error = $_[0]; $finished = 1; $deliver->(undef) } );
+  # A read already waiting gets the failure itself (a timeout included,
+  # k35), not an undef that would end the stream as if it were complete.
+  $f->on_fail( sub {
+    $error = $_[0];
+    $finished = 1;
+    if ( $pending ) { my $p = $pending; $pending = undef; $p->fail($error) }
+  } );
   $f->retain;
 
   return $stream;

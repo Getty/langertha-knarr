@@ -154,11 +154,14 @@ sub _handle_psgi {
     my ($http_req, $trace) = $sb->_raw_passthrough_request(
       $sb_req, [ $fake_http->headers ], $body );
     # The failure as the future carries it, as the native on_fail sees it.
-    my ($resp, $err) = $sb->raw_passthrough->_http->do_request( request => $http_req )
-      ->else( sub { Future->done( undef, $_[0] ) } )->get;
+    # A buffered stream still gets the stall timeout, not the total one: a
+    # long steady stream is legitimate (k35).
+    my ($resp, $err, $category) = $sb->raw_passthrough->_upstream_request_f(
+      request => $http_req, stream => $sb_req->stream ? 1 : 0 )
+      ->else( sub { Future->done( undef, @_[0, 1] ) } )->get;
     my ($status, $ctype, $obody) = $resp
       ? $sb->_raw_passthrough_answer( $sb_req, $trace, $resp )
-      : $sb->_raw_passthrough_failed( $sb_req, $trace, $err // 'unknown error' );
+      : $sb->_raw_passthrough_failed( $proto, $sb_req, $trace, $err // 'unknown error', $category );
     return [ $status, [ 'Content-Type' => $ctype ], [ $obody ] ];
   }
 

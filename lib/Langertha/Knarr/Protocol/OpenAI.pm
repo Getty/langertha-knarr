@@ -220,6 +220,13 @@ sub format_stream_close {
   return $out;
 }
 
+# OpenAI reports a failure inside a stream as a data line carrying an error
+# object; the SDKs raise it.
+sub format_stream_error {
+  my ($self, $status, $message) = @_;
+  return "data: " . $self->_json->encode({ error => { message => "$message" } }) . "\n\n";
+}
+
 sub _stream_chunk {
   my ($self, $request, $choice) = @_;
   my $payload = {

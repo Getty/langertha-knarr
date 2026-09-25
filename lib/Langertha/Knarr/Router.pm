@@ -51,6 +51,11 @@ C<context_size>, so the engine and upstream defaults apply.
 
 =back
 
+C<user_agent_timeout> is endpoint-level too: the seconds Langertha waits
+for that upstream. A model config without one gets
+L<Langertha::Knarr::Config/upstream_timeout> (default C<300>); C<0> in
+either leaves the engine without a timeout.
+
 Any other key is inherited. A new per-model key belongs in the
 model-specific group.
 
@@ -186,6 +191,13 @@ sub _get_engine {
   $args{context_size} = $def->{context_size}
     if defined $def->{context_size} && $full_class->can('context_size');
 
+  # A hanging upstream must not hold the client's request open forever
+  # (k35): the model config's own user_agent_timeout, else the global
+  # upstream_timeout. 0 leaves the engine without one.
+  my $timeout = $def->{user_agent_timeout} // $self->config->upstream_timeout;
+  $args{user_agent_timeout} = $timeout
+    if $timeout && $timeout > 0 && $full_class->can('user_agent_timeout');
+
   # Langfuse config from global config
   my $langfuse = $self->config->langfuse;
   if ($langfuse && %$langfuse) {
@@ -206,9 +218,10 @@ sub _engine_cache_key {
   # The model is part of the key: chat_model is read-only on an engine, and
   # core evaluates model-scoped capabilities against it, so each model needs
   # its own instance (k20). context_size is read-only on the engine too, so
-  # two aliases of one model with different windows need two instances (k30).
+  # two aliases of one model with different windows need two instances (k30);
+  # so is user_agent_timeout (k35).
   return join('|', $self->_endpoint_key($def),
-    map { $def->{$_} // '' } qw( model context_size ));
+    map { $def->{$_} // '' } qw( model context_size user_agent_timeout ));
 }
 
 # One upstream endpoint: engine, url and API key variable. Discovery runs

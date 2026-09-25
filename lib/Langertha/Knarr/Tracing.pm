@@ -490,6 +490,10 @@ dropped, the same way an ingestion HTTP failure is. L</end_trace> runs on the
 request's response path, so a tracing problem must not take the client's
 response down with it.
 
+The ingestion POST is sent without waiting for it and gives up after 5
+seconds: a Langfuse that accepts the connection and never answers is logged
+as a C<Langfuse flush error> warning, and never holds a request.
+
 =cut
 
 has _loop => (

@@ -600,6 +600,25 @@ passthrough:
   openai: https://my-openai-mirror.internal
 ```
 
+### Upstream Timeouts
+
+An upstream that never answers does not hold a client forever. A
+non-streaming request may take `upstream_timeout` seconds in total (default
+`300`); a stream may go `upstream_stall_timeout` seconds without data
+(default `120`), however long it runs overall. `0` disables either.
+
+```yaml
+upstream_timeout: 300
+upstream_stall_timeout: 120
+```
+
+A passthrough request that runs out is answered with `504` in the client's
+own error shape (OpenAI `{"error":{"message":...}}`, Anthropic
+`timeout_error`, Ollama `{"error":"..."}`). A stream that stalls after its
+headers went out ends with the protocol's error frame. Routed engines get
+`upstream_timeout` as their `user_agent_timeout` unless the model config
+sets its own. Langfuse posts give up after 5 seconds and are only logged.
+
 Claude Code example — no Knarr API key needed, your existing key works:
 
 ```bash
@@ -684,6 +703,8 @@ priority, and the `TEST_LANGERTHA_*` variant is the last resort:
 |----------|-------------|---------|
 | `KNARR_API_KEY` | Require client authentication | — (open) |
 | `KNARR_DEBUG` | Enable verbose logging (`1` = on) | — (off) |
+| `KNARR_UPSTREAM_TIMEOUT` | Seconds an upstream may take for a non-streaming request; also the routed engines' `user_agent_timeout` (`0` disables) | `300` |
+| `KNARR_UPSTREAM_STALL_TIMEOUT` | Seconds a passthrough stream may go without data (`0` disables) | `120` |
 | `KNARR_OLLAMA_COMPAT_VERSION` | Ollama version reported at `GET /api/version` (a compatibility claim, not Knarr's version); digits and dots only (`x.y.z`), at least `0.6.4` for VS Code Copilot | `0.34.4` |
 
 ## CLI Reference

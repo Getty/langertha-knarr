@@ -2,6 +2,19 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - An upstream that never answers no longer holds a client forever.
+      Passthrough, the A2A and ACP clients and routed engines now time out:
+      upstream_timeout (KNARR_UPSTREAM_TIMEOUT, default 300 seconds) is the
+      total time of a non-streaming request and the routed engines'
+      user_agent_timeout unless a model sets its own; a passthrough stream
+      may go upstream_stall_timeout (KNARR_UPSTREAM_STALL_TIMEOUT, default
+      120) seconds without data. 0 disables either. An expired passthrough
+      answers 504 in the client protocol's error shape, a stream that stalls
+      mid-way ends with the protocol's error frame, and a streaming
+      passthrough that fails before its headers is answered with 502 or 504
+      like a non-streaming one. The Passthrough handler's stream reports an
+      upstream failure instead of ending as if complete.
+
     - Security fix: the PSGI adapter now enforces auth_token
       (proxy_api_key). Under Plack a protected Knarr answered chat,
       streaming chat, /v1/models, the other model listings and

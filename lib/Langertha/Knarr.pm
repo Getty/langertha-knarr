@@ -15,6 +15,7 @@ use Carp ();
 use Log::Any qw( $log );
 use Langertha::Knarr::Session;
 use Langertha::Knarr::Manifest;
+use Langertha::Knarr::Role::UpstreamHTTP ();
 
 =head1 SYNOPSIS
 
@@ -612,7 +613,13 @@ sub _handle_raw_passthrough {
   my $model = $sb_req->model // 'unknown';
 
   if ($sb_req->stream) {
-    my $f = $pt->_http->do_request(
+    # The upstream may go silent before its headers (answered like a
+    # non-streaming failure: 504 or 502 in the protocol's shape) or in the
+    # middle of the stream (the headers are out: the protocol's error frame,
+    # then the end of the stream). stall_timeout covers both (k35).
+    my $headers_sent = 0;
+    my $tail = '';
+    my $f = $pt->_upstream_request_f(
       request   => $http_req,
       on_header => sub {
         my ($response) = @_;
@@ -621,6 +628,7 @@ sub _handle_raw_passthrough {
         $header->header('Content-Type'  => scalar $response->header('Content-Type'));
         $header->header('Cache-Control' => 'no-cache');
         $req->respond_chunk_header($header);
+        $headers_sent = 1;
 
         return sub {
           my ($data) = @_;
@@ -629,26 +637,43 @@ sub _handle_raw_passthrough {
             $self->tracing->end_trace($trace, output => '[stream]') if $trace;
             return;
           }
+          return unless length $data;
+          $tail = substr( $tail . $data, -2 );
           $req->write_chunk($data) unless $req->is_closed;
         };
       },
     );
     $f->on_fail(sub {
-      my ($err) = @_;
+      my ($err, $category) = @_;
+      unless ($headers_sent) {
+        return $self->_send_simple( $req,
+          $self->_raw_passthrough_failed( $proto, $sb_req, $trace, $err, $category ) );
+      }
       $log->errorf("Passthrough stream error [%s]: %s", $model, $err);
       $self->tracing->end_trace($trace, error => "$err") if $trace;
-      $req->write_chunk_eof unless $req->is_closed;
+      return if $req->is_closed;
+      my $frame = $proto->format_stream_error(
+        $self->_raw_passthrough_status($category), _error_text($err) );
+      if ( length $frame ) {
+        # A frame cut off by the stall is ended first, so the error frame
+        # stands on its own: a blank line for SSE, a newline for NDJSON.
+        my $pad = $proto->stream_content_type =~ /ndjson/
+          ? ( $tail eq '' || $tail =~ /\n\z/ ? '' : "\n" )
+          : ( $tail eq '' || $tail eq "\n\n" ? '' : $tail =~ /\n\z/ ? "\n" : "\n\n" );
+        $req->write_chunk( $pad . $frame );
+      }
+      $req->write_chunk_eof;
     });
     $f->retain;
   } else {
-    my $f = $pt->_http->do_request(request => $http_req);
+    my $f = $pt->_upstream_request_f(request => $http_req);
     $f->on_done(sub {
       $self->_send_simple( $req,
         $self->_raw_passthrough_answer( $sb_req, $trace, $_[0] ) );
     });
     $f->on_fail(sub {
       $self->_send_simple( $req,
-        $self->_raw_passthrough_failed( $sb_req, $trace, $_[0] ) );
+        $self->_raw_passthrough_failed( $proto, $sb_req, $trace, @_[0, 1] ) );
     });
     $f->retain;
   }
@@ -709,12 +734,26 @@ sub _raw_passthrough_answer {
     $resp->decoded_content( charset => 'none' ) // '' );
 }
 
+# An upstream that did not answer in time is a 504, any other failure to
+# reach it a 502, in the client protocol's error shape (k35).
 sub _raw_passthrough_failed {
-  my ($self, $sb_req, $trace, $err) = @_;
+  my ($self, $proto, $sb_req, $trace, $err, $category) = @_;
   $log->errorf("Passthrough error [%s]: %s", $sb_req->model // 'unknown', $err);
   $self->tracing->end_trace($trace, error => "$err") if $trace;
-  return ( 502, 'application/json',
-    $self->_json->encode({ error => { message => "passthrough failed: $err" } }) );
+  my ($status, $headers, $body) = $proto->format_error_response(
+    $self->_raw_passthrough_status($category), 'passthrough failed: ' . _error_text($err) );
+  return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
+}
+
+sub _raw_passthrough_status {
+  my ($self, $category) = @_;
+  return Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category) ? 504 : 502;
+}
+
+sub _error_text {
+  my ($err) = @_;
+  ( my $text = "$err" ) =~ s/\s+\z//;
+  return $text;
 }
 
 sub _action_acp_agents { goto &_action_models }

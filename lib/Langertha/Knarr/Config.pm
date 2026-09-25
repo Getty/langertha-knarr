@@ -256,8 +256,9 @@ has models => (
 
 HashRef of model name → model definition hashref from the C<models:> config
 section. Each definition may include C<engine>, C<model>, C<api_key_env>,
-C<api_key>, C<url>, C<system_prompt>, C<temperature>, C<response_size>, and
-C<context_size>.
+C<api_key>, C<url>, C<system_prompt>, C<temperature>, C<response_size>,
+C<context_size>, and C<user_agent_timeout> (seconds the engine waits for
+its upstream; defaults to L</upstream_timeout>, C<0> disables it).
 
 C<context_size> is passed to engines that compose
 L<Langertha::Role::ContextSize> (Ollama, LMStudio native), which send it on
@@ -441,6 +442,62 @@ sub _build_ollama_compat_version {
   return $version;
 }
 
+has upstream_timeout => (
+  is      => 'lazy',
+  builder => '_build_upstream_timeout',
+);
+
+=attr upstream_timeout
+
+Seconds an upstream may take to answer a non-streaming request. Default
+C<300>; C<0> disables it. Falls back to the C<KNARR_UPSTREAM_TIMEOUT>
+environment variable. It is the total time of a raw passthrough request
+(answered with C<504> in the client protocol's error shape when it runs
+out), and it becomes the C<user_agent_timeout> of every routed engine
+whose model config sets none -- Langertha applies that as the total time
+of a plain request and as the time without data of a streaming one. A
+value that is not a non-negative number croaks when read, and
+L</validate> reports it.
+
+=cut
+
+sub _build_upstream_timeout {
+  my ($self) = @_;
+  return _seconds( upstream_timeout =>
+    $self->data->{upstream_timeout} // _strip_quotes($ENV{KNARR_UPSTREAM_TIMEOUT}), 300 );
+}
+
+has upstream_stall_timeout => (
+  is      => 'lazy',
+  builder => '_build_upstream_stall_timeout',
+);
+
+=attr upstream_stall_timeout
+
+Seconds a streaming raw passthrough request may go without data from the
+upstream, the wait for its response headers included. Default C<120>;
+C<0> disables it. Falls back to the C<KNARR_UPSTREAM_STALL_TIMEOUT>
+environment variable. A stream that stalls before its headers is answered
+with C<504>; one that stalls later ends with the protocol's error frame.
+Croaks when read and is reported by L</validate> like
+L</upstream_timeout>.
+
+=cut
+
+sub _build_upstream_stall_timeout {
+  my ($self) = @_;
+  return _seconds( upstream_stall_timeout =>
+    $self->data->{upstream_stall_timeout} // _strip_quotes($ENV{KNARR_UPSTREAM_STALL_TIMEOUT}), 120 );
+}
+
+sub _seconds {
+  my ($name, $value, $default) = @_;
+  return $default unless defined $value && length $value;
+  croak "$name '$value' must be a number of seconds (0 disables it)"
+    unless $value =~ /\A(?:\d+(?:\.\d*)?|\.\d+)\z/;
+  return $value + 0;
+}
+
 has auto_discover => (
   is      => 'lazy',
   builder => '_build_auto_discover',
@@ -526,8 +583,10 @@ Validates the configuration and returns a list of error strings. Returns an
 empty list when the config is valid. Checks that every model entry has an
 C<engine> key, that the default engine (if set) has an C<engine> key,
 that at least one model or default engine is configured, that a model's
-C<context_size> (and the default engine's), when set, is a positive integer, and that
-L</ollama_compat_version>, when set, is three dot-separated numbers.
+C<context_size> (and the default engine's), when set, is a positive integer, and its
+C<user_agent_timeout> a non-negative number, and that
+L</ollama_compat_version>, when set, is three dot-separated numbers, and that
+L</upstream_timeout> and L</upstream_stall_timeout> are non-negative numbers.
 
 =cut
 
@@ -544,6 +603,9 @@ sub validate {
     if ( defined $def->{context_size} && $def->{context_size} !~ /\A[1-9][0-9]*\z/ ) {
       push @errors, "Model '$name': context_size must be a positive integer";
     }
+    unless ( eval { _seconds( user_agent_timeout => $def->{user_agent_timeout}, 0 ); 1 } ) {
+      push @errors, "Model '$name': user_agent_timeout must be a number of seconds";
+    }
   }
 
   if (my $default = $self->default_engine) {
@@ -553,13 +615,17 @@ sub validate {
     if ( defined $default->{context_size} && $default->{context_size} !~ /\A[1-9][0-9]*\z/ ) {
       push @errors, "Default: context_size must be a positive integer";
     }
+    unless ( eval { _seconds( user_agent_timeout => $default->{user_agent_timeout}, 0 ); 1 } ) {
+      push @errors, "Default: user_agent_timeout must be a number of seconds";
+    }
   }
 
   unless (keys %$models || $self->default_engine) {
     push @errors, "No models configured and no default engine set";
   }
 
-  unless ( eval { $self->ollama_compat_version; 1 } ) {
+  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout )) {
+    next if eval { $self->$attr; 1 };
     ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
     push @errors, $err;
   }

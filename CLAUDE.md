@@ -67,6 +67,7 @@ usage data, cache_control, and all protocol-specific metadata.
 - **Langertha::Knarr::Protocol::ACP** — BeeAI/Linux Foundation ACP
 - **Langertha::Knarr::Protocol::AGUI** — CopilotKit AG-UI
 - **Langertha::Knarr::Handler** — Moose role for all handlers
+- **Langertha::Knarr::Role::UpstreamHTTP** — timed Net::Async::HTTP client (`timeout` total / `stall_timeout` streaming) for Passthrough, A2AClient, ACPClient
 - **Langertha::Knarr::Handler::Router** — Model routing, passthrough fallback
 - **Langertha::Knarr::Handler::Passthrough** — Raw HTTP forwarding to upstream APIs
 - **Langertha::Knarr::Handler::Tracing** — Langfuse decorator (wraps any handler)

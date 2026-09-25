@@ -239,5 +239,30 @@ sub format_stream_close {
 
 sub format_stream_done { '' }
 
+# Anthropic's error types by HTTP status; anything else is an api_error.
+my %ERROR_TYPE = (
+  400 => 'invalid_request_error', 401 => 'authentication_error',
+  403 => 'permission_error',      404 => 'not_found_error',
+  413 => 'request_too_large',     429 => 'rate_limit_error',
+  504 => 'timeout_error',         529 => 'overloaded_error',
+);
+
+sub _error_payload {
+  my ($status, $message) = @_;
+  return { type => 'error',
+    error => { type => $ERROR_TYPE{$status} // 'api_error', message => "$message" } };
+}
+
+sub format_error_response {
+  my ($self, $status, $message) = @_;
+  return ( $status, { 'Content-Type' => 'application/json' },
+    $self->_json->encode( _error_payload( $status, $message ) ) );
+}
+
+sub format_stream_error {
+  my ($self, $status, $message) = @_;
+  return $self->_sse_event( error => _error_payload( $status, $message ) );
+}
+
 __PACKAGE__->meta->make_immutable;
 1;
