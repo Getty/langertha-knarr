@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T16:31:10Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:31:10Z
+created: 2026-09-25T16:19:48Z
+id: 29
+priority: medium
+started: 2026-09-25T16:31:10Z
+status: done
+tags:
+- ollama
+- compat
+title: Implement Ollama /api/show (capabilities without thinking) — Copilot BYOK requires
+  it
+updated: 2026-09-25T16:31:10Z
+---
+
+From k28 research (2026-09-25): VS Code Copilot BYOK calls POST /api/show per model and does not work without it; Continue calls it (context length, stop words, FIM) but tolerates failure. Implement /api/show on native + PSGI (auth like other routes): minimal honest shape — details (family/format best-effort or empty), model_info with context_length if knarr/engine knows it, capabilities ['completion','tools'] (plus 'vision' only if the routed engine supports vision/image input; never 'thinking' since knarr drops think), template/parameters empty. Unknown model -> Ollama's 404 shape. Tests both servers.
