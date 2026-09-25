@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T07:50:11Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:50:11Z
+created: 2026-09-25T07:42:15Z
+id: 22
+priority: low
+started: 2026-09-25T07:50:11Z
+status: done
+tags:
+- router
+- models
+title: 'Router: model config without model: relabels the provider-default answer with
+  the alias name'
+updated: 2026-09-25T07:50:11Z
+---
+
+From k20: a model config without a model key (e.g. known: {engine: OllamaOpenAI}) builds the engine with no model, so the provider default answers; resolve returns the alias and Handler::Router relabels the response with it — the client sees a model that didn't answer. Decide: send the alias name upstream as the model, or report the engine's real/default model (response->model from upstream) instead of relabeling.
