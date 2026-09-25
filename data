@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T18:52:02Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T18:52:02Z
+created: 2026-09-25T18:34:43Z
+id: 36
+priority: low
+started: 2026-09-25T18:52:02Z
+status: done
+tags:
+- errors
+- timeouts
+title: Handler-chain timeouts surface as generic 500 / [error] text chunk instead
+  of 504 + protocol error frame
+updated: 2026-09-25T18:52:02Z
+---
+
+From k35: routed engines, Handler::Passthrough and A2A/ACP timeouts lose their category at await: non-stream → generic 500, mid-stream → '[error: …]' text chunk in _handle_stream. Carry a typed error (e.g. failure category 'timeout' from Net::Async::HTTP / core k278) through the handler chain and map to 504 + the protocol's error frame, mirroring the raw passthrough path. Tests native + PSGI.
