@@ -28,6 +28,7 @@ use JSON::MaybeXS;
 use Time::HiRes qw( time );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::Response;
+use Langertha::Knarr::Image;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -66,9 +67,10 @@ sub manifest_endpoint {
       reasoning_effort temperature seed response_size prompt_cache_key
       image_input
     )],
-    # image_url content parts pass through as sent: OpenAI-shape engines
-    # read them, Gemini translates them.
-    image_content_formats => [qw( openai gemini )],
+    # image_url parts become Langertha::Content::Image objects (k33) that
+    # core writes in any engine's format; an older core without that gets
+    # them as sent, readable by OpenAI-shape engines and Gemini.
+    image_content_formats => Langertha::Knarr::Image::content_formats(qw( openai gemini )),
   };
 }
 
@@ -85,7 +87,7 @@ sub parse_chat_request {
     protocol        => 'openai',
     raw             => $data,
     model           => $data->{model},
-    messages        => $data->{messages} || [],
+    messages        => Langertha::Knarr::Image::openai_messages( $data->{messages} || [] ),
     stream          => $data->{stream}      ? 1 : 0,
     temperature     => $data->{temperature},
     max_tokens      => $data->{max_tokens},

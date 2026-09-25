@@ -95,11 +95,13 @@ it is in this list.
 
 C<image_input> additionally needs C<image_content_formats>: the engine
 C<content_format>s (C<openai>, C<anthropic>, C<gemini>, C<ollama>, ...)
-that read this protocol's image parts. Knarr forwards message content
-untranslated, so an image in one protocol's shape reaches an engine of
-another shape as an unreadable part; a model is published with
+that read this protocol's image parts; a model is published with
 C<image_input> on this endpoint only when its engine's content format is
-listed.
+listed. The OpenAI, Anthropic and Ollama protocols translate their image
+parts into L<Langertha::Content::Image> objects and list every format
+(L<Langertha::Knarr::Image>); on a core too old for that the parts pass
+through untranslated and only the formats that read the protocol's own
+shape are listed.
 
 =cut
 

@@ -8,6 +8,7 @@ use Scalar::Util qw( blessed );
 use JSON::MaybeXS ();
 use MIME::Base64 qw( encode_base64 );
 use Log::Any qw( $log );
+use Langertha::Knarr::Image;
 use HTTP::Request ();
 use Net::Async::HTTP;
 use IO::Async::Loop;
@@ -303,6 +304,8 @@ sub start_trace {
   my $gen_id   = _uuid();
   my @hires    = gettimeofday;
   my $now      = _timestamp(@hires);
+  # Image objects (k33) carry no TO_JSON and would fail the batch encode.
+  my $input    = Langertha::Knarr::Image::plain_messages( $opts{messages} );
 
   push @{$self->_batch}, {
     id        => _uuid(),
@@ -311,7 +314,7 @@ sub start_trace {
     body      => {
       id       => $trace_id,
       name     => $self->trace_name,
-      input    => $opts{messages},
+      input    => $input,
       metadata => {
         format  => $opts{format},
         engine  => $opts{engine},
@@ -331,7 +334,7 @@ sub start_trace {
       traceId   => $trace_id,
       name      => 'proxy-request',
       model     => $opts{model},
-      input     => $opts{messages},
+      input     => $input,
       startTime => $now,
     },
   };

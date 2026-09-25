@@ -35,8 +35,9 @@ endpoints;
 for its upstream model by the core Builder (model-scoped, public allowlist
 only) and narrowed to what the endpoint's protocol actually forwards;
 C<image_input> only where the engine's C<content_format> reads the
-protocol's image parts, which are forwarded untranslated
-(C<image_content_formats> in L<Langertha::Knarr::Protocol/manifest_endpoint>);
+protocol's image parts (C<image_content_formats> in
+L<Langertha::Knarr::Protocol/manifest_endpoint>: every format when Knarr
+translates images, see L<Langertha::Knarr::Image>);
 
 =item * an C<api_key> auth entry when Knarr requires its
 L<Langertha::Knarr/auth_token>.
@@ -116,8 +117,8 @@ sub build {
     my %image_format = map { $_ => 1 } @{ $spec->{image_content_formats} || [] };
     for my $entry (@$entries) {
       my %caps = map { $_ => 1 } grep { $forwarded{$_} } keys %{ $entry->{capabilities} };
-      # The protocol forwards image parts in its own shape, untranslated
-      # (k32): only an engine whose content format reads that shape gets them.
+      # Only an engine whose content format reads the protocol's image
+      # parts gets them (k32); with translation (k33) that is every format.
       delete $caps{image_input}
         unless defined $entry->{content_format} && $image_format{ $entry->{content_format} };
       eval {

@@ -7,6 +7,7 @@ use Scalar::Util qw( blessed );
 use JSON::MaybeXS ();
 use File::Spec;
 use Log::Any qw( $log );
+use Langertha::Knarr::Image;
 
 # The JSONL log is the running operational record, not the detailed trace, so
 # tool-call arguments are capped: enough to see what was called, without
@@ -230,7 +231,8 @@ sub start_request {
     engine    => $opts{engine},
     path      => $opts{path},
     stream    => $opts{stream} ? \1 : \0,
-    messages  => $opts{messages},
+    # Image objects (k33) carry no TO_JSON; the log writes plain parts.
+    messages  => Langertha::Knarr::Image::plain_messages( $opts{messages} ),
     params    => $opts{params},
   };
 }

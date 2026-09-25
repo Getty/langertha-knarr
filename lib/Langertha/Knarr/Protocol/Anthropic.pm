@@ -23,6 +23,7 @@ use JSON::MaybeXS;
 use Time::HiRes qw( time );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::Response;
+use Langertha::Knarr::Image;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -72,8 +73,9 @@ sub manifest_endpoint {
       temperature response_size
       image_input
     )],
-    # image blocks pass through as sent: only Anthropic-shape engines read them.
-    image_content_formats => [qw( anthropic )],
+    # image blocks become Langertha::Content::Image objects (k33); an older
+    # core gets them as sent, readable only by Anthropic-shape engines.
+    image_content_formats => Langertha::Knarr::Image::content_formats(qw( anthropic )),
   };
 }
 
@@ -93,7 +95,7 @@ sub parse_chat_request {
   }
   my @msgs;
   push @msgs, { role => 'system', content => $system_str } if defined $system_str;
-  push @msgs, @{ $data->{messages} || [] };
+  push @msgs, @{ Langertha::Knarr::Image::anthropic_messages( $data->{messages} || [] ) };
   # Capture auth headers for passthrough
   my %fwd;
   for my $h (qw( x-api-key anthropic-version authorization )) {

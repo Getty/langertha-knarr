@@ -10,6 +10,7 @@ my @modules = qw(
   Langertha::Knarr::RequestLog
   Langertha::Knarr::Request
   Langertha::Knarr::Session
+  Langertha::Knarr::Image
   Langertha::Knarr::Manifest
   Langertha::Knarr::Stream
   Langertha::Knarr::Handler

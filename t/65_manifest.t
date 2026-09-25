@@ -36,6 +36,7 @@ use Langertha::Manifest;
 use Langertha::Manifest::Builder;
 use Langertha::Knarr;
 use Langertha::Knarr::Config;
+use Langertha::Knarr::Image;
 use Langertha::Knarr::Router;
 use Langertha::Knarr::Handler::Router;
 use Langertha::Knarr::Handler::Code;
@@ -188,10 +189,13 @@ my ( $knarr, $port, $router ) = start_knarr( config => surface_config() );
 }
 
 # --- image_input (k32): per model, and only where the image parts arrive --
-# Knarr forwards message content untranslated, so a protocol's image parts
-# are readable only by engines whose content format has that shape (OpenAI
-# image_url: OpenAI-shape engines, Gemini translates; Anthropic image blocks:
-# Anthropic-shape engines; Ollama's images array: the native Ollama engine).
+# Knarr translates every protocol's image parts into core image objects
+# (k33), so a vision model claims image_input on every endpoint. On a core
+# too old to write those objects in every format the parts pass through
+# untranslated and are readable only by engines whose content format has that
+# shape (OpenAI image_url: OpenAI-shape engines, Gemini translates; Anthropic
+# image blocks: Anthropic-shape engines; Ollama's images array: the native
+# Ollama engine).
 {
   my $config = Langertha::Knarr::Config->new( data => { models => {
     'gpt'      => { engine => 'OpenAI',    model => 'gpt-5.6',          api_key => 'sk-test' },
@@ -202,12 +206,18 @@ my ( $knarr, $port, $router ) = start_knarr( config => surface_config() );
   } } );
   my ( undef, $img_port ) = start_knarr( config => $config );
   my $data = $json->decode( get_manifest($img_port)->decoded_content );
-  my %expect = (
+  my %expect = Langertha::Knarr::Image::translates() ? (
+    'gpt'      => { openai => 1, anthropic => 1, ollama => 1 },
+    'claude'   => { openai => 1, anthropic => 1, ollama => 1 },
+    'claude-2' => { openai => 0, anthropic => 0, ollama => 0 },  # text-only model, same engine
+    'gemini'   => { openai => 1, anthropic => 1, ollama => 1 },
+    'hermes'   => { openai => 0, anthropic => 0, ollama => 0 },  # engine makes no claim
+  ) : (
     'gpt'      => { openai => 1, anthropic => 0, ollama => 0 },
     'claude'   => { openai => 0, anthropic => 1, ollama => 0 },
-    'claude-2' => { openai => 0, anthropic => 0, ollama => 0 },  # text-only model, same engine
+    'claude-2' => { openai => 0, anthropic => 0, ollama => 0 },
     'gemini'   => { openai => 1, anthropic => 0, ollama => 0 },
-    'hermes'   => { openai => 0, anthropic => 0, ollama => 0 },  # engine makes no claim
+    'hermes'   => { openai => 0, anthropic => 0, ollama => 0 },
   );
   for my $id ( sort keys %expect ) {
     for my $ep ( sort keys %{ $expect{$id} } ) {

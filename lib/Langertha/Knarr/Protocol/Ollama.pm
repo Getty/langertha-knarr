@@ -35,6 +35,7 @@ use Time::HiRes qw( time );
 use POSIX qw( strftime );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::Response;
+use Langertha::Knarr::Image;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -75,9 +76,9 @@ sub manifest_endpoint {
       temperature seed
       image_input
     )],
-    # A message's images array passes through as sent: only the native
-    # Ollama engine reads it.
-    image_content_formats => [qw( ollama )],
+    # A message's images array becomes Langertha::Content::Image objects
+    # (k33); an older core gets it as sent, read only by native Ollama.
+    image_content_formats => Langertha::Knarr::Image::content_formats(qw( ollama )),
   };
 }
 
@@ -88,7 +89,7 @@ sub parse_chat_request {
   my $data = $self->_json->decode( $$body_ref || '{}' );
   my @msgs;
   if ( $data->{messages} ) {
-    @msgs = @{ $data->{messages} };
+    @msgs = @{ Langertha::Knarr::Image::ollama_messages( $data->{messages} ) };
   }
   elsif ( defined $data->{prompt} ) {
     @msgs = ( { role => 'user', content => $data->{prompt} } );
