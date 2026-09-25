@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T07:50:16Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:50:16Z
+created: 2026-09-25T07:42:19Z
+id: 23
+priority: low
+started: 2026-09-25T07:50:16Z
+status: done
+tags:
+- router
+- discovery
+title: Router _discover_models dedupes discovery by engine class only (same class,
+  different url/key discovered once)
+updated: 2026-09-25T07:50:16Z
+---
+
+From k20: _discover_models skips by $seen_engines{$engine_class}++, so two configs with the same engine class but different url or api_key_env only get discovery from the first. Key the dedupe like _engine_cache_key minus model (engine|url|api_key_env). Test with two fake gateways.
