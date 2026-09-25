@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T07:45:19Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:45:19Z
+created: 2026-09-25T07:39:56Z
+id: 21
+priority: medium
+started: 2026-09-25T07:45:19Z
+status: done
+tags:
+- passthrough
+- tools
+title: Handler::Passthrough non-streaming handle_chat_f drops upstream tool calls
+  (text only)
+updated: 2026-09-25T07:45:19Z
+---
+
+From k19: the streaming Passthrough now assembles upstream tool calls (OpenAI/Anthropic/Ollama), but non-streaming handle_chat_f returns only the text and drops the upstream's tool calls. Parse them from the upstream JSON per protocol (OpenAI choices[0].message.tool_calls, Anthropic tool_use blocks, Ollama message.tool_calls) into Langertha::ToolCall on the Response.
