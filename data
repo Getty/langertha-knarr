@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T16:18:03Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:18:03Z
+created: 2026-09-25T16:07:45Z
+id: 27
+priority: low
+started: 2026-09-25T16:18:03Z
+status: done
+tags:
+- routes
+- ollama
+title: /api/version route answers 500 on both servers (no action behind it)
+updated: 2026-09-25T16:18:03Z
+---
+
+From k25: /api/version (Ollama compat) is in the route list but has no action on native or PSGI; after auth it returns 500. Implement (Ollama returns {"version":"x.y.z"} — return knarr's version or a configured compat version) or drop the route. Test on both servers.
