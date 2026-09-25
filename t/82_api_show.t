@@ -55,6 +55,10 @@ my $config = Langertha::Knarr::Config->new( data => {
     'hermes'    => { engine => 'NousResearch', model => 'Hermes-4-70B', api_key => 'sk-test' },
     'lmstudio'  => { engine => 'LMStudio', model => 'qwen3', url => 'http://127.0.0.1:1' },
     'ctx'       => { engine => 'TestShowContext', model => 'llama3', url => 'http://127.0.0.1:1' },
+    # k30: the operator's context_size reaches the engine, so /api/show
+    # reports the configured window, not an engine default.
+    'ctx-conf'  => { engine => 'Ollama', model => 'llama3', url => 'http://127.0.0.1:1',
+                     context_size => 8192 },
     'nokey'     => { engine => 'OpenAI', model => 'gpt-5.6', api_key_env => 'KNARR_TEST_SHOW_UNSET_KEY' },
   },
   # Chat would send an unlisted model here; /api/show must not claim it.
@@ -105,6 +109,9 @@ my @cases = (
   [ 'context length when the engine knows it', routed_knarr(), '{"model":"ctx"}', 200,
     { capabilities => [ 'completion', 'tools' ],
       model_info => { 'general.architecture' => 'knarr', 'knarr.context_length' => 32768 } } ],
+  [ 'configured context_size', routed_knarr(), '{"model":"ctx-conf"}', 200,
+    { capabilities => [ 'completion', 'tools' ],
+      model_info => { 'general.architecture' => 'knarr', 'knarr.context_length' => 8192 } } ],
   [ 'legacy name field', routed_knarr(), '{"name":"lmstudio"}', 200,
     { capabilities => ['completion'], model_info => {} } ],
   [ 'listed but unbuildable engine keeps the forwarded baseline', routed_knarr(),

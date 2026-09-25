@@ -256,13 +256,36 @@ has models => (
 
 HashRef of model name → model definition hashref from the C<models:> config
 section. Each definition may include C<engine>, C<model>, C<api_key_env>,
-C<api_key>, C<url>, C<system_prompt>, C<temperature>, and C<response_size>.
+C<api_key>, C<url>, C<system_prompt>, C<temperature>, C<response_size>, and
+C<context_size>.
+
+C<context_size> is passed to engines that compose
+L<Langertha::Role::ContextSize> (Ollama, LMStudio native), which send it on
+the wire (Ollama's C<num_ctx>, LM Studio's C<context_length>) and report it
+from C</api/show>. For any other engine it is ignored, with one warning
+when the models are loaded.
 
 =cut
 
 sub _build_models {
   my ($self) = @_;
-  return $self->data->{models} // {};
+  my $models = $self->data->{models} // {};
+  $self->_warn_unused_context_size( "Model '$_'", $models->{$_} )
+    for sort keys %$models;
+  return $models;
+}
+
+# A context_size only reaches engines that compose Role::ContextSize (k30);
+# say so once, at load, instead of dropping the operator's intent silently.
+# An engine class that does not load is left for the router to report.
+sub _warn_unused_context_size {
+  my ($self, $label, $def) = @_;
+  return unless ref $def eq 'HASH'
+    && defined $def->{context_size} && $def->{engine};
+  my $class = eval { Langertha->resolve_engine_class( $def->{engine} ) };
+  return if !defined $class || $class->can('context_size');
+  $log->warnf( "%s: engine %s does not take context_size, ignoring it",
+    $label, $def->{engine} );
 }
 
 has default_engine => (
@@ -280,7 +303,9 @@ explicitly configured and no passthrough URL matches.
 
 sub _build_default_engine {
   my ($self) = @_;
-  return $self->data->{default} // undef;
+  my $default = $self->data->{default} // undef;
+  $self->_warn_unused_context_size( 'Default', $default );
+  return $default;
 }
 
 has log_file => (
@@ -496,7 +521,8 @@ C<anthropic>), or C<undef> if passthrough is not configured for that format.
 Validates the configuration and returns a list of error strings. Returns an
 empty list when the config is valid. Checks that every model entry has an
 C<engine> key, that the default engine (if set) has an C<engine> key,
-that at least one model or default engine is configured, and that
+that at least one model or default engine is configured, that a model's
+C<context_size> (and the default engine's), when set, is a positive integer, and that
 L</ollama_compat_version>, when set, is three dot-separated numbers.
 
 =cut
@@ -511,11 +537,17 @@ sub validate {
     unless ($def->{engine}) {
       push @errors, "Model '$name': missing 'engine' key";
     }
+    if ( defined $def->{context_size} && $def->{context_size} !~ /\A[1-9][0-9]*\z/ ) {
+      push @errors, "Model '$name': context_size must be a positive integer";
+    }
   }
 
   if (my $default = $self->default_engine) {
     unless ($default->{engine}) {
       push @errors, "Default: missing 'engine' key";
+    }
+    if ( defined $default->{context_size} && $default->{context_size} !~ /\A[1-9][0-9]*\z/ ) {
+      push @errors, "Default: context_size must be a positive integer";
     }
   }
 

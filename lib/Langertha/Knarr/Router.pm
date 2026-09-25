@@ -20,8 +20,8 @@ use Langertha ();
 =head1 DESCRIPTION
 
 Resolves a model name to a Langertha engine instance and canonical model
-identifier. Engine instances are cached per engine, URL, API key variable and
-model, and reused across requests to avoid repeated construction overhead. Two
+identifier. Engine instances are cached per engine, URL, API key variable,
+model and C<context_size>, and reused across requests to avoid repeated construction overhead. Two
 models on the same endpoint get two instances, each carrying its own model.
 
 Engine classes are resolved from both C<Langertha::Engine::*> and
@@ -152,6 +152,11 @@ sub _get_engine {
   $args{system_prompt} = $def->{system_prompt} if $def->{system_prompt};
   $args{temperature} = $def->{temperature} if defined $def->{temperature};
   $args{response_size} = $def->{response_size} if defined $def->{response_size};
+  # context_size is operator intent: engines composing core's
+  # Role::ContextSize take it (and put it on their wire, e.g. Ollama's
+  # num_ctx); Config warned once at load about engines that cannot (k30).
+  $args{context_size} = $def->{context_size}
+    if defined $def->{context_size} && $full_class->can('context_size');
 
   # Langfuse config from global config
   my $langfuse = $self->config->langfuse;
@@ -172,9 +177,10 @@ sub _engine_cache_key {
   my ($self, $def) = @_;
   # The model is part of the key: chat_model is read-only on an engine, and
   # core evaluates model-scoped capabilities against it, so each model needs
-  # its own instance (k20).
-  my $model = $def->{model} // '';
-  return join('|', $self->_endpoint_key($def), $model);
+  # its own instance (k20). context_size is read-only on the engine too, so
+  # two aliases of one model with different windows need two instances (k30).
+  return join('|', $self->_endpoint_key($def),
+    map { $def->{$_} // '' } qw( model context_size ));
 }
 
 # One upstream endpoint: engine, url and API key variable. Discovery runs

@@ -28,6 +28,12 @@ Revision history for Langertha-Knarr
       unlisted model gets Ollama's 404 {"error":"model 'x' not found"},
       a request without model a 400. Needs proxy_api_key when one is set.
 
+    - A model's context_size config key now reaches engines that take a
+      context window (Ollama and LMStudio native): they send it upstream
+      (Ollama's num_ctx) and /api/show reports it as the context length.
+      Other engines ignore it with one warning when the config is loaded;
+      knarr check refuses a value that is not a positive integer.
+
     - The PSGI adapter now does the same raw passthrough as the native
       server: a model the router does not configure goes to the upstream
       byte for byte, with the client's headers, and its answer comes back
