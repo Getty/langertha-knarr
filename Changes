@@ -8,12 +8,20 @@ Revision history for Langertha-Knarr
       total time of a non-streaming request and the routed engines'
       user_agent_timeout unless a model sets its own; a passthrough stream
       may go upstream_stall_timeout (KNARR_UPSTREAM_STALL_TIMEOUT, default
-      120) seconds without data. 0 disables either. An expired passthrough
-      answers 504 in the client protocol's error shape, a stream that stalls
-      mid-way ends with the protocol's error frame, and a streaming
-      passthrough that fails before its headers is answered with 502 or 504
-      like a non-streaming one. The Passthrough handler's stream reports an
-      upstream failure instead of ending as if complete.
+      120) seconds without data. 0 disables either. An expired request
+      answers 504 in the client protocol's error shape, and a stream that
+      stalls mid-way ends with the protocol's error frame instead of an
+      "[error: ...]" text chunk, on the raw passthrough and through the
+      handler chain (routed engines with a Langertha that reports timeouts,
+      the Passthrough handler, the Tracing and RequestLog decorators), on
+      the native server and under PSGI. A streaming passthrough that fails
+      before its headers is answered with 502 or 504 like a non-streaming
+      one; other handler failures keep their 500. A stream that fails while
+      the client waits for its next chunk reports the failure instead of
+      ending as if complete, and a stream behind the Tracing or RequestLog
+      decorator no longer stalls when the upstream is slower than the
+      client. PSGI streams from a routed engine or the Passthrough handler
+      now work when the upstream answers after the request started.
 
     - Security fix: the PSGI adapter now enforces auth_token
       (proxy_api_key). Under Plack a protected Knarr answered chat,

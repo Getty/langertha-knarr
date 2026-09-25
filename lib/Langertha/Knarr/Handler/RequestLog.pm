@@ -98,7 +98,8 @@ async sub handle_chat_f {
   })->else( sub {
     my ($err) = @_;
     $self->request_log->end_request( $handle, error => "$err" );
-    return Future->fail($err);
+    # The whole failure: a timeout's category rides along (k36).
+    return Future->fail(@_);
   });
 }
 
@@ -146,7 +147,7 @@ async sub handle_stream_f {
           $closed = 1;
           $self->request_log->end_request( $handle, error => "$e" );
         }
-        return Future->fail($e);
+        return Future->fail(@_);
       });
     },
   );

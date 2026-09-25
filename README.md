@@ -617,7 +617,10 @@ own error shape (OpenAI `{"error":{"message":...}}`, Anthropic
 `timeout_error`, Ollama `{"error":"..."}`). A stream that stalls after its
 headers went out ends with the protocol's error frame. Routed engines get
 `upstream_timeout` as their `user_agent_timeout` unless the model config
-sets its own. Langfuse posts give up after 5 seconds and are only logged.
+sets its own (for a stream it is their time without data). A routed engine
+or the Passthrough handler that runs out is answered the same way, 504 or
+the error frame; this needs a Langertha whose async requests report their
+timeouts. Any other failure there stays a `500`. Langfuse posts give up after 5 seconds and are only logged.
 
 Claude Code example — no Knarr API key needed, your existing key works:
 

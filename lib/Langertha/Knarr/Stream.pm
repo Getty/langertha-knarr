@@ -121,7 +121,7 @@ sub from_callback {
   my @queue;
   my $pending;
   my $finished = 0;
-  my $error;
+  my @error;
 
   my $deliver = sub {
     my ($v) = @_;
@@ -135,12 +135,21 @@ sub from_callback {
     $deliver->($chunk);
   };
   my $done = sub { $finished = 1; $deliver->(undef) };
-  my $fail = sub { $error = $_[0] // 'unknown error'; $finished = 1; $deliver->(undef) };
+  # The whole failure is kept, not just its message: a timeout's category
+  # (the second value, k36) has to reach the protocol. A read already
+  # waiting gets the failure too, not an undef that would end the stream
+  # as if it were complete.
+  my $fail = sub {
+    @error = ( $_[0] // 'unknown error', @_[ 1 .. $#_ ] );
+    $finished = 1;
+    if ( $pending && $error[0] ) { my $p = $pending; $pending = undef; $p->fail(@error) }
+    else                         { $deliver->(undef) }
+  };
 
   my $stream = $class->new(
     source => sub {
       if ( @queue )    { return Future->done( shift @queue ) }
-      if ( $finished ) { return $error ? Future->fail($error) : Future->done(undef) }
+      if ( $finished ) { return $error[0] ? Future->fail(@error) : Future->done(undef) }
       $pending = Future->new;
       return $pending;
     },

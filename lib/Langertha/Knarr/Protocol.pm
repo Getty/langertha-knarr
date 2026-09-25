@@ -90,7 +90,8 @@ The frame that tells a client its stream failed after the response
 headers went out, or C<''> (the default) when the protocol has none.
 OpenAI sends C<data: {"error":{...}}>, Anthropic an C<event: error>,
 Ollama an C<{"error":"..."}> line. The raw passthrough writes it before
-closing a stream the upstream stopped feeding.
+closing a stream the upstream stopped feeding, and so does a routed stream
+whose handler failed with an upstream timeout.
 
 =method stream_content_type
 

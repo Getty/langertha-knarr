@@ -68,7 +68,10 @@ C<timeout> (default C<300>) is the total time of a non-streaming request,
 C<stall_timeout> (default C<120>) the time a streaming one may go without
 data. C<0> disables either. They also apply to the raw passthrough of
 L<Langertha::Knarr> and L<Langertha::Knarr::PSGI>, which answer an expired
-one with C<504> in the client protocol's error shape.
+one with C<504> in the client protocol's error shape. When this handler
+itself times out, its failure carries the category C<timeout> or
+C<stall_timeout> through the handler chain, and the client gets the same
+C<504> or stream error frame.
 
 =cut
 
@@ -187,7 +190,7 @@ async sub handle_stream_f {
   my @queue;
   my $pending;
   my $finished = 0;
-  my $error;
+  my @error;
   my $buffer = '';
 
   my $deliver = sub {
@@ -205,7 +208,7 @@ async sub handle_stream_f {
   my $stream = Langertha::Knarr::Stream->new(
     source => sub {
       if ( @queue )    { return Future->done( shift @queue ) }
-      if ( $finished ) { return $error ? Future->fail($error) : Future->done(undef) }
+      if ( $finished ) { return $error[0] ? Future->fail(@error) : Future->done(undef) }
       $pending = Future->new;
       return $pending;
     },
@@ -319,10 +322,11 @@ async sub handle_stream_f {
   );
   # A read already waiting gets the failure itself (a timeout included,
   # k35), not an undef that would end the stream as if it were complete.
+  # The whole failure, so a timeout keeps its category (k36).
   $f->on_fail( sub {
-    $error = $_[0];
+    @error = @_;
     $finished = 1;
-    if ( $pending ) { my $p = $pending; $pending = undef; $p->fail($error) }
+    if ( $pending ) { my $p = $pending; $pending = undef; $p->fail(@error) }
   } );
   $f->retain;
 

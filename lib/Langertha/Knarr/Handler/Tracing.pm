@@ -127,7 +127,8 @@ async sub handle_chat_f {
   })->else( sub {
     my ($err) = @_;
     $self->tracing->end_trace( $trace, error => "$err" );
-    return Future->fail($err);
+    # The whole failure: a timeout's category rides along (k36).
+    return Future->fail(@_);
   });
   return await $f;
 }
@@ -189,7 +190,7 @@ async sub handle_stream_f {
           $closed = 1;
           $self->tracing->end_trace( $trace, error => "$e" );
         }
-        return Future->fail($e);
+        return Future->fail(@_);
       });
     },
   );

@@ -537,8 +537,11 @@ sub _action_chat {
     };
   });
   $f->on_fail( sub {
-    my ($err) = @_;
+    my ($err, $category) = @_;
     $log->errorf("Chat handler error: %s", $err);
+    if ( my @answer = $self->_handler_timeout_answer( $proto, $err, $category ) ) {
+      return $self->_send_simple( $req, @answer );
+    }
     $self->_send_simple( $req, 500, 'application/json',
       $self->_json->encode({ error => { message => "$err" } }) );
   });
@@ -586,23 +589,53 @@ sub _handle_stream {
           undef $pump;
         }
       })->on_fail( sub {
-        my ($err) = @_;
+        my ($err, $category) = @_;
         $log->errorf("Stream chunk error: %s", $err);
+        undef $pump;
+        return if $self->_stream_timeout_frame( $proto, $req, $err, $category );
         $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
         $write->( $proto->format_stream_close($sb_req) );
         $req->write_chunk_eof;
-        undef $pump;
-      });
+      })->retain;
+      # Held until ready: a decorator's chained read (Tracing, RequestLog)
+      # is referenced by nothing else while the upstream is silent (k36).
     };
     $pump->();
   });
   $f->on_fail( sub {
-    my ($err) = @_;
+    my ($err, $category) = @_;
     $log->errorf("Stream handler error: %s", $err);
+    return if $self->_stream_timeout_frame( $proto, $req, $err, $category );
     $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
     $req->write_chunk_eof;
   });
   $f->retain;
+}
+
+# A handler failure carrying a Net::Async::HTTP timeout category (the second
+# failure value: core's k278 engine timeouts, the UpstreamHTTP role's) is an
+# upstream that did not answer in time: 504 in the client protocol's error
+# shape, as on the raw passthrough (k35). Empty for any other failure, and
+# for a core that sets no category (k36).
+sub _handler_timeout_answer {
+  my ($self, $proto, $err, $category) = @_;
+  return unless Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
+  my ($status, $headers, $body) = $proto->format_error_response( 504, _error_text($err) );
+  return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
+}
+
+# The same for a stream whose headers are out: the protocol's error frame,
+# then the end of the stream. False (nothing written) when the failure is no
+# timeout or the protocol has no error frame, so the caller answers as before.
+sub _stream_timeout_frame {
+  my ($self, $proto, $req, $err, $category) = @_;
+  return 0 unless Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
+  my $frame = $proto->format_stream_error( 504, _error_text($err) );
+  return 0 unless length $frame;
+  return 1 if $req->is_closed;
+  $req->write_chunk($frame);
+  $req->write_chunk_eof;
+  return 1;
 }
 
 sub _handle_raw_passthrough {
