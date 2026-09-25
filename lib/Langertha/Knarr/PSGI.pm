@@ -31,6 +31,11 @@ just drives the inner stream to completion in a blocking loop and
 returns the full assembled body. Use the native
 L<Langertha::Knarr/run> entry point if you need real-time streaming.
 
+Requests are authenticated exactly like on the native server: with
+L<Langertha::Knarr/auth_token> set, every route except the A2A agent card
+needs the key as C<Authorization: Bearer> or C<x-api-key>, and a missing
+or wrong key gets the same C<401> JSON error.
+
 =attr knarr
 
 Required. The L<Langertha::Knarr> instance to expose.
@@ -94,6 +99,14 @@ sub _handle_psgi {
   my $proto = $route->{protocol};
   my $action = $route->{action};
 
+  # Same auth decision and 401 as the native server (k25), before any
+  # handler work, so a rejected streaming request never starts its stream.
+  my $fake_http = Langertha::Knarr::PSGI::FakeReq->new( $env );
+  unless ( $sb->_check_auth( $fake_http, $action ) ) {
+    my ($status, $ctype, $body) = $sb->_unauthorized;
+    return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
+  }
+
   if ( $action eq 'models' || $action eq 'acp_agents' ) {
     my $models = $sb->handler->list_models;
     my ($status, $headers, $body) = $proto->format_models_response($models);
@@ -118,7 +131,6 @@ sub _handle_psgi {
   }
 
   my $body = $self->_read_body($env);
-  my $fake_http = Langertha::Knarr::PSGI::FakeReq->new( $env );
   my $sb_req = $proto->parse_chat_request( $fake_http, \$body );
   my $session = $sb->session( $sb_req->session_id );
   my $handler = $sb->handler;

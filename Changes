@@ -2,6 +2,14 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Security fix: the PSGI adapter now enforces auth_token
+      (proxy_api_key). Under Plack a protected Knarr answered chat,
+      streaming chat, /v1/models, the other model listings and
+      /.well-known/langertha.json without a key; it now applies the same
+      check and the same 401 as the native server on every route, with the
+      A2A agent card still anonymous. Upgrade if you serve Knarr via PSGI
+      with a key set.
+
     - Knarr serves a Langertha provider manifest at
       GET /.well-known/langertha.json on the native server and PSGI, so
       raider --provider HOST can configure itself. It lists the OpenAI

@@ -418,6 +418,13 @@ sub _check_auth {
   return 0;
 }
 
+# The one 401 answer, shared by the native server and the PSGI adapter (k25).
+sub _unauthorized {
+  my ($self) = @_;
+  return ( 401, 'application/json',
+    $self->_json->encode({ error => { message => 'unauthorized' } }) );
+}
+
 sub _dispatch {
   my ($self, $req) = @_;
   my $method = $req->method;
@@ -429,8 +436,7 @@ sub _dispatch {
   }
   my $action = $route->{action};
   unless ( $self->_check_auth( $req, $action ) ) {
-    return $self->_send_simple( $req, 401, 'application/json',
-      $self->_json->encode({ error => { message => 'unauthorized' } }) );
+    return $self->_send_simple( $req, $self->_unauthorized );
   }
   my $proto  = $route->{protocol};
   my $code = $self->can("_action_$action");
