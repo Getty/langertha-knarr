@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T06:27:45Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T06:27:45Z
+created: 2026-09-25T06:23:32Z
+id: 15
+priority: medium
+started: 2026-09-25T06:27:45Z
+status: done
+tags:
+- langertha-core
+- tools
+- capabilities
+title: chat_f_args drops tools/tool_choice on Hermes engines after core k234
+updated: 2026-09-25T06:27:45Z
+---
+
+Core branch for langertha k234 (Role::HermesTools layer-2 rule) clears tools_native, tool_choice_any, tool_choice_named and parallel_tool_use on the hermes wire (Engine::NousResearch, Engine::AKI native); tools_hermes, tool_choice_auto, tool_choice_none stay. lib/Langertha/Knarr/Request.pm:223-224 (chat_f_args) forwards tools and tool_choice only when supports(tools_native), so once core ships k234 a knarr client sending tools to a NousResearch/AKI backend gets them silently dropped, although core chat_f renders them into the Hermes system prompt (k231) and rewrites a forced tool into json_schema on NousResearch (ADR 0005). Fix: gate tools on tools_native || tools_hermes, and tool_choice likewise (core chat_f handles the choice per wire: rewrite on NousResearch, carp+drop elsewhere). parallel_tool_use gating (line 230) is already correct. Add a test with a hermes-capability CaptureEngine. Found in langertha-reviewer review of core k234/k237.
