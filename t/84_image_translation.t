@@ -67,6 +67,10 @@ my %b64_request = (
     { role => 'user', content => 'look', images => [$JPG] },
   ] },
 );
+# /api/generate: one prompt, the images on the request itself (k34).
+my %generate_request = ( model => 'm', stream => JSON::MaybeXS::false(),
+  prompt => 'look', images => [$JPG] );
+
 my %b64_expect = ( openai => [ $PNG, 'image/png' ], anthropic => [ $PNG, 'image/png' ],
   ollama => [ $JPG, 'image/jpeg' ] );
 
@@ -143,6 +147,16 @@ if ( Langertha::Knarr::Image::translates() ) {
     }
   }
 
+  # k34: /api/generate images were dropped -- a vision prompt reached the
+  # engine as text alone. They now join the synthesized user message.
+  for my $fmt (qw( anthropic ollama openai )) {
+    my ( undef, undef, $extract, $b64_shape ) = @{ $engine{$fmt} };
+    my $e = engine_for($fmt);
+    my $got = $extract->( body_of( $e, parse( ollama => \%generate_request ) ) );
+    is $got, $b64_shape->( $JPG, 'image/jpeg' ),
+      "ollama /api/generate, request images -> $fmt engine: native $fmt image";
+  }
+
   subtest 'what the faces parse' => sub {
     my $data = $b64_request{ollama};
     my $req  = parse( ollama => $data );
@@ -199,6 +213,8 @@ else {
     shift @msgs if $face eq 'anthropic' && defined $data->{system};
     is \@msgs, $data->{messages}, "$face face: messages untouched on a core without full image translation";
   }
+  is parse( ollama => \%generate_request )->messages, [ { role => 'user', content => 'look' } ],
+    'ollama /api/generate: prompt only, images left to passthrough, as before';
   is $proto{openai}->manifest_endpoint->{image_content_formats}, [qw( openai gemini )], 'openai formats as before';
   is $proto{anthropic}->manifest_endpoint->{image_content_formats}, [qw( anthropic )], 'anthropic formats as before';
   is $proto{ollama}->manifest_endpoint->{image_content_formats}, [qw( ollama )], 'ollama formats as before';
