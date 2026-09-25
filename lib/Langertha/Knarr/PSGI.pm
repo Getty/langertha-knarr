@@ -2,6 +2,7 @@ package Langertha::Knarr::PSGI;
 # ABSTRACT: PSGI adapter for Langertha::Knarr (buffered, no streaming)
 our $VERSION = '1.102';
 use Moose;
+use Future;
 use JSON::MaybeXS;
 use Langertha::Knarr::Request;
 
@@ -30,6 +31,13 @@ L<IO::Async> in the same process; for honesty's sake this adapter
 just drives the inner stream to completion in a blocking loop and
 returns the full assembled body. Use the native
 L<Langertha::Knarr/run> entry point if you need real-time streaming.
+
+Raw passthrough works as on the native server: with a
+C<raw_passthrough> handler and a C<router> set on the Knarr, a chat request for a
+model the router does not configure is sent to the upstream byte for byte
+with the client's headers, and the upstream's status, content type and body
+come back unchanged. A streamed passthrough answer is buffered like any
+other stream here.
 
 Requests are authenticated exactly like on the native server: with
 L<Langertha::Knarr/auth_token> set, every route except the A2A agent card
@@ -132,6 +140,23 @@ sub _handle_psgi {
 
   my $body = $self->_read_body($env);
   my $sb_req = $proto->parse_chat_request( $fake_http, \$body );
+
+  # Raw passthrough, decided and prepared by the same Knarr code as on the
+  # native server (k26): the client's bytes go 1:1 to the upstream and its
+  # answer comes back unchanged. A streaming answer is buffered, like every
+  # stream under this adapter.
+  if ( $sb->_is_raw_passthrough($sb_req) ) {
+    my ($http_req, $trace) = $sb->_raw_passthrough_request(
+      $sb_req, [ $fake_http->headers ], $body );
+    # The failure as the future carries it, as the native on_fail sees it.
+    my ($resp, $err) = $sb->raw_passthrough->_http->do_request( request => $http_req )
+      ->else( sub { Future->done( undef, $_[0] ) } )->get;
+    my ($status, $ctype, $obody) = $resp
+      ? $sb->_raw_passthrough_answer( $sb_req, $trace, $resp )
+      : $sb->_raw_passthrough_failed( $sb_req, $trace, $err // 'unknown error' );
+    return [ $status, [ 'Content-Type' => $ctype ], [ $obody ] ];
+  }
+
   my $session = $sb->session( $sb_req->session_id );
   my $handler = $sb->handler;
 
@@ -163,6 +188,21 @@ sub header {
   my ($self, $name) = @_;
   ( my $key = uc $name ) =~ tr/-/_/;
   return $self->{env}{"HTTP_$key"};
+}
+# The request headers as [ name, value ] pairs, like
+# Net::Async::HTTP::Server::Request->headers. PSGI keeps only the CGI form
+# of a header name, so it comes back lower-cased with dashes (x-api-key).
+sub headers {
+  my ($self) = @_;
+  my $env = $self->{env};
+  my @pairs;
+  for my $key ( sort keys %$env ) {
+    my $name = $key =~ /\AHTTP_(.+)\z/ ? $1
+      : $key =~ /\A(CONTENT_TYPE)\z/ ? $1 : next;
+    ( $name = lc $name ) =~ tr/_/-/;
+    push @pairs, [ $name, $env->{$key} ];
+  }
+  return @pairs;
 }
 
 package Langertha::Knarr::PSGI;

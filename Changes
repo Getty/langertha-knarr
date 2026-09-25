@@ -10,6 +10,13 @@ Revision history for Langertha-Knarr
       A2A agent card still anonymous. Upgrade if you serve Knarr via PSGI
       with a key set.
 
+    - The PSGI adapter now does the same raw passthrough as the native
+      server: a model the router does not configure goes to the upstream
+      byte for byte, with the client's headers, and its answer comes back
+      unchanged (tool calls, usage, cache fields and all) instead of being
+      re-framed by the handler chain. A streamed answer arrives whole under
+      PSGI, like every stream there.
+
     - Knarr serves a Langertha provider manifest at
       GET /.well-known/langertha.json on the native server and PSGI, so
       raider --provider HOST can configure itself. It lists the OpenAI

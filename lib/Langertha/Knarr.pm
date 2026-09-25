@@ -460,8 +460,7 @@ sub _action_chat {
   my $sb_req = $proto->parse_chat_request( $req, \$body );
 
   # Raw passthrough: pipe bytes 1:1 to upstream, skip handler chain
-  if ($self->raw_passthrough && $self->router
-      && $self->router->is_passthrough_model($sb_req->model)) {
+  if ( $self->_is_raw_passthrough($sb_req) ) {
     return $self->_handle_raw_passthrough( $proto, $req, $sb_req );
   }
 
@@ -556,32 +555,10 @@ sub _handle_stream {
 
 sub _handle_raw_passthrough {
   my ($self, $proto, $req, $sb_req) = @_;
+  my ($http_req, $trace) = $self->_raw_passthrough_request(
+    $sb_req, [ $req->headers ], $req->body );
   my $pt = $self->raw_passthrough;
   my $model = $sb_req->model // 'unknown';
-  my $protocol = $sb_req->protocol;
-
-  # Build upstream URL from passthrough config
-  my $url = $pt->_upstream_url($protocol);
-  my $http_req = HTTP::Request->new(POST => $url);
-
-  # Forward all client headers except hop-by-hop / connection-specific
-  my %skip = map { lc($_) => 1 } qw( host content-length connection transfer-encoding );
-  for my $pair ($req->headers) {
-    my ($name, $value) = @$pair;
-    next if $skip{lc($name)};
-    $http_req->header($name => $value);
-  }
-  $http_req->content($req->body);
-
-  $log->infof("Passthrough %s [%s] -> %s", $model, $protocol, $url);
-
-  # Lightweight tracing for passthrough requests
-  my $trace = $self->tracing ? $self->tracing->start_trace(
-    model    => $model,
-    engine   => 'passthrough',
-    format   => $protocol,
-    messages => $sb_req->messages,
-  ) : undef;
 
   if ($sb_req->stream) {
     my $f = $pt->_http->do_request(
@@ -615,21 +592,78 @@ sub _handle_raw_passthrough {
   } else {
     my $f = $pt->_http->do_request(request => $http_req);
     $f->on_done(sub {
-      my ($resp) = @_;
-      $self->_send_simple($req, $resp->code,
-        scalar $resp->header('Content-Type') // 'application/json',
-        $resp->decoded_content);
-      $self->tracing->end_trace($trace, output => '[passthrough]') if $trace;
+      $self->_send_simple( $req,
+        $self->_raw_passthrough_answer( $sb_req, $trace, $_[0] ) );
     });
     $f->on_fail(sub {
-      my ($err) = @_;
-      $log->errorf("Passthrough error [%s]: %s", $model, $err);
-      $self->tracing->end_trace($trace, error => "$err") if $trace;
-      $self->_send_simple($req, 502, 'application/json',
-        $self->_json->encode({ error => { message => "passthrough failed: $err" } }));
+      $self->_send_simple( $req,
+        $self->_raw_passthrough_failed( $sb_req, $trace, $_[0] ) );
     });
     $f->retain;
   }
+}
+
+# Raw passthrough is decided and prepared here for both transports, the
+# native server and Langertha::Knarr::PSGI (k26), so they cannot drift:
+# which requests bypass the handler chain, which client headers reach the
+# upstream, what the upstream request and its trace look like, and how an
+# answer or a failure is returned. Only the byte pumping differs -- the
+# native server streams chunks as they arrive, PSGI buffers.
+sub _is_raw_passthrough {
+  my ($self, $sb_req) = @_;
+  return $self->raw_passthrough && $self->router
+    && $self->router->is_passthrough_model( $sb_req->model ) ? 1 : 0;
+}
+
+# $headers: the client's request headers as [ name, value ] pairs.
+sub _raw_passthrough_request {
+  my ($self, $sb_req, $headers, $body) = @_;
+  my $model = $sb_req->model // 'unknown';
+  my $protocol = $sb_req->protocol;
+
+  # Build upstream URL from passthrough config
+  my $url = $self->raw_passthrough->_upstream_url($protocol);
+  my $http_req = HTTP::Request->new(POST => $url);
+
+  # Forward all client headers except hop-by-hop / connection-specific
+  my %skip = map { lc($_) => 1 } qw( host content-length connection transfer-encoding );
+  for my $pair (@$headers) {
+    my ($name, $value) = @$pair;
+    next if $skip{lc($name)};
+    $http_req->header($name => $value);
+  }
+  $http_req->content($body);
+
+  $log->infof("Passthrough %s [%s] -> %s", $model, $protocol, $url);
+
+  # Lightweight tracing for passthrough requests
+  my $trace = $self->tracing ? $self->tracing->start_trace(
+    model    => $model,
+    engine   => 'passthrough',
+    format   => $protocol,
+    messages => $sb_req->messages,
+  ) : undef;
+
+  return ( $http_req, $trace );
+}
+
+# The upstream's answer as ( status, content type, body bytes ). A buffered
+# stream (PSGI) is traced as a stream, like the native one.
+sub _raw_passthrough_answer {
+  my ($self, $sb_req, $trace, $resp) = @_;
+  $self->tracing->end_trace( $trace,
+    output => $sb_req->stream ? '[stream]' : '[passthrough]' ) if $trace;
+  return ( $resp->code,
+    scalar $resp->header('Content-Type') // 'application/json',
+    $resp->decoded_content( charset => 'none' ) // '' );
+}
+
+sub _raw_passthrough_failed {
+  my ($self, $sb_req, $trace, $err) = @_;
+  $log->errorf("Passthrough error [%s]: %s", $sb_req->model // 'unknown', $err);
+  $self->tracing->end_trace($trace, error => "$err") if $trace;
+  return ( 502, 'application/json',
+    $self->_json->encode({ error => { message => "passthrough failed: $err" } }) );
 }
 
 sub _action_acp_agents { goto &_action_models }
