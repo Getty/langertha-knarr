@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T17:38:05Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T17:38:05Z
+created: 2026-09-25T17:28:21Z
+id: 33
+priority: medium
+started: 2026-09-25T17:38:05Z
+status: done
+tags:
+- vision
+- protocol
+title: 'Translate client image parts across formats: faces parse images into Langertha::Content::Image'
+updated: 2026-09-25T17:38:05Z
+---
+
+From k32: faces pass message content through as-is, so an image only works when face format == engine content format (OpenAI image_url on Anthropic engines is unreadable; Ollama images array only reaches Ollama native; core croaks on Ollama native for OpenAI parts). Fix: each face's parse_chat_request converts its image representation (OpenAI image_url parts incl. data URLs, Anthropic image blocks base64/url, Ollama message.images base64) into Langertha::Content::Image objects in the message content array; core (k267) serializes per engine content_format. Then manifest image_content_formats (k32) can list all formats per face. Tests per face x engine format with dev core; under 0.503 behavior must not regress (Content::Image exists in 0.503? check; to_* for new formats only in dev core).
