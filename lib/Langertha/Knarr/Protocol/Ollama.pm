@@ -94,11 +94,10 @@ sub parse_chat_request {
   elsif ( defined $data->{prompt} ) {
     my %msg = ( role => 'user', content => $data->{prompt} );
     # /api/generate carries images on the request, not a message (k34).
-    # Only a translating core gets them; an older one sees the prompt
-    # alone, as before.
+    # They go onto the user message in Ollama's message shape: translated
+    # like chat images, or as sent on an older core.
     $msg{images} = $data->{images}
-      if ref $data->{images} eq 'ARRAY' && @{ $data->{images} }
-      && Langertha::Knarr::Image::translates();
+      if ref $data->{images} eq 'ARRAY' && @{ $data->{images} };
     @msgs = @{ Langertha::Knarr::Image::ollama_messages( [ \%msg ] ) };
   }
   return Langertha::Knarr::Request->new(

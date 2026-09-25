@@ -213,8 +213,9 @@ else {
     shift @msgs if $face eq 'anthropic' && defined $data->{system};
     is \@msgs, $data->{messages}, "$face face: messages untouched on a core without full image translation";
   }
-  is parse( ollama => \%generate_request )->messages, [ { role => 'user', content => 'look' } ],
-    'ollama /api/generate: prompt only, images left to passthrough, as before';
+  is parse( ollama => \%generate_request )->messages,
+    [ { role => 'user', content => 'look', images => [$JPG] } ],
+    'ollama /api/generate: request images ride on the user message unchanged';
   is $proto{openai}->manifest_endpoint->{image_content_formats}, [qw( openai gemini )], 'openai formats as before';
   is $proto{anthropic}->manifest_endpoint->{image_content_formats}, [qw( anthropic )], 'anthropic formats as before';
   is $proto{ollama}->manifest_endpoint->{image_content_formats}, [qw( ollama )], 'ollama formats as before';
