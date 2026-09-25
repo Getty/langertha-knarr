@@ -349,7 +349,9 @@ curl http://localhost:8080/api/show -d '{"model":"gpt-5.6-terra"}'
 
 `POST /api/show` (VS Code Copilot needs it) answers for every model
 `/api/tags` lists: `capabilities` holds `completion`, plus `tools` when the
-routed engine takes tools; never `thinking` or `vision`. A context length
+routed engine takes tools, plus `vision` when the routed engine claims
+`image_input` for that model (needs a Langertha core with that flag); never
+`thinking`. A context length
 appears in `model_info` only when the engine knows one.
 
 In container mode Knarr binds an extra `:11434` socket as well, so

@@ -70,7 +70,10 @@ sub manifest_endpoint {
       tools_native tools_hermes
       tool_choice_auto tool_choice_any tool_choice_none tool_choice_named
       temperature response_size
+      image_input
     )],
+    # image blocks pass through as sent: only Anthropic-shape engines read them.
+    image_content_formats => [qw( anthropic )],
   };
 }
 

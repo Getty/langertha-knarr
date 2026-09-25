@@ -7,9 +7,10 @@ use Test2::V0;
 # `capabilities` and the context window from
 # model_info["<general.architecture>.context_length"]. Continue reads it too.
 # The answer must be honest: "tools" only when the routed engine can take
-# tools, never "thinking" (Knarr drops think on the Ollama wire), no
-# "vision" (core has no image-input flag to ask), and a context length only
-# when the engine knows one. A model Knarr does not list gets Ollama's own
+# tools, never "thinking" (Knarr drops think on the Ollama wire), "vision"
+# only when the routed engine claims core's model-scoped image_input for the
+# upstream model (k32; a core without that flag, 0.503, gets no vision and
+# no croak), and a context length only when the engine knows one. A model Knarr does not list gets Ollama's own
 # 404 {"error":"model 'x' not found"}. Native server and PSGI must answer
 # the same, so every case below runs against both.
 
@@ -49,9 +50,19 @@ $loop->add($http);
 
 delete $ENV{KNARR_TEST_SHOW_UNSET_KEY};
 
+# k32: vision follows the core flag. Without Langertha::Role::ImageInput the
+# installed core cannot tell, so no model claims it.
+my $core_vision = eval { require Langertha::Role::ImageInput; 1 } ? 1 : 0;
+my @vision = $core_vision ? ('vision') : ();
+note $core_vision ? 'core knows image_input' : 'core has no image_input: no vision anywhere';
+
 my $config = Langertha::Knarr::Config->new( data => {
   models => {
     'gpt-alias' => { engine => 'OpenAI', model => 'gpt-5.6', api_key => 'sk-test' },
+    # k32: the same engine class answers per upstream model (ADR 0019):
+    # Claude 3+ sees images, the pre-3 generation does not.
+    'claude'    => { engine => 'Anthropic', model => 'claude-opus-4-1', api_key => 'sk-test' },
+    'claude-2'  => { engine => 'Anthropic', model => 'claude-2.1', api_key => 'sk-test' },
     'hermes'    => { engine => 'NousResearch', model => 'Hermes-4-70B', api_key => 'sk-test' },
     'lmstudio'  => { engine => 'LMStudio', model => 'qwen3', url => 'http://127.0.0.1:1' },
     'ctx'       => { engine => 'TestShowContext', model => 'llama3', url => 'http://127.0.0.1:1' },
@@ -100,7 +111,11 @@ my $empty_details = {
 
 # One table, both transports.
 my @cases = (
-  [ 'native tools engine', routed_knarr(), '{"model":"gpt-alias"}', 200,
+  [ 'native tools engine, vision model', routed_knarr(), '{"model":"gpt-alias"}', 200,
+    { capabilities => [ 'completion', 'tools', @vision ], model_info => {} } ],
+  [ 'vision model of a family', routed_knarr(), '{"model":"claude"}', 200,
+    { capabilities => [ 'completion', 'tools', @vision ], model_info => {} } ],
+  [ 'text-only model of the same family', routed_knarr(), '{"model":"claude-2"}', 200,
     { capabilities => [ 'completion', 'tools' ], model_info => {} } ],
   [ 'hermes tools count as tools', routed_knarr(), '{"model":"hermes"}', 200,
     { capabilities => [ 'completion', 'tools' ], model_info => {} } ],
@@ -141,8 +156,8 @@ for my $case (@cases) {
     if ( $status == 200 ) {
       is( $got, { details => $empty_details, template => '', parameters => '', license => '',
         %$expect }, "$t: $name: body" );
-      ok( !( grep { $_ eq 'thinking' || $_ eq 'vision' } @{ $got->{capabilities} } ),
-        "$t: $name: never thinking or vision" );
+      ok( !( grep { $_ eq 'thinking' } @{ $got->{capabilities} } ),
+        "$t: $name: never thinking" );
       like( $json->decode( $r{$t}->decoded_content )->{modified_at},
         qr/\A\d{4}-\d\d-\d\dT/, "$t: $name: modified_at" );
     }

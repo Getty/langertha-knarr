@@ -73,7 +73,11 @@ sub manifest_endpoint {
       tools_native tools_hermes
       response_format_json_object
       temperature seed
+      image_input
     )],
+    # A message's images array passes through as sent: only the native
+    # Ollama engine reads it.
+    image_content_formats => [qw( ollama )],
   };
 }
 

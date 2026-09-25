@@ -34,6 +34,9 @@ endpoints;
 =item * per model, the capabilities of the engine that serves it, evaluated
 for its upstream model by the core Builder (model-scoped, public allowlist
 only) and narrowed to what the endpoint's protocol actually forwards;
+C<image_input> only where the engine's C<content_format> reads the
+protocol's image parts, which are forwarded untranslated
+(C<image_content_formats> in L<Langertha::Knarr::Protocol/manifest_endpoint>);
 
 =item * an C<api_key> auth entry when Knarr requires its
 L<Langertha::Knarr/auth_token>.
@@ -110,8 +113,13 @@ sub build {
       ( defined $auth_ref ? ( auth_ref => $auth_ref ) : () ),
     );
     my %forwarded = map { $_ => 1 } grep { $allowed{$_} } @{ $spec->{capabilities} || [] };
+    my %image_format = map { $_ => 1 } @{ $spec->{image_content_formats} || [] };
     for my $entry (@$entries) {
       my %caps = map { $_ => 1 } grep { $forwarded{$_} } keys %{ $entry->{capabilities} };
+      # The protocol forwards image parts in its own shape, untranslated
+      # (k32): only an engine whose content format reads that shape gets them.
+      delete $caps{image_input}
+        unless defined $entry->{content_format} && $image_format{ $entry->{content_format} };
       eval {
         $builder->add_model(
           id           => $entry->{id},
@@ -153,9 +161,10 @@ sub _model_entries {
   for my $row (@rows) {
     my $id = $row->{id};
     next unless defined $id && length $id;
-    my $caps = $router ? _router_capabilities( $router, $id ) : { chat => 1 };
+    my ( $caps, $content_format ) = $router
+      ? _router_capabilities( $router, $id ) : ( { chat => 1 } );
     next unless $caps;
-    push @entries, { id => $id, capabilities => $caps };
+    push @entries, { id => $id, capabilities => $caps, content_format => $content_format };
   }
   $self->_cache( { key => $key, entries => \@entries } );
   return \@entries;
@@ -170,7 +179,7 @@ sub _router_capabilities {
   my ( $engine, $model, $alias_only ) = eval { $router->resolve( $id, skip_default => 1 ) };
   unless ($engine) {
     $log->debugf( "Manifest: model %s not published: %s", $id, $@ || 'unresolved' );
-    return undef;
+    return;
   }
   # An alias without model: key sends the engine's own default (k22).
   my $upstream = $alias_only ? eval { $engine->chat_model } : $model;
@@ -198,7 +207,11 @@ sub _router_capabilities {
     $log->debugf( "Manifest: no capabilities for %s: %s", $id, $@ );
     $caps = { chat => 1 };
   }
-  return $caps;
+  # The message-content shape the engine puts on its wire (openai,
+  # anthropic, gemini, ollama, ...); decides which protocol's image parts
+  # reach it intact.
+  my $content_format = $engine->can('content_format') ? eval { $engine->content_format } : undef;
+  return ( $caps, $content_format );
 }
 
 sub _origin_of {

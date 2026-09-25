@@ -23,8 +23,10 @@ Revision history for Langertha-Knarr
     - POST /api/show answers on the native server and PSGI, so VS Code
       Copilot's Ollama provider works against Knarr. For a model /api/tags
       lists it returns Ollama's shape with capabilities completion, plus
-      tools when the routed engine takes tools (never thinking or vision),
-      and the context length in model_info when the engine knows it. An
+      tools when the routed engine takes tools, plus vision when that
+      engine claims image input for the upstream model (needs a Langertha
+      with the image_input capability; never thinking), and the context
+      length in model_info when the engine knows it. An
       unlisted model gets Ollama's 404 {"error":"model 'x' not found"},
       a request without model a 400. Needs proxy_api_key when one is set.
 
@@ -51,7 +53,9 @@ Revision history for Langertha-Knarr
       under the public URL (new public_url config key / KNARR_PUBLIC_URL,
       else taken from the request), every configured alias and
       auto-discovered model with its engine's capabilities as far as that
-      protocol forwards them, and api_key auth when proxy_api_key is set
+      protocol forwards them (image_input only where the engine reads that
+      protocol's image parts, which Knarr passes on untranslated), and
+      api_key auth when proxy_api_key is set
       (the route needs the key then, like /v1/models). Upstream URLs, keys,
       key variable names and passthrough targets are never published.
       Needs a Langertha with Langertha::Manifest; with an older one the

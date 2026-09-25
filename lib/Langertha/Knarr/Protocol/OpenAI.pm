@@ -64,7 +64,11 @@ sub manifest_endpoint {
       parallel_tool_use
       response_format_json_object response_format_json_schema
       reasoning_effort temperature seed response_size prompt_cache_key
+      image_input
     )],
+    # image_url content parts pass through as sent: OpenAI-shape engines
+    # read them, Gemini translates them.
+    image_content_formats => [qw( openai gemini )],
   };
 }
 

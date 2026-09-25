@@ -80,7 +80,8 @@ C<text/event-stream>; Ollama overrides to C<application/x-ndjson>.
 =method manifest_endpoint
 
     my $spec = $proto->manifest_endpoint;
-    # { dialect => 'openai-chat', path => '/v1', capabilities => [ ... ] }
+    # { dialect => 'openai-chat', path => '/v1', capabilities => [ ... ],
+    #   image_content_formats => [ 'openai', 'gemini' ] }
 
 How this protocol appears in the provider manifest
 (C</.well-known/langertha.json>, see L<Langertha::Knarr/MANIFEST>), or
@@ -91,6 +92,14 @@ C<capabilities> lists the capability flags this protocol's
 L</parse_chat_request> actually carries to the engine. A published model
 claims a capability on this endpoint only when its engine has it B<and>
 it is in this list.
+
+C<image_input> additionally needs C<image_content_formats>: the engine
+C<content_format>s (C<openai>, C<anthropic>, C<gemini>, C<ollama>, ...)
+that read this protocol's image parts. Knarr forwards message content
+untranslated, so an image in one protocol's shape reaches an engine of
+another shape as an unreadable part; a model is published with
+C<image_input> on this endpoint only when its engine's content format is
+listed.
 
 =cut
 

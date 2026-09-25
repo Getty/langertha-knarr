@@ -187,6 +187,38 @@ my ( $knarr, $port, $router ) = start_knarr( config => surface_config() );
   no_leaks( $body, 'native' );
 }
 
+# --- image_input (k32): per model, and only where the image parts arrive --
+# Knarr forwards message content untranslated, so a protocol's image parts
+# are readable only by engines whose content format has that shape (OpenAI
+# image_url: OpenAI-shape engines, Gemini translates; Anthropic image blocks:
+# Anthropic-shape engines; Ollama's images array: the native Ollama engine).
+{
+  my $config = Langertha::Knarr::Config->new( data => { models => {
+    'gpt'      => { engine => 'OpenAI',    model => 'gpt-5.6',          api_key => 'sk-test' },
+    'claude'   => { engine => 'Anthropic', model => 'claude-opus-4-1',  api_key => 'sk-test' },
+    'claude-2' => { engine => 'Anthropic', model => 'claude-2.1',       api_key => 'sk-test' },
+    'gemini'   => { engine => 'Gemini',    model => 'gemini-2.5-flash', api_key => 'sk-test' },
+    'hermes'   => { engine => 'NousResearch', model => 'Hermes-4-70B',  api_key => 'sk-test' },
+  } } );
+  my ( undef, $img_port ) = start_knarr( config => $config );
+  my $data = $json->decode( get_manifest($img_port)->decoded_content );
+  my %expect = (
+    'gpt'      => { openai => 1, anthropic => 0, ollama => 0 },
+    'claude'   => { openai => 0, anthropic => 1, ollama => 0 },
+    'claude-2' => { openai => 0, anthropic => 0, ollama => 0 },  # text-only model, same engine
+    'gemini'   => { openai => 1, anthropic => 0, ollama => 0 },
+    'hermes'   => { openai => 0, anthropic => 0, ollama => 0 },  # engine makes no claim
+  );
+  for my $id ( sort keys %expect ) {
+    for my $ep ( sort keys %{ $expect{$id} } ) {
+      my $entry = model_entry( $data, $id, $ep );
+      ok $entry, "$ep:$id published" or next;
+      is !!$entry->{capabilities}{image_input}, !!$expect{$id}{$ep},
+        "$ep:$id: image_input " . ( $expect{$id}{$ep} ? 'claimed' : 'not claimed' );
+    }
+  }
+}
+
 # --- Auth reflection ------------------------------------------------------
 {
   my ( undef, $auth_port ) = start_knarr( config => surface_config(), auth_token => 'knarr-proxy-token-99' );

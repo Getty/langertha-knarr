@@ -773,8 +773,12 @@ sub _simple_show {
   my @capabilities = ('completion');
   push @capabilities, 'tools'
     if !$caps || $caps->supports('tools_native') || $caps->supports('tools_hermes');
-  # No "vision": Langertha core has no image-input capability flag to ask,
-  # so Knarr cannot tell which routed models take images.
+  # "vision" from core's model-scoped image_input (core k266, ADR 0019),
+  # evaluated for the upstream model: the router builds one engine per model,
+  # so its chat_model is the model this name is sent to. A core without the
+  # flag (0.503) cannot tell, so no claim; nor without a routed engine.
+  push @capabilities, 'vision'
+    if $caps && _image_input_known() && eval { $caps->supports('image_input') };
   my $context_length = blessed($engine) && $engine->can('get_context_size')
     ? eval { $engine->get_context_size } : undef;
 
@@ -782,6 +786,14 @@ sub _simple_show {
     capabilities => \@capabilities,
     ( defined $context_length ? ( context_length => $context_length ) : () ),
   } );
+}
+
+# True when the installed Langertha core knows the image_input capability
+# (Langertha::Role::ImageInput contributes it). Checked once per process.
+my $IMAGE_INPUT_KNOWN;
+sub _image_input_known {
+  $IMAGE_INPUT_KNOWN //= eval { require Langertha::Role::ImageInput; 1 } ? 1 : 0;
+  return $IMAGE_INPUT_KNOWN;
 }
 
 sub _action_manifest {
