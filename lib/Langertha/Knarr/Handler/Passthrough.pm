@@ -195,7 +195,22 @@ async sub handle_stream_f {
   # protocol-native chunk. The Knarr core then re-frames them via the
   # client-side protocol's format_stream_chunk — keeping symmetry even
   # when client and upstream use the same protocol.
+  my $stream = Langertha::Knarr::Stream->new(
+    source => sub {
+      if ( @queue )    { return Future->done( shift @queue ) }
+      if ( $finished ) { return $error ? Future->fail($error) : Future->done(undef) }
+      $pending = Future->new;
+      return $pending;
+    },
+  );
+
   my $proto_name = $request->protocol;
+  # The upstream's terminal reason, verbatim; the client-side protocol maps
+  # it when it closes the stream (k18).
+  my $note_finish = sub {
+    my ($reason) = @_;
+    $stream->finish_reason($reason) if defined $reason && length $reason;
+  };
   my $extract_chunk = sub {
     my ($line) = @_;
     if ( $proto_name eq 'openai' || $proto_name eq 'anthropic' ) {
@@ -205,15 +220,19 @@ async sub handle_stream_f {
       my $d = eval { $self->_json->decode($payload) };
       return undef unless ref $d eq 'HASH';
       if ( $proto_name eq 'openai' ) {
+        $note_finish->( $d->{choices}[0]{finish_reason} );
         return $d->{choices}[0]{delta}{content};
       } else {
-        return $d->{delta}{text} if ($d->{type} // '') eq 'content_block_delta';
+        my $type = $d->{type} // '';
+        $note_finish->( $d->{delta}{stop_reason} ) if $type eq 'message_delta';
+        return $d->{delta}{text} if $type eq 'content_block_delta';
         return undef;
       }
     }
     if ( $proto_name eq 'ollama' ) {
       my $d = eval { $self->_json->decode($line) };
       return undef unless ref $d eq 'HASH';
+      $note_finish->( $d->{done_reason} ) if $d->{done};
       return $d->{message}{content};
     }
     return undef;
@@ -247,14 +266,7 @@ async sub handle_stream_f {
   $f->on_fail( sub { $error = $_[0]; $finished = 1; $deliver->(undef) } );
   $f->retain;
 
-  return Langertha::Knarr::Stream->new(
-    source => sub {
-      if ( @queue )    { return Future->done( shift @queue ) }
-      if ( $finished ) { return $error ? Future->fail($error) : Future->done(undef) }
-      $pending = Future->new;
-      return $pending;
-    },
-  );
+  return $stream;
 }
 
 sub list_models {

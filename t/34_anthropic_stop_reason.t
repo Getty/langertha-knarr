@@ -63,9 +63,9 @@ subtest 'undef and unknown values fall back to a valid enum value' => sub {
 };
 
 subtest 'streaming message_delta carries an Anthropic stop_reason' => sub {
-  # The stream path hands format_stream_close only the request -- no
-  # finish_reason reaches it -- so it closes with end_turn. Assert the
-  # emitted value stays inside the enum.
+  # Without a finish_reason (a stream whose backend reported none, or the
+  # error path) the stream closes with end_turn; t/43 covers the mapped
+  # reasons (k18). Assert the emitted value stays inside the enum.
   my $out = $proto->format_stream_close($areq);
   my ($data) = $out =~ /^event: message_delta\ndata: (.+)$/m;
   ok defined $data, 'message_delta event emitted';

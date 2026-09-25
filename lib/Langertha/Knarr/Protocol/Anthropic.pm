@@ -174,12 +174,14 @@ sub format_stream_chunk {
 }
 
 sub format_stream_close {
-  my ($self, $request) = @_;
+  my ($self, $request, $finish_reason) = @_;
+  # The stream delivers text only, so there are no tool calls to weigh in.
+  my $stop_reason = _stop_reason( $finish_reason, 0 );
   return join( '',
     $self->_sse_event( content_block_stop => { type => 'content_block_stop', index => 0 } ),
     $self->_sse_event( message_delta => {
       type => 'message_delta',
-      delta => { stop_reason => 'end_turn', stop_sequence => undef },
+      delta => { stop_reason => $stop_reason, stop_sequence => undef },
       usage => { output_tokens => 0 },
     }),
     $self->_sse_event( message_stop => { type => 'message_stop' } ),

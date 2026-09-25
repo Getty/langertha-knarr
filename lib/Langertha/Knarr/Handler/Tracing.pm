@@ -159,6 +159,7 @@ async sub handle_stream_f {
   my $closed = 0;
 
   return Langertha::Knarr::Stream->new(
+    upstream => $upstream_stream,
     source => sub {
       $upstream_stream->next_chunk_f->then( sub {
         my ($delta) = @_;

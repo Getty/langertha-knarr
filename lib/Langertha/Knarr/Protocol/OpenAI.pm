@@ -74,14 +74,38 @@ sub parse_chat_request {
   );
 }
 
+# OpenAI's finish_reason is a closed enum; the engine carries the backend's
+# own value (Anthropic end_turn/max_tokens/tool_use, Gemini STOP/MAX_TOKENS/
+# SAFETY, Ollama stop/length, ...). Values already in OpenAI vocabulary pass
+# through; a value with no OpenAI counterpart falls back like an absent one.
+my %FINISH_REASON = (
+  ( map { $_ => $_ } qw( stop length tool_calls content_filter function_call ) ),
+  end_turn           => 'stop',
+  stop_sequence      => 'stop',
+  max_tokens         => 'length',
+  tool_use           => 'tool_calls',
+  refusal            => 'content_filter',
+  safety             => 'content_filter',
+  recitation         => 'content_filter',
+  blocklist          => 'content_filter',
+  prohibited_content => 'content_filter',
+  spii               => 'content_filter',
+);
+
+sub _finish_reason {
+  my ( $finish_reason, $has_tool_calls ) = @_;
+  return 'tool_calls' if $has_tool_calls;
+  return 'stop' unless defined $finish_reason;
+  return $FINISH_REASON{ lc $finish_reason } // 'stop';
+}
+
 sub format_chat_response {
   my ($self, $response, $request) = @_;
   my $r = Langertha::Knarr::Response->coerce($response);
   my $message = { role => 'assistant', content => $r->content };
-  my $finish = $r->finish_reason // 'stop';
+  my $finish = _finish_reason( $r->finish_reason, $r->has_tool_calls );
   if ( $r->has_tool_calls ) {
     $message->{tool_calls} = [ map { $_->to_openai } @{ $r->tool_calls } ];
-    $finish = 'tool_calls';
   }
   my $usage = $r->usage && $r->usage->can('to_openai_format')
     ? $r->usage->to_openai_format
@@ -120,6 +144,21 @@ sub format_stream_chunk {
     created => int( time() ),
     model   => $request->model // 'unknown',
     choices => [ { index => 0, delta => { content => $delta_text }, finish_reason => undef } ],
+  };
+  return "data: " . $self->_json->encode($payload) . "\n\n";
+}
+
+# OpenAI streams end with a chunk whose delta is empty and whose
+# finish_reason is set, before data: [DONE]. The stream delivers text only,
+# so there are no tool calls to weigh in.
+sub format_stream_close {
+  my ($self, $request, $finish_reason) = @_;
+  my $payload = {
+    id => 'chatcmpl-stream',
+    object  => 'chat.completion.chunk',
+    created => int( time() ),
+    model   => $request->model // 'unknown',
+    choices => [ { index => 0, delta => {}, finish_reason => _finish_reason( $finish_reason, 0 ) } ],
   };
   return "data: " . $self->_json->encode($payload) . "\n\n";
 }

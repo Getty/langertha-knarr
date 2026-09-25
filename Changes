@@ -2,6 +2,19 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Streams now end with the backend's real finish reason instead of a
+      fixed "normal end": the Anthropic message_delta stop_reason uses the
+      same mapping as non-streaming answers, OpenAI streams end with a
+      terminal chunk (empty delta, finish_reason) before data: [DONE], and
+      the Ollama done_reason is mapped into Ollama vocabulary (length stays
+      length, everything else becomes stop) on both streaming and
+      non-streaming answers. Non-streaming OpenAI answers map a backend's
+      end_turn, max_tokens, tool_use or Gemini STOP / MAX_TOKENS / SAFETY
+      to OpenAI's finish_reason vocabulary instead of passing it verbatim.
+      Langertha::Knarr::Stream carries the reason as finish_reason, and
+      format_stream_close / format_stream_done receive it as a second
+      argument.
+
     - The Anthropic protocol now answers with a stop_reason from Anthropic's
       own vocabulary: tool_calls and function_call become tool_use, length
       becomes max_tokens, stop becomes end_turn (tool_use when the reply

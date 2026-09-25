@@ -86,15 +86,21 @@ async sub handle_stream_f {
   unless ( _supports_streaming($engine) ) {
     # Engine doesn't support native streaming — fall back to single-chunk.
     my $r = await $self->handle_chat_f($session, $request);
-    return Langertha::Knarr::Stream->from_list( $r->content );
+    my $stream = Langertha::Knarr::Stream->from_list( $r->content );
+    $stream->finish_reason( $r->finish_reason );
+    return $stream;
   }
 
   return Langertha::Knarr::Stream->from_callback( sub {
-    my ($emit, $done, $fail) = @_;
+    my ($emit, $done, $fail, $finish) = @_;
     my $cb = sub {
       my ($chunk) = @_;
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
       $emit->($text);
+      # Langertha::Stream::Chunk carries the backend's finish_reason on the
+      # terminal chunk; the protocol maps it when it closes the stream.
+      $finish->( $chunk->finish_reason )
+        if ref $chunk && $chunk->can('has_finish_reason') && $chunk->has_finish_reason;
     };
     my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );

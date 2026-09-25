@@ -93,7 +93,9 @@ requires 'list_models';
 async sub handle_stream_f {
   my ($self, $session, $request) = @_;
   my $r = Langertha::Knarr::Response->coerce( await $self->handle_chat_f($session, $request) );
-  return Langertha::Knarr::Stream->from_list( $r->content );
+  my $stream = Langertha::Knarr::Stream->from_list( $r->content );
+  $stream->finish_reason( $r->finish_reason );
+  return $stream;
 }
 
 1;

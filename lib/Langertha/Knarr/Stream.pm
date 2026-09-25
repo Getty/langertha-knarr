@@ -3,6 +3,7 @@ package Langertha::Knarr::Stream;
 our $VERSION = '1.102';
 use Moose;
 use Future;
+use Scalar::Util qw( weaken );
 
 =head1 SYNOPSIS
 
@@ -45,6 +46,21 @@ Optional. CodeRef returning the next chunk synchronously.
 Optional. CodeRef returning a L<Future> that resolves to the next
 chunk.
 
+=attr finish_reason
+
+Optional. The backend's terminal finish reason, verbatim (C<stop>,
+C<length>, C<tool_calls>, C<end_turn>, C<MAX_TOKENS>, ...), or C<undef>
+when the backend reported none. Known once the stream is exhausted; the
+protocol maps it into its own vocabulary when it closes the stream.
+Settable, since a producer learns it only at the end. A stream that
+wraps another (see L</upstream>) and has none of its own answers with
+its upstream's.
+
+=attr upstream
+
+Optional. The stream this one wraps, as the tracing and request-log
+decorators do. Only consulted by L</finish_reason>.
+
 =method next_chunk_f
 
 Returns a L<Future> resolving to the next chunk string, or C<undef>
@@ -60,9 +76,12 @@ chunk strings.
 =method from_callback
 
     my $stream = Langertha::Knarr::Stream->from_callback( sub {
-        my ($emit, $done, $fail) = @_;
+        my ($emit, $done, $fail, $finish) = @_;
         my $f = $engine->simple_chat_stream_realtime_f(
-            sub { $emit->( $_[0]->content ) },
+            sub {
+                $emit->( $_[0]->content );
+                $finish->( $_[0]->finish_reason ) if $_[0]->has_finish_reason;
+            },
             @messages,
         );
         $f->on_done( $done );
@@ -71,9 +90,10 @@ chunk strings.
     });
 
 Builds a stream backed by a callback-driven producer. The setup sub
-receives three callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
-C<$fail-E<gt>($err)> — and is expected to wire them to the underlying
-async source. Internally maintains a queue and pending Future so the
+receives four callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
+C<$fail-E<gt>($err)>, C<$finish-E<gt>($finish_reason)> — and is
+expected to wire them to the underlying async source. C<$finish> sets
+L</finish_reason>; an C<undef> reason is ignored, a later one wins. Internally maintains a queue and pending Future so the
 consumer side can sit on C<next_chunk_f> without polling.
 
 This is the canonical replacement for the queue/pending/finished/error
@@ -102,9 +122,7 @@ sub from_callback {
   my $done = sub { $finished = 1; $deliver->(undef) };
   my $fail = sub { $error = $_[0] // 'unknown error'; $finished = 1; $deliver->(undef) };
 
-  $setup->($emit, $done, $fail);
-
-  return $class->new(
+  my $stream = $class->new(
     source => sub {
       if ( @queue )    { return Future->done( shift @queue ) }
       if ( $finished ) { return $error ? Future->fail($error) : Future->done(undef) }
@@ -112,6 +130,19 @@ sub from_callback {
       return $pending;
     },
   );
+
+  # The producer may outlive a consumer that dropped the stream; it must
+  # not keep the stream alive for it.
+  my $weak = $stream;
+  weaken $weak;
+  my $finish = sub {
+    my ($reason) = @_;
+    $weak->finish_reason($reason) if $weak && defined $reason;
+  };
+
+  $setup->($emit, $done, $fail, $finish);
+
+  return $stream;
 }
 
 # Two ways to construct:
@@ -119,6 +150,22 @@ sub from_callback {
 #  2) source    => sub { ... }     — coderef returning a Future[string|undef]
 has generator => ( is => 'ro', isa => 'Maybe[CodeRef]' );
 has source    => ( is => 'ro', isa => 'Maybe[CodeRef]' );
+has upstream  => ( is => 'ro', isa => 'Maybe[Object]' );
+
+has _finish_reason => (
+  is       => 'rw',
+  isa      => 'Maybe[Str]',
+  init_arg => 'finish_reason',
+);
+
+sub finish_reason {
+  my $self = shift;
+  return $self->_finish_reason(@_) if @_;
+  my $own = $self->_finish_reason;
+  return $own if defined $own;
+  my $up = $self->upstream;
+  return $up && $up->can('finish_reason') ? $up->finish_reason : undef;
+}
 
 sub next_chunk_f {
   my ($self) = @_;

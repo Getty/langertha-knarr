@@ -58,6 +58,13 @@ Lifecycle hooks for streaming responses. Defaults are no-ops where the
 protocol doesn't need framing — Anthropic/A2A/ACP/AG-UI override these
 to emit their named events around the chunk stream.
 
+C<format_stream_close> and C<format_stream_done> are called as
+C<($request, $finish_reason)>: the second argument is the backend's
+terminal finish reason from L<Langertha::Knarr::Stream/finish_reason>,
+verbatim and possibly C<undef> (always C<undef> after a stream error).
+A protocol maps it into its own vocabulary; Anthropic puts it on
+C<message_delta>, OpenAI on a terminal chunk, Ollama on C<done_reason>.
+
 =method stream_content_type
 
 Returns the HTTP C<Content-Type> for streaming responses. Default

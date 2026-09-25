@@ -77,6 +77,22 @@ sub parse_chat_request {
   );
 }
 
+# Ollama's done_reason vocabulary is stop / length (plus load / unload for
+# model-management answers, which carry no generation). Tool calls end with
+# stop on Ollama's own wire. Every other reason -- tool_calls, end_turn,
+# content_filter, Gemini SAFETY, ... -- has no Ollama counterpart and
+# becomes stop.
+my %DONE_REASON = (
+  ( map { $_ => $_ } qw( stop length load unload ) ),
+  max_tokens => 'length',
+);
+
+sub _done_reason {
+  my ($finish_reason) = @_;
+  return 'stop' unless defined $finish_reason;
+  return $DONE_REASON{ lc $finish_reason } // 'stop';
+}
+
 sub format_chat_response {
   my ($self, $response, $request) = @_;
   my $r = Langertha::Knarr::Response->coerce($response);
@@ -88,7 +104,7 @@ sub format_chat_response {
     created_at => _ts(),
     message    => $message,
     done       => JSON::MaybeXS::true(),
-    done_reason => $r->finish_reason // 'stop',
+    done_reason => _done_reason( $r->finish_reason ),
   };
   if ( $r->usage && $r->usage->can('to_ollama_format') ) {
     my $u = $r->usage->to_ollama_format;
@@ -121,13 +137,13 @@ sub format_stream_chunk {
 sub stream_content_type { 'application/x-ndjson' }
 
 sub format_stream_done {
-  my ($self, $request) = @_;
+  my ($self, $request, $finish_reason) = @_;
   my $payload = {
     model      => $request->model // 'unknown',
     created_at => _ts(),
     message    => { role => 'assistant', content => '' },
     done       => JSON::MaybeXS::true(),
-    done_reason => 'stop',
+    done_reason => _done_reason($finish_reason),
   };
   return $self->_json->encode($payload) . "\n";
 }
