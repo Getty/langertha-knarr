@@ -31,7 +31,35 @@ When C<auto_discover> is enabled in the config, the router queries each
 configured endpoint (engine, URL and API key variable) for its full model list on first use, making all discovered
 models available as routing targets.
 
+A discovered model is routed with the config of the model entry it was
+discovered through, minus the keys that describe that one model. The keys
+split into two groups:
+
+=over
+
+=item * Endpoint-level, inherited: C<engine>, C<url>, C<api_key_env>,
+C<api_key> (where and how to reach the upstream), and C<system_prompt>,
+C<temperature>, C<response_size> (the operator's request policy for that
+endpoint; a C<response_size> is a cap on the answer, not a property of the
+model).
+
+=item * Model-specific, not inherited: C<model> (replaced by the discovered
+id) and C<context_size> (a context window belongs to one model; another
+model on the same endpoint may hold less, and on Ollama it sizes the
+loaded model through C<num_ctx>). A discovered model gets no
+C<context_size>, so the engine and upstream defaults apply.
+
+=back
+
+Any other key is inherited. A new per-model key belongs in the
+model-specific group.
+
 =cut
+
+# Keys of a model config that describe that one model and therefore never
+# pass to the models discovered through it (k31). Everything else is
+# endpoint-level and inherited; see the POD above.
+my @MODEL_SPECIFIC_KEYS = qw( model context_size );
 
 has config => (
   is       => 'ro',
@@ -213,8 +241,10 @@ sub _discover_models {
         for my $id (@$model_ids) {
           next if $models->{$id};
           next if $self->_discovered_models->{$id};
+          my %inherited = %$def;
+          delete @inherited{@MODEL_SPECIFIC_KEYS};
           $self->_discovered_models->{$id} = {
-            %$def,
+            %inherited,
             model      => $id,
             discovered => 1,
           };

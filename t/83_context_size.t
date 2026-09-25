@@ -80,4 +80,43 @@ subtest 'context_size must be a positive integer' => sub {
   ], 'validate rejects non-integer and zero' );
 };
 
+# k31: a context window belongs to one model. A model found by auto_discover
+# is routed with the config of the entry it was discovered through, but must
+# not inherit that entry's context_size -- on Ollama it would size another
+# model's context via num_ctx. Endpoint-level settings still carry over.
+{
+  package LangerthaX::Engine::TestOllamaDiscover;
+  use Moose;
+  extends 'Langertha::Engine::Ollama';
+  sub list_models { [ 'llama3', 'qwen3' ] }
+}
+
+subtest 'discovered models do not inherit context_size' => sub {
+  my $discover = Langertha::Knarr::Config->new( data => {
+    auto_discover => 1,
+    models => {
+      'llama-big' => { engine => 'TestOllamaDiscover', model => 'llama3',
+                       url => 'http://127.0.0.1:1', context_size => 32768,
+                       system_prompt => 'Be brief.', temperature => 0.3,
+                       response_size => 512 },
+    },
+  } );
+  my $router = Langertha::Knarr::Router->new( config => $discover );
+
+  my ($engine, $model) = $router->resolve('qwen3');
+  is( $model, 'qwen3', 'discovered model resolves to itself' );
+  isa_ok( $engine, 'LangerthaX::Engine::TestOllamaDiscover' );
+  ok( !$engine->has_context_size, 'discovered model has no inherited context_size' );
+  my $body = $json->decode( $engine->chat( { role => 'user', content => 'hi' } )->content );
+  ok( !exists $body->{options}{num_ctx}, 'no num_ctx on the discovered model\'s wire' );
+
+  is( $engine->url, 'http://127.0.0.1:1', 'keeps the endpoint url' );
+  is( $engine->system_prompt, 'Be brief.', 'keeps the endpoint system_prompt' );
+  is( $engine->temperature, 0.3, 'keeps the endpoint temperature' );
+  is( $engine->response_size, 512, 'keeps the endpoint response_size' );
+
+  my ($configured) = $router->resolve('llama-big');
+  is( $configured->context_size, 32768, 'the configured entry keeps its own context_size' );
+};
+
 done_testing;

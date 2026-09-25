@@ -32,7 +32,10 @@ Revision history for Langertha-Knarr
       context window (Ollama and LMStudio native): they send it upstream
       (Ollama's num_ctx) and /api/show reports it as the context length.
       Other engines ignore it with one warning when the config is loaded;
-      knarr check refuses a value that is not a positive integer.
+      knarr check refuses a value that is not a positive integer. Models
+      found by auto_discover do not inherit it from the entry they were
+      discovered through (they keep its url, key, system_prompt,
+      temperature and response_size).
 
     - The PSGI adapter now does the same raw passthrough as the native
       server: a model the router does not configure goes to the upstream

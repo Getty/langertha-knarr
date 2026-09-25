@@ -572,7 +572,7 @@ Every `models.<name>` entry accepts these keys:
 | `system_prompt` | System prompt prepended to every request |
 | `temperature` | Sampling temperature applied to every request |
 | `response_size` | Max tokens applied to every request |
-| `context_size` | Context window in tokens; only engines that take one (`Ollama`, `LMStudio` native) — sent upstream (Ollama `num_ctx`) and reported by `/api/show`; other engines ignore it with a warning at startup |
+| `context_size` | Context window in tokens; only engines that take one (`Ollama`, `LMStudio` native) — sent upstream (Ollama `num_ctx`) and reported by `/api/show`; other engines ignore it with a warning at startup; not inherited by auto-discovered models |
 
 ### Passthrough Mode
 

@@ -265,6 +265,10 @@ the wire (Ollama's C<num_ctx>, LM Studio's C<context_length>) and report it
 from C</api/show>. For any other engine it is ignored, with one warning
 when the models are loaded.
 
+Models found by L</auto_discover> inherit the endpoint-level keys of the
+entry they were discovered through, but not the model-specific C<model> and
+C<context_size>; see L<Langertha::Knarr::Router/DESCRIPTION> for the split.
+
 =cut
 
 sub _build_models {
