@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T16:07:37Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:07:37Z
+created: 2026-09-25T15:59:10Z
+id: 25
+priority: high
+started: 2026-09-25T16:07:37Z
+status: done
+tags:
+- security
+- psgi
+- auth
+title: PSGI adapter ignores auth_token (proxy_api_key) on every route
+updated: 2026-09-25T16:07:37Z
+---
+
+Found during k14. Langertha::Knarr::PSGI::_handle_psgi never calls Knarr::_check_auth, so under Plack a Knarr with auth_token set serves chat, /v1/models and (since k14) /.well-known/langertha.json without a key; only the native server enforces it. Done = PSGI applies the same _check_auth (FakeReq already has header()), agent card stays anonymous, test in t/60_psgi.t or t/76_auth.t.
