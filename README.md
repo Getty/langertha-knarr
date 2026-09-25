@@ -674,7 +674,7 @@ priority, and the `TEST_LANGERTHA_*` variant is the last resort:
 |----------|-------------|---------|
 | `KNARR_API_KEY` | Require client authentication | — (open) |
 | `KNARR_DEBUG` | Enable verbose logging (`1` = on) | — (off) |
-| `KNARR_OLLAMA_COMPAT_VERSION` | Ollama version reported at `GET /api/version` (a compatibility claim, not Knarr's version) | `0.12.6` |
+| `KNARR_OLLAMA_COMPAT_VERSION` | Ollama version reported at `GET /api/version` (a compatibility claim, not Knarr's version); digits and dots only (`x.y.z`), at least `0.6.4` for VS Code Copilot | `0.34.4` |
 
 ## CLI Reference
 

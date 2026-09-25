@@ -9,7 +9,8 @@ use Test2::V0;
 # Knarr claims compatibility with -- never Knarr's own version, which an
 # Ollama client would misread (Knarr 1.x > any Ollama 0.x). Both
 # transports, default and configured version, and the route stays behind
-# auth_token like the other model routes.
+# auth_token like the other model routes. The default is the current Ollama
+# release (k28) and the value is digits and dots only (Open WebUI).
 
 BEGIN {
   eval { require Plack::Test; 1 }
@@ -50,7 +51,7 @@ sub knarr { Langertha::Knarr->new( handler => $handler, loop => $loop, listen =>
   for my $t (qw( native psgi )) {
     is( $r{$t}->code, 200, "$t: /api/version answers 200" );
     like( $r{$t}->header('Content-Type'), qr{\Aapplication/json}, "$t: JSON" );
-    is( $json->decode( $r{$t}->decoded_content ), { version => '0.12.6' },
+    is( $json->decode( $r{$t}->decoded_content ), { version => '0.34.4' },
       "$t: Ollama shape with the default compat version" );
   }
   is( $r{psgi}->decoded_content, $r{native}->decoded_content, 'same body on both transports' );
@@ -83,5 +84,27 @@ sub knarr { Langertha::Knarr->new( handler => $handler, loop => $loop, listen =>
   is( Langertha::Knarr::Config->new( data => {} )->ollama_compat_version, undef,
     'unset means Knarr\'s default applies' );
 }
+
+# k28: the value must be digits and dots only. Open WebUI int()s every
+# dotted part of /api/version, so a suffix or a "v" would break its
+# connection check; refuse it when the config is loaded, not per request.
+for my $bad ( '0.34.4-knarr', 'v0.34.4', '0.34', '0.34.4.1', '0.34.x', '' ) {
+  like( dies { knarr( ollama_compat_version => $bad ) },
+    qr/three dot-separated numbers/, "Knarr refuses compat version '$bad'" );
+  my $config = Langertha::Knarr::Config->new( data => {
+    models => { m => { engine => 'OpenAI' } }, ollama_compat_version => $bad } );
+  like( dies { $config->ollama_compat_version },
+    qr/three dot-separated numbers/, "Config croaks on '$bad'" );
+  is( [ grep { /ollama_compat_version/ } $config->validate ], [ match qr/three dot-separated/ ],
+    "validate reports '$bad'" );
+}
+{
+  local $ENV{KNARR_OLLAMA_COMPAT_VERSION} = '0.34.4+knarr';
+  like( dies { Langertha::Knarr::Config->new( data => {} )->ollama_compat_version },
+    qr/three dot-separated numbers/, 'the env value is checked too' );
+}
+is( [ Langertha::Knarr::Config->new( data => {
+  models => { m => { engine => 'OpenAI' } }, ollama_compat_version => '0.6.4' } )->validate ],
+  [], 'a valid compat version passes validate' );
 
 done_testing;

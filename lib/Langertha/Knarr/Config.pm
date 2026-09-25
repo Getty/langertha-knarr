@@ -395,13 +395,21 @@ has ollama_compat_version => (
 Optional Ollama version to report at C<GET /api/version> (see
 L<Langertha::Knarr/ollama_compat_version>). Falls back to the
 C<KNARR_OLLAMA_COMPAT_VERSION> environment variable. When not set, Knarr's
-default applies.
+default applies. A value that is not three dot-separated numbers
+(C<0.34.4>) croaks when read, and L</validate> reports it: Ollama clients
+parse each part as an integer.
 
 =cut
 
 sub _build_ollama_compat_version {
   my ($self) = @_;
-  return $self->data->{ollama_compat_version} // $ENV{KNARR_OLLAMA_COMPAT_VERSION} // undef;
+  my $version = $self->data->{ollama_compat_version} // $ENV{KNARR_OLLAMA_COMPAT_VERSION};
+  return undef unless defined $version;
+  # Open WebUI int()s every dotted part (k28): digits and dots only.
+  croak "ollama_compat_version '$version' must be three dot-separated numbers"
+    . " like 0.34.4 (Ollama clients parse each part as an integer)"
+    unless $version =~ /\A\d+\.\d+\.\d+\z/;
+  return $version;
 }
 
 has auto_discover => (
@@ -487,8 +495,9 @@ C<anthropic>), or C<undef> if passthrough is not configured for that format.
 
 Validates the configuration and returns a list of error strings. Returns an
 empty list when the config is valid. Checks that every model entry has an
-C<engine> key, that the default engine (if set) has an C<engine> key, and
-that at least one model or default engine is configured.
+C<engine> key, that the default engine (if set) has an C<engine> key,
+that at least one model or default engine is configured, and that
+L</ollama_compat_version>, when set, is three dot-separated numbers.
 
 =cut
 
@@ -512,6 +521,11 @@ sub validate {
 
   unless (keys %$models || $self->default_engine) {
     push @errors, "No models configured and no default engine set";
+  }
+
+  unless ( eval { $self->ollama_compat_version; 1 } ) {
+    ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
+    push @errors, $err;
   }
 
   return @errors;

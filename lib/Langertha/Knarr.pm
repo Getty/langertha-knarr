@@ -11,6 +11,7 @@ use Data::UUID;
 use Module::Runtime qw( use_module );
 use Scalar::Util qw( blessed );
 use Try::Tiny;
+use Carp ();
 use Log::Any qw( $log );
 use Langertha::Knarr::Session;
 use Langertha::Knarr::Manifest;
@@ -155,13 +156,26 @@ it as C<Authorization: Bearer> or C<x-api-key>. Discovery routes
 =attr ollama_compat_version
 
 The Ollama version reported at C<GET /api/version> as
-C<{"version":"..."}>. Default C<0.12.6>, the Ollama version in the Ollama
-OpenAPI spec that Langertha bundles for L<Langertha::Engine::Ollama>.
-It is a compatibility claim, not Knarr's own version: Ollama clients
-read it as the server's Ollama version and may switch features on or off
-by it, so set it only to a version whose C</api/chat>, C</api/generate> and C</api/tags> behaviour
-Knarr's Ollama endpoints cover. Configured as C<ollama_compat_version> in
-the config file or C<KNARR_OLLAMA_COMPAT_VERSION>.
+C<{"version":"..."}>. Default C<0.34.4>, the current Ollama release when
+it was chosen (2026-09-23). It is a compatibility claim, not Knarr's own
+version: Ollama clients read it as the server's Ollama version. Two
+clients set its limits:
+
+=over
+
+=item * VS Code Copilot (BYOK Ollama) refuses a server below C<0.6.4>.
+
+=item * Open WebUI parses every dotted part with C<int()>, so anything but
+digits and dots (C<0.34.4-knarr>, C<v0.34>) breaks its connection check.
+
+=back
+
+The value must therefore be three dot-separated numbers
+(C</^\d+\.\d+\.\d+$/>); anything else croaks at construction. No
+surveyed client gates C<think>, tools or C<format> on the version -- they
+read C</api/show> capabilities per model -- so raising it enables nothing
+Knarr lacks. Configured as C<ollama_compat_version> in the config file or
+C<KNARR_OLLAMA_COMPAT_VERSION>.
 
 =attr public_url
 
@@ -284,13 +298,23 @@ has public_url => (
 );
 
 # What GET /api/version answers (k27): the Ollama version the Ollama
-# endpoints are compatible with -- the one in Langertha's bundled Ollama
-# OpenAPI spec (share/ollama.yaml) -- not Knarr's own.
+# endpoints are compatible with, not Knarr's own. Current Ollama release
+# (k28); it must stay >= 0.6.4 (Copilot BYOK floor) and digits-and-dots only
+# (Open WebUI int()s each part).
 has ollama_compat_version => (
   is => 'ro',
   isa => 'Str',
-  default => '0.12.6',
+  default => '0.34.4',
+  trigger => sub { _check_ollama_compat_version( $_[1] ) },
 );
+
+sub _check_ollama_compat_version {
+  my ($version) = @_;
+  Carp::croak( "ollama_compat_version '$version' must be three dot-separated"
+    . " numbers like 0.34.4 (Ollama clients parse each part as an integer)" )
+    unless $version =~ /\A\d+\.\d+\.\d+\z/;
+  return $version;
+}
 
 has _manifest => (
   is => 'ro',
