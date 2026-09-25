@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-25T07:30:07Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:30:07Z
+created: 2026-09-25T07:22:48Z
+id: 18
+priority: low
+started: 2026-09-25T07:30:07Z
+status: done
+tags:
+- protocol
+- streaming
+title: Streaming path drops the engine finish_reason (Anthropic message_delta always
+  end_turn, OpenAI final chunk has none)
+updated: 2026-09-25T07:30:07Z
+---
+
+Found during k17. Knarr::Stream carries text deltas only; format_stream_close($request) gets no finish_reason, so Protocol::Anthropic hardcodes message_delta stop_reason end_turn (valid enum, but wrong for a length-truncated stream) and tool calls never appear in a stream at all. Fix needs the stream to expose a terminal finish_reason (and tool calls) to format_stream_close in Knarr.pm _handle_stream and PSGI.pm, then route it through Protocol::Anthropic::_stop_reason. Future/stream seam change.
+
+2026-09-25 07:23 Checked: OpenAI protocol has no format_stream_close, every chunk sends finish_reason null (no terminal chunk); Ollama format_stream_done hardcodes done_reason stop. Related non-stream drift: Protocol/Ollama.pm:91 passes finish_reason verbatim as done_reason (tool_calls from an OpenAI backend) - same mapping problem as k17 for the Ollama wire.
+
+2026-09-25 07:29 Implemented on branch k18-stream-finish, commit 91091d9 (not pushed). Stream.finish_reason + upstream fallback; Anthropic/OpenAI/Ollama close with mapped reason; OpenAI + Ollama non-stream mapped too. Streamed tool calls split to k19.
