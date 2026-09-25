@@ -91,6 +91,27 @@ sub parse_chat_request {
   );
 }
 
+# Anthropic's stop_reason is a closed enum; the engine Response carries the
+# backend's own finish_reason (OpenAI tool_calls/length/stop/content_filter,
+# Gemini STOP/MAX_TOKENS, ...). Values already in Anthropic vocabulary pass
+# through; a value with no Anthropic counterpart falls back like an absent one.
+my %STOP_REASON = (
+  ( map { $_ => $_ } qw( end_turn max_tokens stop_sequence tool_use pause_turn refusal ) ),
+  tool_calls     => 'tool_use',
+  function_call  => 'tool_use',
+  length         => 'max_tokens',
+  content_filter => 'refusal',
+);
+
+sub _stop_reason {
+  my ( $finish_reason, $has_tool_calls ) = @_;
+  my $fallback = $has_tool_calls ? 'tool_use' : 'end_turn';
+  return $fallback unless defined $finish_reason;
+  my $key = lc $finish_reason;
+  return $fallback if $key eq 'stop';
+  return $STOP_REASON{$key} // $fallback;
+}
+
 sub format_chat_response {
   my ($self, $response, $request) = @_;
   my $r = Langertha::Knarr::Response->coerce($response);
@@ -98,8 +119,7 @@ sub format_chat_response {
   push @blocks, { type => 'text', text => $r->content } if length $r->content;
   push @blocks, map { $_->to_anthropic_block } @{ $r->tool_calls };
   push @blocks, { type => 'text', text => '' } unless @blocks;
-  my $stop_reason = $r->finish_reason
-                 // ( $r->has_tool_calls ? 'tool_use' : 'end_turn' );
+  my $stop_reason = _stop_reason( $r->finish_reason, $r->has_tool_calls );
   my $usage = $r->usage && $r->usage->can('to_anthropic_format')
     ? $r->usage->to_anthropic_format
     : { input_tokens => 0, output_tokens => 0 };

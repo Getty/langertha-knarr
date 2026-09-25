@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - The Anthropic protocol now answers with a stop_reason from Anthropic's
+      own vocabulary: tool_calls and function_call become tool_use, length
+      becomes max_tokens, stop becomes end_turn (tool_use when the reply
+      carries tool calls), content_filter becomes refusal. Values already
+      in Anthropic vocabulary pass through; any other value falls back to
+      end_turn or tool_use.
+
     - The routed path now forwards tools and tool_choice to Hermes-wire
       engines (NousResearch, AKI native), which carry tools in the system
       prompt and advertise tools_hermes rather than tools_native. Both are
