@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T19:35:09Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T19:35:09Z
+created: 2026-09-25T19:25:51Z
+id: 38
+priority: medium
+started: 2026-09-25T19:35:09Z
+status: done
+tags:
+- vision
+- probe
+- performance
+title: Probe each gateway endpoint once and import the facts into its instances (core
+  k282 API)
+updated: 2026-09-25T19:35:09Z
+---
+
+Core k282 (unreleased): probe_model_capabilities_f(models=>'all') on catalogue formats (Langertha::ModelProbe->is_catalogue($engine->model_metadata_format): openrouter, mistral, lmstudio, tsystems) returns the learned map for every model in one request; import_learned_capabilities(\%map) fills other instances without I/O. Change knarr's k37 probe: group routed instances by endpoint (engine|url|api_key_env), probe one per endpoint with models=>'all' when is_catalogue, import into the rest; per-model probing stays for ollama/llamacpp. Import only into instances of the same endpoint. Gate on ->can('import_learned_capabilities'), else fall back to k37 behavior. Tests: 300 discovered OpenRouter slugs -> 1 metadata fetch.
