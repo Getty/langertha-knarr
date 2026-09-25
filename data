@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T16:17:58Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:17:58Z
+created: 2026-09-25T16:07:41Z
+id: 26
+priority: low
+started: 2026-09-25T16:17:58Z
+status: done
+tags:
+- psgi
+- passthrough
+title: PSGI adapter lacks the native server's raw passthrough in _action_chat
+updated: 2026-09-25T16:17:58Z
+---
+
+From k25: under Plack the PSGI adapter does not do the raw passthrough the native _action_chat does for passthrough models (behaviour difference native vs PSGI). Mirror the native path or document PSGI as not supporting raw passthrough; parity test like t/76_auth_psgi_parity.t.
