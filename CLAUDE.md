@@ -61,7 +61,7 @@ usage data, cache_control, and all protocol-specific metadata.
 - **Langertha::Knarr::Manifest** — `/.well-known/langertha.json` provider manifest from the exposed model surface (needs core `Langertha::Manifest::Builder`, else 404)
 - **Langertha::Knarr::Protocol::OpenAI** — `/v1/chat/completions`, `/v1/models`
 - **Langertha::Knarr::Protocol::Anthropic** — `/v1/messages`
-- **Langertha::Knarr::Protocol::Ollama** — `/api/chat`, `/api/generate`, `/api/tags`, `/api/version`
+- **Langertha::Knarr::Protocol::Ollama** — `/api/chat`, `/api/generate`, `/api/tags`, `/api/version`, `/api/show`
 - **Langertha::Knarr::Protocol::A2A** — Google Agent2Agent JSON-RPC
 - **Langertha::Knarr::Protocol::ACP** — BeeAI/Linux Foundation ACP
 - **Langertha::Knarr::Protocol::AGUI** — CopilotKit AG-UI

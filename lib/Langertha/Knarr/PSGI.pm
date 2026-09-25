@@ -129,8 +129,9 @@ sub _handle_psgi {
     );
     return [ $status, [ 'Content-Type' => 'application/json' ], [ $body ] ];
   }
-  if ( $action eq 'version' ) {
-    my ($status, $headers, $body) = $proto->format_version_response( $sb->ollama_compat_version );
+  # The same table and methods as the native server (k29).
+  if ( my $simple = $sb->_simple_action($action) ) {
+    my ($status, $headers, $body) = $sb->$simple( $proto, $self->_read_body($env) );
     return [ $status, [ %$headers ], [ $body ] ];
   }
   if ( $action eq 'a2a_card' ) {

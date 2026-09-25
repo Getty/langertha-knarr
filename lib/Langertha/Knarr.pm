@@ -483,13 +483,20 @@ sub _dispatch {
     return $self->_send_simple( $req, $self->_unauthorized );
   }
   my $proto  = $route->{protocol};
-  my $code = $self->can("_action_$action");
-  unless ( $code ) {
+  my $simple = $self->_simple_action($action);
+  my $code = $simple ? undef : $self->can("_action_$action");
+  unless ( $simple || $code ) {
     return $self->_send_simple( $req, 500, 'application/json',
       $self->_json->encode({ error => { message => "unknown action $action" } }) );
   }
   try {
-    $self->$code( $proto, $req );
+    if ( $simple ) {
+      my ($status, $headers, $body) = $self->$simple( $proto, $req->body );
+      $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
+    }
+    else {
+      $self->$code( $proto, $req );
+    }
   } catch {
     my $err = $_;
     $log->errorf("Request error (%s): %s", $action, $err);
@@ -717,10 +724,64 @@ sub _action_a2a_card {
   $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
-sub _action_version {
-  my ($self, $proto, $req) = @_;
-  my ($status, $headers, $body) = $proto->format_version_response( $self->ollama_compat_version );
-  $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
+# Actions answered with one buffered response from the request body alone.
+# The native server and the PSGI adapter both dispatch through this table,
+# so the two cannot drift: action => method( $proto, $body_bytes ) returning
+# ( status, \%headers, body ).
+my %SIMPLE_ACTIONS = (
+  version => '_simple_version',
+  show    => '_simple_show',
+);
+
+sub _simple_action {
+  my ($self, $action) = @_;
+  return $SIMPLE_ACTIONS{$action};
+}
+
+sub _simple_version {
+  my ($self, $proto) = @_;
+  return $proto->format_version_response( $self->ollama_compat_version );
+}
+
+# POST /api/show (k29). VS Code Copilot calls it for every model and reads
+# tools/vision from capabilities; Continue reads it too. Only a model Knarr
+# lists (the /api/tags surface) is shown, anything else gets Ollama's 404.
+# capabilities never carry "thinking": Knarr drops think on the Ollama wire.
+sub _simple_show {
+  my ($self, $proto, $body) = @_;
+  my $data = eval { $self->_json->decode( defined $body && length $body ? $body : '{}' ) };
+  $data = {} unless ref $data eq 'HASH';
+  my $model = $data->{model};
+  $model = $data->{name} unless defined $model && length $model;   # Ollama's legacy field
+  return $proto->format_error_response( 400, 'model is required' )
+    unless defined $model && !ref $model && length $model;
+
+  my $router = $self->router;
+  my $listed = $router ? $router->list_models : $self->handler->list_models;
+  my ($known) = grep { $_ eq $model }
+    map { ref $_ eq 'HASH' ? $_->{id} // '' : "$_" } @{ $listed || [] };
+  return $proto->format_error_response( 404, "model '$model' not found" )
+    unless defined $known;
+
+  # The engine the router sends this model to, when it can build one; a
+  # model it cannot build (key variable unset) or a custom handler without
+  # a router leaves the capabilities at what the Ollama endpoint forwards.
+  my $engine = $router
+    ? eval { ( $router->resolve( $model, skip_default => 1 ) )[0] } : undef;
+  my $caps = blessed($engine) && $engine->can('supports') ? $engine : undef;
+
+  my @capabilities = ('completion');
+  push @capabilities, 'tools'
+    if !$caps || $caps->supports('tools_native') || $caps->supports('tools_hermes');
+  # No "vision": Langertha core has no image-input capability flag to ask,
+  # so Knarr cannot tell which routed models take images.
+  my $context_length = blessed($engine) && $engine->can('get_context_size')
+    ? eval { $engine->get_context_size } : undef;
+
+  return $proto->format_show_response( $model, {
+    capabilities => \@capabilities,
+    ( defined $context_length ? ( context_length => $context_length ) : () ),
+  } );
 }
 
 sub _action_manifest {

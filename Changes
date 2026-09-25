@@ -20,6 +20,14 @@ Revision history for Langertha-Knarr
       0.6.4 for VS Code Copilot. The route needs proxy_api_key when one is
       set.
 
+    - POST /api/show answers on the native server and PSGI, so VS Code
+      Copilot's Ollama provider works against Knarr. For a model /api/tags
+      lists it returns Ollama's shape with capabilities completion, plus
+      tools when the routed engine takes tools (never thinking or vision),
+      and the context length in model_info when the engine knows it. An
+      unlisted model gets Ollama's 404 {"error":"model 'x' not found"},
+      a request without model a 400. Needs proxy_api_key when one is set.
+
     - The PSGI adapter now does the same raw passthrough as the native
       server: a model the router does not configure goes to the upstream
       byte for byte, with the client's headers, and its answer comes back

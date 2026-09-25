@@ -16,6 +16,11 @@ L<Langertha::Knarr::Protocol>. Loaded by default.
 C<{"version":"x.y.z"}> and the Ollama version Knarr claims compatibility
 with (L<Langertha::Knarr/ollama_compat_version>), not Knarr's own version
 
+=item * C<POST /api/show> — model details for a listed model (see
+L</format_show_response>); C<model> or the legacy C<name> in the body,
+C<400> without one, Ollama's C<404> C<{"error":"model 'x' not found"}> for
+a model Knarr does not list
+
 =back
 
 Streaming uses newline-delimited JSON (NDJSON) rather than SSE — the
@@ -51,6 +56,7 @@ sub protocol_routes {
     { method => 'POST', path => '/api/generate', action => 'chat'   },
     { method => 'GET',  path => '/api/tags',     action => 'models' },
     { method => 'GET',  path => '/api/version',  action => 'version' },
+    { method => 'POST', path => '/api/show',     action => 'show'    },
   ];
 }
 
@@ -149,6 +155,65 @@ sub format_version_response {
   my ($self, $version) = @_;
   return ( 200, { 'Content-Type' => 'application/json' },
     $self->_json->encode({ version => "$version" }) );
+}
+
+=method format_error_response
+
+    my ($status, $headers, $body) = $proto->format_error_response( 404, "model 'x' not found" );
+
+Ollama's error answer: C<{"error":"..."}> with a plain string, not the
+C<{"error":{"message":...}}> object of the OpenAI wire.
+
+=cut
+
+sub format_error_response {
+  my ($self, $status, $message) = @_;
+  return ( $status, { 'Content-Type' => 'application/json' },
+    $self->_json->encode({ error => "$message" }) );
+}
+
+=method format_show_response
+
+    my ($status, $headers, $body) = $proto->format_show_response( $model, {
+        capabilities   => [ 'completion', 'tools' ],
+        context_length => 131072,   # optional
+    } );
+
+The C<POST /api/show> answer for a model Knarr serves (k29). Only what
+Knarr knows is claimed: C<capabilities> as given, C<model_info> with
+C<general.architecture> (C<knarr>) and C<knarr.context_length> when a
+context length is known -- the pair VS Code Copilot reads, C<{}> otherwise
+-- and empty C<details>, C<template> and C<parameters>, since there are no
+local weights, template or Modelfile behind a routed model.
+
+=cut
+
+sub format_show_response {
+  my ($self, $model, $info) = @_;
+  my %model_info;
+  if ( defined $info->{context_length} ) {
+    %model_info = (
+      'general.architecture' => 'knarr',
+      'knarr.context_length' => $info->{context_length} + 0,
+    );
+  }
+  my $payload = {
+    modified_at  => _ts(),
+    capabilities => [ @{ $info->{capabilities} || [] } ],
+    details      => {
+      parent_model       => '',
+      format             => '',
+      family             => '',
+      families           => [],
+      parameter_size     => '',
+      quantization_level => '',
+    },
+    model_info => \%model_info,
+    template   => '',
+    parameters => '',
+    license    => '',
+  };
+  return ( 200, { 'Content-Type' => 'application/json' }, $self->_json->encode($payload) );
 }
 
 sub format_stream_chunk {

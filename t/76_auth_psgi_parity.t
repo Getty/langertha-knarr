@@ -45,6 +45,7 @@ my %chat_body = (
   '/runs'                => { agent_name => 'm', mode => 'sync',
     input => [ { parts => [ { content_type => 'text/plain', content => 'hi' } ] } ] },
   '/awp'                 => { threadId => 'th1', runId => 'r1', messages => $msgs },
+  '/api/show'            => { model => 'knarr-code' },   # not a chat route (k29)
 );
 my %stream_body = (
   '/v1/chat/completions' => { model => 'm', messages => $msgs, stream => JSON::MaybeXS::true() },
@@ -148,7 +149,7 @@ for my $route (@routes) {
 }
 
 # The table must actually cover every kind of route Knarr serves.
-for my $action (qw( chat models acp_agents a2a_card manifest version )) {
+for my $action (qw( chat models acp_agents a2a_card manifest version show )) {
   ok( $actions_seen{$action}, "matrix covers action $action" );
 }
 
