@@ -2,6 +2,19 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Knarr serves a Langertha provider manifest at
+      GET /.well-known/langertha.json on the native server and PSGI, so
+      raider --provider HOST can configure itself. It lists the OpenAI
+      (openai-chat), Anthropic (anthropic-compat) and Ollama endpoints
+      under the public URL (new public_url config key / KNARR_PUBLIC_URL,
+      else taken from the request), every configured alias and
+      auto-discovered model with its engine's capabilities as far as that
+      protocol forwards them, and api_key auth when proxy_api_key is set
+      (the route needs the key then, like /v1/models). Upstream URLs, keys,
+      key variable names and passthrough targets are never published.
+      Needs a Langertha with Langertha::Manifest; with an older one the
+      route answers 404.
+
     - Non-streaming Handler::Passthrough answers now carry the upstream's
       tool calls (OpenAI message.tool_calls, Anthropic tool_use blocks,
       Ollama message.tool_calls) and its finish reason, so the client gets

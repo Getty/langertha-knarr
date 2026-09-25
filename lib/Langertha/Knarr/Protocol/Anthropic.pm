@@ -56,6 +56,24 @@ sub protocol_routes {
   ];
 }
 
+# Provider manifest (k14): anthropic-compat, not anthropic. parse_chat_request
+# below carries tools and tool_choice but not output_config.format, so a
+# client must do structured output the shim way (synthetic tool + forced
+# tool_choice). Nor are thinking, cache_control or disable_parallel_tool_use
+# forwarded.
+sub manifest_endpoint {
+  return {
+    dialect      => 'anthropic-compat',
+    path         => '',
+    capabilities => [qw(
+      chat streaming system_prompt
+      tools_native tools_hermes
+      tool_choice_auto tool_choice_any tool_choice_none tool_choice_named
+      temperature response_size
+    )],
+  };
+}
+
 sub _msg_id { 'msg_' . int( time() * 1000 ) }
 
 sub parse_chat_request {

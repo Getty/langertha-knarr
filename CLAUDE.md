@@ -58,6 +58,7 @@ usage data, cache_control, and all protocol-specific metadata.
 - **Langertha::Knarr::Stream** — Async chunk iterator; `from_list`, `from_callback` constructors
 - **Langertha::Knarr::Tracing** — Langfuse trace/generation per request (async flush via Net::Async::HTTP)
 - **Langertha::Knarr::RequestLog** — JSONL per-request logging
+- **Langertha::Knarr::Manifest** — `/.well-known/langertha.json` provider manifest from the exposed model surface (needs core `Langertha::Manifest::Builder`, else 404)
 - **Langertha::Knarr::Protocol::OpenAI** — `/v1/chat/completions`, `/v1/models`
 - **Langertha::Knarr::Protocol::Anthropic** — `/v1/messages`
 - **Langertha::Knarr::Protocol::Ollama** — `/api/chat`, `/api/generate`, `/api/tags`, `/api/version`

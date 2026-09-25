@@ -270,6 +270,7 @@ sub execute {
     ( $passthrough ? ( raw_passthrough => $passthrough ) : () ),
     ( $tracing->_enabled ? ( tracing => $tracing ) : () ),
     ( $config->has_proxy_api_key ? ( auth_token => $config->proxy_api_key ) : () ),
+    ( defined $config->public_url ? ( public_url => $config->public_url ) : () ),
   );
 
   _log("Starting server:");

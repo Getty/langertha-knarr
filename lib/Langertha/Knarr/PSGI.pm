@@ -99,6 +99,15 @@ sub _handle_psgi {
     my ($status, $headers, $body) = $proto->format_models_response($models);
     return [ $status, [ %$headers ], [ $body ] ];
   }
+  if ( $action eq 'manifest' ) {
+    my ($status, $body) = $sb->manifest_response(
+      scheme => $env->{'psgi.url_scheme'} // 'http',
+      host   => $env->{HTTP_HOST}
+        // ( defined $env->{SERVER_NAME} ? $env->{SERVER_NAME} . ':' . ( $env->{SERVER_PORT} // 80 ) : undef ),
+      prefix => $env->{SCRIPT_NAME} // '',
+    );
+    return [ $status, [ 'Content-Type' => 'application/json' ], [ $body ] ];
+  }
   if ( $action eq 'a2a_card' ) {
     my ($status, $headers, $body) = $proto->format_agent_card;
     return [ $status, [ %$headers ], [ $body ] ];

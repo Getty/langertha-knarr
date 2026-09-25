@@ -13,6 +13,7 @@ use Scalar::Util qw( blessed );
 use Try::Tiny;
 use Log::Any qw( $log );
 use Langertha::Knarr::Session;
+use Langertha::Knarr::Manifest;
 
 =head1 SYNOPSIS
 
@@ -58,6 +59,24 @@ Knarr is built on L<IO::Async> and L<Net::Async::HTTP::Server>
 with native L<Future::AsyncAwait> integration into Langertha engines,
 so streaming works end-to-end token-by-token without any thread or
 event-loop bridges.
+
+=head1 MANIFEST
+
+C<GET /.well-known/langertha.json> serves a Langertha provider manifest
+(schema v1, see L<Langertha::Manifest>) so a client such as
+C<raider --provider HOST> can configure itself. It is built by
+L<Langertha::Knarr::Manifest> from what this Knarr exposes: one endpoint
+per protocol with a manifest dialect (OpenAI C</v1> as C<openai-chat>,
+Anthropic as C<anthropic-compat>, Ollama as C<ollama>), every listed model
+(configured aliases and auto-discovered ids) on each of them, with the
+serving engine's model-scoped capabilities narrowed to what that protocol
+forwards, and an C<api_key> auth entry when L</auth_token> is set. The
+route is protected by L</auth_token> like C<GET /v1/models>. It never
+carries configuration: no upstream URL, key, key variable name, engine
+class or passthrough target.
+
+The manifest needs a Langertha that ships L<Langertha::Manifest::Builder>;
+with an older one the route answers C<404> with a JSON error.
 
 =head1 ARCHITECTURE
 
@@ -133,6 +152,12 @@ Optional shared secret. When set, every incoming request must present
 it as C<Authorization: Bearer> or C<x-api-key>. Discovery routes
 (C</.well-known/agent.json>) stay anonymous.
 
+=attr public_url
+
+Optional public base URL (e.g. C<https://knarr.example>) used in the
+provider manifest. When unset, the base URL is taken from the request
+(C<Host>, and C<X-Forwarded-Proto> when it is C<http> or C<https>).
+
 =method start
 
     $knarr->start;
@@ -152,6 +177,18 @@ Calls L</start> if needed, then enters the L</loop> and blocks.
 
 Returns the L<Langertha::Knarr::Session> for the given id, creating
 one on demand. Used internally by the dispatcher.
+
+=method manifest_response
+
+    my ($status, $json_body) = $knarr->manifest_response(
+        scheme => 'https', host => 'knarr.example', prefix => '' );
+
+Builds the provider manifest (see L</MANIFEST>) and returns the HTTP
+status and JSON body. The base URL is L</public_url>, else
+C<scheme://host> plus C<prefix> from the request. C<404> when core has no
+manifest builder, C<400> when no base URL can be derived, C<500> when the
+manifest cannot be built. Used by the native server and
+L<Langertha::Knarr::PSGI>.
 
 =cut
 
@@ -229,6 +266,18 @@ has auth_token => (
   default => sub { undef },
 );
 
+has public_url => (
+  is => 'ro',
+  isa => 'Maybe[Str]',
+  default => sub { undef },
+);
+
+has _manifest => (
+  is => 'ro',
+  lazy => 1,
+  default => sub { Langertha::Knarr::Manifest->new( knarr => $_[0] ) },
+);
+
 has _protocol_objects => (
   is => 'ro',
   lazy => 1,
@@ -284,6 +333,9 @@ sub _build_routes {
       push @routes, { %$r, protocol => $proto };
     }
   }
+  # Knarr's own route, not a protocol's (k14).
+  push @routes, { method => 'GET', path => '/.well-known/langertha.json',
+    action => 'manifest', protocol => undef };
   return \@routes;
 }
 
@@ -579,6 +631,47 @@ sub _action_a2a_card {
   my ($self, $proto, $req) = @_;
   my ($status, $headers, $body) = $proto->format_agent_card;
   $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
+}
+
+sub _action_manifest {
+  my ($self, $proto, $req) = @_;
+  my $proto_header = lc( scalar( $req->header('X-Forwarded-Proto') ) // '' );
+  my ($status, $body) = $self->manifest_response(
+    scheme => ( $proto_header =~ /\A(https?)\z/ ? $1 : 'http' ),
+    host   => scalar $req->header('Host'),
+  );
+  $self->_send_simple( $req, $status, 'application/json', $body );
+}
+
+sub manifest_response {
+  my ($self, %request) = @_;
+  my $error = sub {
+    my ($status, $message) = @_;
+    return ( $status, $self->_json->encode({ error => { message => $message } }) );
+  };
+  return $error->( 404, 'provider manifest not available: the installed Langertha'
+    . ' has no Langertha::Manifest::Builder' )
+    unless Langertha::Knarr::Manifest->available;
+
+  my $base_url = $self->public_url;
+  unless ( defined $base_url && length $base_url ) {
+    my $host = $request{host} // '';
+    # A hostname or bracketed IPv6 address, optional port; nothing else can
+    # reach the published URLs.
+    return $error->( 400, 'cannot derive the public URL: no valid Host header'
+      . ' (set public_url)' )
+      unless $host =~ /\A(?:[A-Za-z0-9](?:[A-Za-z0-9.\-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?\z/;
+    $base_url = ( $request{scheme} // 'http' ) . '://' . $host . ( $request{prefix} // '' );
+  }
+
+  my $manifest = eval { $self->_manifest->build($base_url) };
+  unless ( $manifest ) {
+    my $err = $@ || 'unknown error';
+    $err =~ s/ at \S+ line \d+\.?\n?\z//;
+    $log->errorf("Manifest error: %s", $err);
+    return $error->( 500, "provider manifest failed: $err" );
+  }
+  return ( 200, $manifest->to_json );
 }
 
 sub _action_models {

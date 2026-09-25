@@ -52,6 +52,23 @@ sub protocol_routes {
   ];
 }
 
+# Provider manifest (k14): parse_chat_request below carries tools, format,
+# options.temperature and options.seed. Ollama has no tool_choice; a schema
+# in `format` is not mapped onto a json_schema response_format, so only
+# the loose JSON mode is claimed; num_predict is not forwarded.
+sub manifest_endpoint {
+  return {
+    dialect      => 'ollama',
+    path         => '',
+    capabilities => [qw(
+      chat streaming system_prompt
+      tools_native tools_hermes
+      response_format_json_object
+      temperature seed
+    )],
+  };
+}
+
 sub _ts { strftime( "%Y-%m-%dT%H:%M:%S.000000000Z", gmtime ) }
 
 sub parse_chat_request {

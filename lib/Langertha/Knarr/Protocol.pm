@@ -77,6 +77,21 @@ Ollama as C<message.tool_calls> on the done line.
 Returns the HTTP C<Content-Type> for streaming responses. Default
 C<text/event-stream>; Ollama overrides to C<application/x-ndjson>.
 
+=method manifest_endpoint
+
+    my $spec = $proto->manifest_endpoint;
+    # { dialect => 'openai-chat', path => '/v1', capabilities => [ ... ] }
+
+How this protocol appears in the provider manifest
+(C</.well-known/langertha.json>, see L<Langertha::Knarr/MANIFEST>), or
+C<undef> (the default) when it has no manifest dialect and is not
+published. C<dialect> is a Langertha manifest dialect, C<path> is appended
+to the public base URL to form the endpoint's C<base_url>, and
+C<capabilities> lists the capability flags this protocol's
+L</parse_chat_request> actually carries to the engine. A published model
+claims a capability on this endpoint only when its engine has it B<and>
+it is in this list.
+
 =cut
 
 # Identifier (e.g. 'openai', 'anthropic', 'ollama').
@@ -112,6 +127,9 @@ sub format_stream_close { '' }
 
 # Content-Type for streaming responses. Default is SSE; Ollama overrides.
 sub stream_content_type { 'text/event-stream' }
+
+# Manifest publication (k14): undef = not in the provider manifest.
+sub manifest_endpoint { undef }
 
 # format_models_response(\@models) -> ($status, \%headers, $body)
 sub format_models_response {

@@ -358,6 +358,25 @@ sub has_proxy_api_key {
   return defined $self->proxy_api_key;
 }
 
+has public_url => (
+  is      => 'lazy',
+  builder => '_build_public_url',
+);
+
+=attr public_url
+
+Optional public base URL of this Knarr (e.g. C<https://knarr.example>),
+published in the provider manifest at C</.well-known/langertha.json>. Falls
+back to the C<KNARR_PUBLIC_URL> environment variable. When not set, the
+manifest takes the base URL from each request.
+
+=cut
+
+sub _build_public_url {
+  my ($self) = @_;
+  return $self->data->{public_url} // $ENV{KNARR_PUBLIC_URL} // undef;
+}
+
 =method has_proxy_api_key
 
     if ($config->has_proxy_api_key) { ... }

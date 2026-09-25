@@ -49,6 +49,25 @@ sub protocol_routes {
   ];
 }
 
+# Provider manifest (k14): what parse_chat_request below carries to the
+# engine. The whole OpenAI tool / structured-output / control surface is
+# forwarded; thinking_budget, prompt_cache (Anthropic cache_control) and
+# server_tools are not.
+sub manifest_endpoint {
+  return {
+    dialect      => 'openai-chat',
+    path         => '/v1',
+    capabilities => [qw(
+      chat streaming system_prompt
+      tools_native tools_hermes
+      tool_choice_auto tool_choice_any tool_choice_none tool_choice_named
+      parallel_tool_use
+      response_format_json_object response_format_json_schema
+      reasoning_effort temperature seed response_size prompt_cache_key
+    )],
+  };
+}
+
 sub parse_chat_request {
   my ($self, $http_req, $body_ref) = @_;
   my $data = $self->_json->decode( $$body_ref || '{}' );
