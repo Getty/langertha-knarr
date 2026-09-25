@@ -2,6 +2,19 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Routed streams now deliver the backend's tool calls. They arrive
+      whole when the stream closes, before the terminal frames: Anthropic
+      as one tool_use content block per call (content_block_start, one
+      input_json_delta with the full arguments, content_block_stop),
+      OpenAI as one chunk with delta.tool_calls, Ollama as
+      message.tool_calls on the done line. Handler::Passthrough assembles
+      the upstream's streamed tool calls the same way, and the tracing and
+      request-log decorators record them. Langertha::Knarr::Stream carries
+      them as tool_calls, and format_stream_close / format_stream_done
+      receive them as a third argument. Engine streams need a Langertha
+      whose stream parser attaches the assembled calls to its chunks;
+      with one that does not, the stream carries none.
+
     - Streams now end with the backend's real finish reason instead of a
       fixed "normal end": the Anthropic message_delta stop_reason uses the
       same mapping as non-streaming answers, OpenAI streams end with a

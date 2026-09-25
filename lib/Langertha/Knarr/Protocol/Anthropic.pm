@@ -44,6 +44,9 @@ with 'Langertha::Knarr::Protocol';
 # ----------------------
 
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
+# Tool arguments become a JSON string inside an event that _json encodes to
+# UTF-8, so they are encoded to characters here, not to bytes.
+has _args_json => ( is => 'ro', default => sub { JSON::MaybeXS->new( canonical => 1 ) } );
 
 sub protocol_name { 'anthropic' }
 
@@ -173,12 +176,35 @@ sub format_stream_chunk {
   });
 }
 
+# The routed stream carries the backend's tool calls complete, not as they
+# were fragmented upstream, so each call closes the stream as its own
+# tool_use block: content_block_start with an empty input, one
+# input_json_delta holding the full arguments, content_block_stop (k19).
 sub format_stream_close {
-  my ($self, $request, $finish_reason) = @_;
-  # The stream delivers text only, so there are no tool calls to weigh in.
-  my $stop_reason = _stop_reason( $finish_reason, 0 );
+  my ($self, $request, $finish_reason, $tool_calls) = @_;
+  my @calls = @{ $tool_calls // [] };
+  my $stop_reason = _stop_reason( $finish_reason, scalar @calls );
+  my @tool_events;
+  my $index = 0;
+  for my $tc (@calls) {
+    $index++;
+    my $block = $tc->to_anthropic_block( fallback_id => "toolu_knarr_$index" );
+    push @tool_events,
+      $self->_sse_event( content_block_start => {
+        type  => 'content_block_start',
+        index => $index,
+        content_block => { type => 'tool_use', id => $block->{id}, name => $block->{name}, input => {} },
+      }),
+      $self->_sse_event( content_block_delta => {
+        type  => 'content_block_delta',
+        index => $index,
+        delta => { type => 'input_json_delta', partial_json => $self->_args_json->encode( $block->{input} ) },
+      }),
+      $self->_sse_event( content_block_stop => { type => 'content_block_stop', index => $index } );
+  }
   return join( '',
     $self->_sse_event( content_block_stop => { type => 'content_block_stop', index => 0 } ),
+    @tool_events,
     $self->_sse_event( message_delta => {
       type => 'message_delta',
       delta => { stop_reason => $stop_reason, stop_sequence => undef },

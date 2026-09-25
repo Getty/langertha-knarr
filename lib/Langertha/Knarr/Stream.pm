@@ -56,10 +56,22 @@ Settable, since a producer learns it only at the end. A stream that
 wraps another (see L</upstream>) and has none of its own answers with
 its upstream's.
 
+=attr tool_calls
+
+ArrayRef of complete L<Langertha::ToolCall> objects the backend emitted,
+empty when it emitted none. Like L</finish_reason> it is known once the
+stream is exhausted: the protocol emits the calls in its own framing when
+it closes the stream. Settable; a stream that wraps another and has none
+of its own answers with its upstream's.
+
+=method has_tool_calls
+
+True when L</tool_calls> holds at least one call.
+
 =attr upstream
 
 Optional. The stream this one wraps, as the tracing and request-log
-decorators do. Only consulted by L</finish_reason>.
+decorators do. Only consulted by L</finish_reason> and L</tool_calls>.
 
 =method next_chunk_f
 
@@ -76,11 +88,12 @@ chunk strings.
 =method from_callback
 
     my $stream = Langertha::Knarr::Stream->from_callback( sub {
-        my ($emit, $done, $fail, $finish) = @_;
+        my ($emit, $done, $fail, $finish, $tool_call) = @_;
         my $f = $engine->simple_chat_stream_realtime_f(
             sub {
                 $emit->( $_[0]->content );
                 $finish->( $_[0]->finish_reason ) if $_[0]->has_finish_reason;
+                $tool_call->( @{ $_[0]->tool_calls } ) if $_[0]->has_tool_calls;
             },
             @messages,
         );
@@ -90,10 +103,12 @@ chunk strings.
     });
 
 Builds a stream backed by a callback-driven producer. The setup sub
-receives four callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
-C<$fail-E<gt>($err)>, C<$finish-E<gt>($finish_reason)> — and is
-expected to wire them to the underlying async source. C<$finish> sets
-L</finish_reason>; an C<undef> reason is ignored, a later one wins. Internally maintains a queue and pending Future so the
+receives five callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
+C<$fail-E<gt>($err)>, C<$finish-E<gt>($finish_reason)>,
+C<$tool_call-E<gt>(@tool_calls)> — and is expected to wire them to the
+underlying async source. C<$finish> sets L</finish_reason>; an C<undef>
+reason is ignored, a later one wins. C<$tool_call> appends complete
+L<Langertha::ToolCall> objects to L</tool_calls>. Internally maintains a queue and pending Future so the
 consumer side can sit on C<next_chunk_f> without polling.
 
 This is the canonical replacement for the queue/pending/finished/error
@@ -139,8 +154,12 @@ sub from_callback {
     my ($reason) = @_;
     $weak->finish_reason($reason) if $weak && defined $reason;
   };
+  my $tool_call = sub {
+    my @calls = grep { defined } @_;
+    $weak->tool_calls( [ @{ $weak->_tool_calls // [] }, @calls ] ) if $weak && @calls;
+  };
 
-  $setup->($emit, $done, $fail, $finish);
+  $setup->($emit, $done, $fail, $finish, $tool_call);
 
   return $stream;
 }
@@ -166,6 +185,24 @@ sub finish_reason {
   my $up = $self->upstream;
   return $up && $up->can('finish_reason') ? $up->finish_reason : undef;
 }
+
+has _tool_calls => (
+  is       => 'rw',
+  isa      => 'Maybe[ArrayRef]',
+  init_arg => 'tool_calls',
+);
+
+sub tool_calls {
+  my $self = shift;
+  return $self->_tool_calls(@_) if @_;
+  my $own = $self->_tool_calls;
+  return $own if $own && @$own;
+  my $up = $self->upstream;
+  return $up->tool_calls if $up && $up->can('tool_calls');
+  return [];
+}
+
+sub has_tool_calls { scalar @{ $_[0]->tool_calls } > 0 }
 
 sub next_chunk_f {
   my ($self) = @_;

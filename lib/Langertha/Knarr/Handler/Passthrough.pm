@@ -10,6 +10,7 @@ use IO::Async::Loop;
 use JSON::MaybeXS;
 use Langertha::Knarr::Stream;
 use Langertha::Knarr::Response;
+use Langertha::ToolCall;
 
 with 'Langertha::Knarr::Handler';
 
@@ -33,7 +34,9 @@ L<Langertha::Knarr::Request>; Passthrough rebuilds the upstream JSON
 from C<$request-E<gt>raw> and re-POSTs it.
 
 Both sync and streaming requests are supported. For streaming, the
-upstream's protocol-native chunks are extracted into plain text deltas
+upstream's protocol-native chunks are extracted into plain text deltas,
+the upstream's tool calls are assembled into complete
+L<Langertha::ToolCall> objects on the stream's C<tool_calls>
 which the front-side protocol then re-frames — keeping symmetry even
 when client and upstream use the same protocol.
 
@@ -211,6 +214,24 @@ async sub handle_stream_f {
     my ($reason) = @_;
     $stream->finish_reason($reason) if defined $reason && length $reason;
   };
+  # The upstream's tool calls, assembled into complete Langertha::ToolCall
+  # objects: OpenAI delta.tool_calls fragments per index until the stream
+  # ends, Anthropic tool_use blocks with their input_json_delta until
+  # content_block_stop, Ollama message.tool_calls whole. The client-side
+  # protocol frames them when it closes the stream (k19).
+  my %openai_calls;
+  my %anthropic_blocks;
+  my $note_calls = sub {
+    my @calls = @_;
+    $stream->tool_calls( [ @{ $stream->tool_calls }, @calls ] ) if @calls;
+  };
+  my $finish_openai_calls = sub {
+    return unless %openai_calls;
+    my @raw = map { $openai_calls{$_} } sort { $a <=> $b } keys %openai_calls;
+    %openai_calls = ();
+    $note_calls->( Langertha::ToolCall->extract( 'openai',
+      { choices => [ { message => { tool_calls => \@raw } } ] } ) );
+  };
   my $extract_chunk = sub {
     my ($line) = @_;
     if ( $proto_name eq 'openai' || $proto_name eq 'anthropic' ) {
@@ -221,10 +242,37 @@ async sub handle_stream_f {
       return undef unless ref $d eq 'HASH';
       if ( $proto_name eq 'openai' ) {
         $note_finish->( $d->{choices}[0]{finish_reason} );
+        my $frags = $d->{choices}[0]{delta}{tool_calls};
+        for my $frag ( ref $frags eq 'ARRAY' ? @$frags : () ) {
+          next unless ref $frag eq 'HASH';
+          my $call = $openai_calls{ $frag->{index} // 0 } //=
+            { id => '', type => 'function', function => { name => '', arguments => '' } };
+          $call->{id} = $frag->{id} if defined $frag->{id} && length $frag->{id};
+          my $fn = ref $frag->{function} eq 'HASH' ? $frag->{function} : {};
+          $call->{function}{name} = $fn->{name} if defined $fn->{name} && length $fn->{name};
+          $call->{function}{arguments} .= $fn->{arguments} // '';
+        }
         return $d->{choices}[0]{delta}{content};
       } else {
         my $type = $d->{type} // '';
         $note_finish->( $d->{delta}{stop_reason} ) if $type eq 'message_delta';
+        my $index = $d->{index} // 0;
+        if ( $type eq 'content_block_start'
+          && ref $d->{content_block} eq 'HASH'
+          && ( $d->{content_block}{type} // '' ) eq 'tool_use' ) {
+          $anthropic_blocks{$index} = { %{ $d->{content_block} }, json => '' };
+          return undef;
+        }
+        if ( $type eq 'content_block_delta' && $anthropic_blocks{$index} ) {
+          $anthropic_blocks{$index}{json} .= $d->{delta}{partial_json} // '';
+          return undef;
+        }
+        if ( $type eq 'content_block_stop' && ( my $block = delete $anthropic_blocks{$index} ) ) {
+          my $json = delete $block->{json};
+          $block->{input} = $json if length $json;
+          $note_calls->( grep { defined } Langertha::ToolCall->from_anthropic($block) );
+          return undef;
+        }
         return $d->{delta}{text} if $type eq 'content_block_delta';
         return undef;
       }
@@ -233,6 +281,7 @@ async sub handle_stream_f {
       my $d = eval { $self->_json->decode($line) };
       return undef unless ref $d eq 'HASH';
       $note_finish->( $d->{done_reason} ) if $d->{done};
+      $note_calls->( Langertha::ToolCall->extract( 'ollama', $d ) );
       return $d->{message}{content};
     }
     return undef;
@@ -245,6 +294,7 @@ async sub handle_stream_f {
       return sub {
         my ($data) = @_;
         if ( !defined $data ) {
+          $finish_openai_calls->();
           $finished = 1;
           $deliver->(undef);
           return;

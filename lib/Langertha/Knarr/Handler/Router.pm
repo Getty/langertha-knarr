@@ -106,11 +106,12 @@ async sub handle_stream_f {
     my $r = await $self->handle_chat_f($session, $request);
     my $stream = Langertha::Knarr::Stream->from_list( $r->content );
     $stream->finish_reason( $r->finish_reason );
+    $stream->tool_calls( $r->tool_calls );
     return $stream;
   }
 
   return Langertha::Knarr::Stream->from_callback( sub {
-    my ($emit, $done, $fail, $finish) = @_;
+    my ($emit, $done, $fail, $finish, $tool_call) = @_;
     my $cb = sub {
       my ($chunk) = @_;
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
@@ -119,6 +120,12 @@ async sub handle_stream_f {
       # terminal chunk; the protocol maps it when it closes the stream.
       $finish->( $chunk->finish_reason )
         if ref $chunk && $chunk->can('has_finish_reason') && $chunk->has_finish_reason;
+      # Core assembles streamed tool-call fragments and attaches the finished
+      # Langertha::ToolCall objects to a chunk (Role::Chat::aggregate_tool_calls
+      # collects the same); a core whose parser attaches none yields none. The
+      # protocol emits them when it closes the stream (k19).
+      $tool_call->( @{ $chunk->tool_calls } )
+        if ref $chunk && $chunk->can('has_tool_calls') && $chunk->has_tool_calls;
     };
     my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );

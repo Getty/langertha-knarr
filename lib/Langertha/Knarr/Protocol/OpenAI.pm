@@ -36,6 +36,10 @@ has _json => (
   default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) },
 );
 
+# Tool arguments become a JSON string inside a chunk that _json encodes to
+# UTF-8, so they are encoded to characters here, not to bytes.
+has _args_json => ( is => 'ro', default => sub { JSON::MaybeXS->new( canonical => 1 ) } );
+
 sub protocol_name { 'openai' }
 
 sub protocol_routes {
@@ -149,16 +153,43 @@ sub format_stream_chunk {
 }
 
 # OpenAI streams end with a chunk whose delta is empty and whose
-# finish_reason is set, before data: [DONE]. The stream delivers text only,
-# so there are no tool calls to weigh in.
+# finish_reason is set, before data: [DONE]. The routed stream carries the
+# backend's tool calls complete, so they go out ahead of it in one chunk:
+# delta.tool_calls with every call whole, keyed by index (k19).
 sub format_stream_close {
-  my ($self, $request, $finish_reason) = @_;
+  my ($self, $request, $finish_reason, $tool_calls) = @_;
+  my @calls = @{ $tool_calls // [] };
+  my $out = '';
+  if (@calls) {
+    my @delta_calls;
+    for my $index ( 0 .. $#calls ) {
+      my $wire = $calls[$index]->to_openai( fallback_id => 'call_knarr_' . ( $index + 1 ) );
+      push @delta_calls, {
+        index    => $index,
+        id       => $wire->{id},
+        type     => 'function',
+        function => {
+          name      => $wire->{function}{name},
+          arguments => $self->_args_json->encode( $calls[$index]->arguments // {} ),
+        },
+      };
+    }
+    $out .= $self->_stream_chunk( $request,
+      { index => 0, delta => { tool_calls => \@delta_calls }, finish_reason => undef } );
+  }
+  $out .= $self->_stream_chunk( $request,
+    { index => 0, delta => {}, finish_reason => _finish_reason( $finish_reason, scalar @calls ) } );
+  return $out;
+}
+
+sub _stream_chunk {
+  my ($self, $request, $choice) = @_;
   my $payload = {
     id => 'chatcmpl-stream',
     object  => 'chat.completion.chunk',
     created => int( time() ),
     model   => $request->model // 'unknown',
-    choices => [ { index => 0, delta => {}, finish_reason => _finish_reason( $finish_reason, 0 ) } ],
+    choices => [ $choice ],
   };
   return "data: " . $self->_json->encode($payload) . "\n\n";
 }

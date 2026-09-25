@@ -131,7 +131,13 @@ async sub handle_stream_f {
         }
         unless ( $closed ) {
           $closed = 1;
-          $self->request_log->end_request( $handle, output => $accumulated );
+          # The complete tool calls, known once the stream is exhausted (k19).
+          $self->request_log->end_request(
+            $handle,
+            output => $accumulated,
+            ( $upstream->can('has_tool_calls') && $upstream->has_tool_calls
+                ? ( tool_calls => $upstream->tool_calls ) : () ),
+          );
         }
         return Future->done(undef);
       })->else( sub {

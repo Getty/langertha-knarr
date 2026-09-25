@@ -95,6 +95,7 @@ async sub handle_stream_f {
   my $r = Langertha::Knarr::Response->coerce( await $self->handle_chat_f($session, $request) );
   my $stream = Langertha::Knarr::Stream->from_list( $r->content );
   $stream->finish_reason( $r->finish_reason );
+  $stream->tool_calls( $r->tool_calls );
   return $stream;
 }
 

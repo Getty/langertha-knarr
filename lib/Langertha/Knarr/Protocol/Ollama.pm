@@ -136,12 +136,17 @@ sub format_stream_chunk {
 
 sub stream_content_type { 'application/x-ndjson' }
 
+# The routed stream carries the backend's tool calls complete; Ollama's own
+# wire sends message.tool_calls whole, so they ride on the done line (k19).
 sub format_stream_done {
-  my ($self, $request, $finish_reason) = @_;
+  my ($self, $request, $finish_reason, $tool_calls) = @_;
+  my $message = { role => 'assistant', content => '' };
+  $message->{tool_calls} = [ map { $_->to_ollama } @$tool_calls ]
+    if $tool_calls && @$tool_calls;
   my $payload = {
     model      => $request->model // 'unknown',
     created_at => _ts(),
-    message    => { role => 'assistant', content => '' },
+    message    => $message,
     done       => JSON::MaybeXS::true(),
     done_reason => _done_reason($finish_reason),
   };

@@ -177,6 +177,9 @@ async sub handle_stream_f {
             output => $accumulated,
             model  => $request->model,
             ( defined $ttft ? ( timing => { ttft_seconds => $ttft } ) : () ),
+            # The complete tool calls, known once the stream is exhausted (k19).
+            ( $upstream_stream->can('has_tool_calls') && $upstream_stream->has_tool_calls
+                ? ( tool_calls => $upstream_stream->tool_calls ) : () ),
           );
         }
         return Future->done(undef);

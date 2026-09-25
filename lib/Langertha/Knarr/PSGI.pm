@@ -122,8 +122,9 @@ sub _handle_psgi {
       $out .= $proto->format_stream_chunk( $delta, $sb_req );
     }
     my $finish_reason = $stream->can('finish_reason') ? $stream->finish_reason : undef;
-    $out .= $proto->format_stream_close( $sb_req, $finish_reason );
-    $out .= $proto->format_stream_done( $sb_req, $finish_reason );
+    my $tool_calls    = $stream->can('tool_calls')    ? $stream->tool_calls    : [];
+    $out .= $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls );
+    $out .= $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls );
     return [ 200, [ 'Content-Type' => $proto->stream_content_type ], [ $out ] ];
   }
 
