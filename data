@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T18:34:39Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T18:34:39Z
+created: 2026-09-25T18:20:46Z
+id: 35
+priority: medium
+started: 2026-09-25T18:34:39Z
+status: done
+tags:
+- http
+- timeouts
+- passthrough
+title: knarr's own HTTP client (passthrough, tracing, ACP/A2A) has no timeout
+updated: 2026-09-25T18:34:39Z
+---
+
+From core k278: core engines now honor user_agent_timeout on Net::Async::HTTP, but knarr's own _http client (raw passthrough, Langfuse tracing, ACP/A2A calls) has no timeout — a hanging upstream stalls the client connection forever. Add a configurable upstream timeout (config + env), total for non-streaming, stall_timeout for streaming passthrough (Net::Async::HTTP per-request options), tracing with a short timeout so telemetry can't stall requests. Tests with a never-answering local server.
