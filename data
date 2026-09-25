@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-25T07:50:33Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:50:33Z
+created: 2026-09-25T06:46:03Z
+id: 16
+priority: low
+started: 2026-09-25T07:50:33Z
+status: done
+tags:
+- langertha-core
+- tools
+- capabilities
+title: Gate proxied tool_choice on the engine's tool_choice_* capabilities (core k239)
+updated: 2026-09-25T07:50:33Z
+---
+
+Core k239 (unreleased) gates a caller's tool_choice against supports('tool_choice_*') in core and carps when it drops a forced/none choice. Request.pm chat_f_args forwards tool_choice whenever tools_native||tools_hermes, so a proxied forced choice to Ollama native / OllamaOpenAI / MiniMax triggers a server-side core carp per request. Decide: pre-gate in knarr (forward only when the matching tool_choice_* flag is claimed, mirror core's none-withholds rule) or leave it to core and accept the carp. Low priority.
+
+Won't fix (orchestrator ruling 2026-09-25): core's _gate_tool_choice (k239) is the single owner of tool_choice semantics per wire (incl. none withholds tools); pre-gating in knarr would duplicate and drift. The per-request carp on the server is intended signal.
