@@ -152,6 +152,17 @@ Optional shared secret. When set, every incoming request must present
 it as C<Authorization: Bearer> or C<x-api-key>. Discovery routes
 (C</.well-known/agent.json>) stay anonymous.
 
+=attr ollama_compat_version
+
+The Ollama version reported at C<GET /api/version> as
+C<{"version":"..."}>. Default C<0.12.6>, the Ollama version in the Ollama
+OpenAPI spec that Langertha bundles for L<Langertha::Engine::Ollama>.
+It is a compatibility claim, not Knarr's own version: Ollama clients
+read it as the server's Ollama version and may switch features on or off
+by it, so set it only to a version whose C</api/chat>, C</api/generate> and C</api/tags> behaviour
+Knarr's Ollama endpoints cover. Configured as C<ollama_compat_version> in
+the config file or C<KNARR_OLLAMA_COMPAT_VERSION>.
+
 =attr public_url
 
 Optional public base URL (e.g. C<https://knarr.example>) used in the
@@ -270,6 +281,15 @@ has public_url => (
   is => 'ro',
   isa => 'Maybe[Str]',
   default => sub { undef },
+);
+
+# What GET /api/version answers (k27): the Ollama version the Ollama
+# endpoints are compatible with -- the one in Langertha's bundled Ollama
+# OpenAPI spec (share/ollama.yaml) -- not Knarr's own.
+has ollama_compat_version => (
+  is => 'ro',
+  isa => 'Str',
+  default => '0.12.6',
 );
 
 has _manifest => (
@@ -670,6 +690,12 @@ sub _action_acp_agents { goto &_action_models }
 sub _action_a2a_card {
   my ($self, $proto, $req) = @_;
   my ($status, $headers, $body) = $proto->format_agent_card;
+  $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
+}
+
+sub _action_version {
+  my ($self, $proto, $req) = @_;
+  my ($status, $headers, $body) = $proto->format_version_response( $self->ollama_compat_version );
   $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 

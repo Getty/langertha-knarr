@@ -12,7 +12,9 @@ L<Langertha::Knarr::Protocol>. Loaded by default.
 
 =item * C<GET /api/tags> — model listing
 
-=item * C<GET /api/version> — version probe
+=item * C<GET /api/version> — version probe, answered with Ollama's shape
+C<{"version":"x.y.z"}> and the Ollama version Knarr claims compatibility
+with (L<Langertha::Knarr/ollama_compat_version>), not Knarr's own version
 
 =back
 
@@ -138,6 +140,15 @@ sub format_models_response {
   } @$models;
   return ( 200, { 'Content-Type' => 'application/json' },
     $self->_json->encode({ models => \@data }) );
+}
+
+# GET /api/version (k27). Ollama clients read this as the server's Ollama
+# version and may gate features on it, so it carries the Ollama version
+# Knarr's endpoints are compatible with, never Knarr's own version.
+sub format_version_response {
+  my ($self, $version) = @_;
+  return ( 200, { 'Content-Type' => 'application/json' },
+    $self->_json->encode({ version => "$version" }) );
 }
 
 sub format_stream_chunk {

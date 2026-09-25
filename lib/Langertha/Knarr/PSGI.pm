@@ -129,6 +129,10 @@ sub _handle_psgi {
     );
     return [ $status, [ 'Content-Type' => 'application/json' ], [ $body ] ];
   }
+  if ( $action eq 'version' ) {
+    my ($status, $headers, $body) = $proto->format_version_response( $sb->ollama_compat_version );
+    return [ $status, [ %$headers ], [ $body ] ];
+  }
   if ( $action eq 'a2a_card' ) {
     my ($status, $headers, $body) = $proto->format_agent_card;
     return [ $status, [ %$headers ], [ $body ] ];

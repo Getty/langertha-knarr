@@ -10,6 +10,13 @@ Revision history for Langertha-Knarr
       A2A agent card still anonymous. Upgrade if you serve Knarr via PSGI
       with a key set.
 
+    - GET /api/version answers Ollama's {"version":"x.y.z"} on the native
+      server and PSGI instead of a 500. The version is the Ollama version
+      Knarr's Ollama endpoints are compatible with, not Knarr's own:
+      0.12.6 by default, set with the new ollama_compat_version config key
+      or KNARR_OLLAMA_COMPAT_VERSION. The route needs proxy_api_key when
+      one is set.
+
     - The PSGI adapter now does the same raw passthrough as the native
       server: a model the router does not configure goes to the upstream
       byte for byte, with the client's headers, and its answer comes back

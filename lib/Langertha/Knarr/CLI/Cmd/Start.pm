@@ -271,6 +271,8 @@ sub execute {
     ( $tracing->_enabled ? ( tracing => $tracing ) : () ),
     ( $config->has_proxy_api_key ? ( auth_token => $config->proxy_api_key ) : () ),
     ( defined $config->public_url ? ( public_url => $config->public_url ) : () ),
+    ( defined $config->ollama_compat_version
+      ? ( ollama_compat_version => $config->ollama_compat_version ) : () ),
   );
 
   _log("Starting server:");

@@ -385,6 +385,25 @@ Returns true when a L</proxy_api_key> is configured.
 
 =cut
 
+has ollama_compat_version => (
+  is      => 'lazy',
+  builder => '_build_ollama_compat_version',
+);
+
+=attr ollama_compat_version
+
+Optional Ollama version to report at C<GET /api/version> (see
+L<Langertha::Knarr/ollama_compat_version>). Falls back to the
+C<KNARR_OLLAMA_COMPAT_VERSION> environment variable. When not set, Knarr's
+default applies.
+
+=cut
+
+sub _build_ollama_compat_version {
+  my ($self) = @_;
+  return $self->data->{ollama_compat_version} // $ENV{KNARR_OLLAMA_COMPAT_VERSION} // undef;
+}
+
 has auto_discover => (
   is      => 'lazy',
   builder => '_build_auto_discover',
