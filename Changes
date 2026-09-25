@@ -15,6 +15,12 @@ Revision history for Langertha-Knarr
       whose stream parser attaches the assembled calls to its chunks;
       with one that does not, the stream carries none.
 
+    - Two models routed to the same engine, URL and API key now each get
+      their own engine instance, so the upstream request carries the model
+      the client asked for. This covers auto-discovered gateway models and
+      names routed to the default engine as well.
+
+
     - Streams now end with the backend's real finish reason instead of a
       fixed "normal end": the Anthropic message_delta stop_reason uses the
       same mapping as non-streaming answers, OpenAI streams end with a

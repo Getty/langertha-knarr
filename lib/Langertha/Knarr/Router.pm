@@ -20,8 +20,9 @@ use Langertha ();
 =head1 DESCRIPTION
 
 Resolves a model name to a Langertha engine instance and canonical model
-identifier. Engine instances are cached and reused across requests to avoid
-repeated construction overhead.
+identifier. Engine instances are cached per engine, URL, API key variable and
+model, and reused across requests to avoid repeated construction overhead. Two
+models on the same endpoint get two instances, each carrying its own model.
 
 Engine classes are resolved from both C<Langertha::Engine::*> and
 C<LangerthaX::Engine::*>.
@@ -161,7 +162,11 @@ sub _engine_cache_key {
   my $engine = $def->{engine} // '';
   my $url = $def->{url} // '';
   my $key_env = $def->{api_key_env} // '';
-  return join('|', $engine, $url, $key_env);
+  # The model is part of the key: chat_model is read-only on an engine, and
+  # core evaluates model-scoped capabilities against it, so each model needs
+  # its own instance (k20).
+  my $model = $def->{model} // '';
+  return join('|', $engine, $url, $key_env, $model);
 }
 
 sub _discover_models {
