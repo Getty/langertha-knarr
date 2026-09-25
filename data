@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-25T19:17:18Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T19:17:18Z
+created: 2026-09-25T18:56:13Z
+id: 37
+priority: low
+started: 2026-09-25T19:17:18Z
+status: done
+tags:
+- vision
+- probe
+- compat
+title: Use core's probe_model_capabilities for /api/show vision and manifest on gateway/self-hosted
+  engines
+updated: 2026-09-25T19:17:18Z
+---
+
+Core k270 (unreleased) adds opt-in probe_model_capabilities(_f) (ADR 0032) that learns image_input from provider metadata (OpenRouter, Mistral, LM Studio, Ollama, llama.cpp). Knarr could probe once per routed engine (at startup/after discovery, cached, refreshed with discovery) so /api/show vision and the manifest are right for gateway/self-hosted models. Explicit, async, failures non-fatal (log). Gate on ->can('probe_model_capabilities_f') for older cores.
