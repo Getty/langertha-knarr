@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-25T15:59:47Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T15:59:47Z
+created: 2026-09-24T19:40:49Z
+id: 14
+priority: medium
+started: 2026-09-25T15:59:47Z
+status: done
+tags:
+- manifest
+- provider-discovery
+- needs:langertha#191
+title: Provider-Manifest /.well-known/langertha.json automatisch ausliefern
+updated: 2026-09-25T15:59:47Z
+---
+
+Aus langertha-raider ADR 0007 (2026-09-24). Knarr liefert das Manifest automatisch aus seiner tatsaechlich exponierten Modell-Oberflaeche (inkl. auto_discover), damit `raider --provider mein-knarr` einfach funktioniert. Nutzt Schema/Builder aus langertha#191.
+NICHT die interne YAML-Config serialisieren; keine Upstream-Keys, internen Servernamen oder Passthrough-Details leaken. Oeffentliche URL + Aliase + berechtigte Modellnamen. Auth-Verfahren = proxy_api_key falls gesetzt.
+
+2026-09-25 15:59 Implemented on branch k14-manifest (worktree .claude/worktrees/k14-manifest), commit ffce2d1. Decisions: manifest route requires proxy_api_key like /v1/models (flip in _check_auth if it should be anonymous like the A2A card); Anthropic endpoint published as anthropic-compat (no output_config.format parsing); per-protocol capability narrowing via Protocol->manifest_endpoint; new public_url config key.
