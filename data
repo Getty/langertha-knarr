@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-25T16:57:44Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:57:44Z
+created: 2026-09-25T16:53:41Z
+id: 31
+priority: low
+started: 2026-09-25T16:57:44Z
+status: done
+tags:
+- router
+- discovery
+- context
+title: 'auto_discover: discovered models inherit the parent model''s context_size
+  (model-specific window)'
+updated: 2026-09-25T16:57:44Z
+---
+
+From k30: models found by auto_discover copy the whole config of the model they were discovered through, incl. context_size (and system_prompt/temperature, which are arguably endpoint-level). A context window is model-specific: a discovered model should not inherit it. Fix: drop context_size (and any other model-specific keys — review the list) when cloning for discovered models; test.
+
+2026-09-25 16:57 Fixed on branch k31-discover-ctx, commit 294279d: discovered models drop model + context_size; endpoint keys (engine,url,api_key_env,api_key,system_prompt,temperature,response_size) inherited. Not pushed/merged.
