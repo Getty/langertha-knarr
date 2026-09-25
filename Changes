@@ -2,6 +2,12 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - The routed path now forwards tools and tool_choice to Hermes-wire
+      engines (NousResearch, AKI native), which carry tools in the system
+      prompt and advertise tools_hermes rather than tools_native. Both are
+      forwarded when the engine supports either capability, and still
+      dropped when it supports neither.
+
     - Langertha floor raised from 0.500 to 0.503, matching the real
       runtime dependency. Knarr requires the canonical per-request
       controls chat_f extracts (reasoning_effort, seed, parallel_tool_use,

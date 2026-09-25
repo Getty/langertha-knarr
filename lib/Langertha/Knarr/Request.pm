@@ -200,6 +200,13 @@ Ollama's bare C<'json'> — needs only C<response_format_json_object>.
 Gating both on the schema flag would drop a plain C<json_object>
 request on an engine that can only do the loose form.
 
+C<tools> and C<tool_choice> are forwarded when the engine supports
+either C<tools_native> or C<tools_hermes>. Hermes-wire engines
+(NousResearch, AKI native) carry tools in the system prompt rather than
+as a native C<tools> field, and Langertha's C<chat_f> renders them there
+and handles C<tool_choice> per wire, so gating on C<tools_native> alone
+would silently drop a client's tools on those backends.
+
 =cut
 
 # Which capability flag a given response_format value requires. Only an
@@ -219,9 +226,10 @@ sub chat_f_args {
     ? sub { $engine->supports($_[0]) }
     : sub { 1 };
   my $rf = $self->response_format;
+  my $tools_ok = $supports->('tools_native') || $supports->('tools_hermes');
   my @args = ( messages => $self->messages );
-  push @args, tools           => $self->tools           if $self->tools           && $supports->('tools_native');
-  push @args, tool_choice     => $self->tool_choice     if defined $self->tool_choice && $supports->('tools_native');
+  push @args, tools           => $self->tools           if $self->tools           && $tools_ok;
+  push @args, tool_choice     => $self->tool_choice     if defined $self->tool_choice && $tools_ok;
   push @args, response_format => $rf                    if defined $rf              && $supports->( _response_format_cap($rf) );
   push @args, temperature     => $self->temperature     if defined $self->temperature && $supports->('temperature');
   push @args, max_tokens      => $self->max_tokens      if defined $self->max_tokens  && $supports->('response_size');
