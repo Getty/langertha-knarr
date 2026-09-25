@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-25T07:42:10Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:42:10Z
+created: 2026-09-25T07:34:28Z
+id: 20
+priority: high
+started: 2026-09-25T07:42:10Z
+status: done
+tags:
+- router
+- bug
+- llm
+- risk
+title: 'Router engine cache ignores the model: two models on one engine/url/key share
+  the first model''s instance'
+updated: 2026-09-25T07:42:10Z
+---
+
+Found by langertha-llm-advisor during core k238 design pass (2026-09-25), code-read only, not run.
+
+Knarr::Router::_engine_cache_key is join("|", engine, url, api_key_env) — the model is not part of it. _get_engine sets $args{model} only when constructing, so the second configured (or auto-discovered) model on the same engine/url/key gets the CACHED instance built for the first model. Request::chat_f_args passes no model, so the upstream body carries the first model (chat_model is ro), and Handler::Router then clone_with(model => $canonical_model) — the client sees the model it asked for while another model answered.
+
+Also wrong per model: every model-scoped decision in core (layer-3 model_capability_corrections, model_capability_exclusions, Reasoning::Profile, and the proposed model-aware tool_wire_format of core k238) is evaluated for the wrong chat_model.
+
+Worst case: auto_discover on a gateway (OpenRouter, NousResearch, HuggingFace) — all discovered slugs collapse onto one model.
+
+Fix direction: include the resolved model in the cache key (or cache per engine config and clone with chat_model => $model per resolved model). Test: two models, same engine/url/key, assert two distinct chat_model on the upstream request.
