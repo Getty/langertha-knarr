@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-25T07:23:28Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:23:28Z
+created: 2026-09-25T07:19:08Z
+id: 17
+priority: medium
+started: 2026-09-25T07:23:28Z
+status: done
+tags:
+- protocol
+- anthropic
+title: Anthropic protocol passes OpenAI finish_reason through as stop_reason (tool_calls/length
+  are not Anthropic values)
+updated: 2026-09-25T07:23:28Z
+---
+
+From core k248: lib/Langertha/Knarr/Protocol/Anthropic.pm:101 sets stop_reason => $r->finish_reason verbatim. For OpenAI-dialect backends that is 'tool_calls' (now also for gpt-oss replies that said 'stop', core k248) or 'length' — not valid Anthropic stop_reason values. Map: tool_calls|function_call -> tool_use, length -> max_tokens, stop -> end_turn (and tool_use when tool_calls are present), content_filter -> refusal/end_turn; pass through values already in Anthropic vocabulary. Test per mapping + streaming message_delta.
+
+2026-09-25 07:22 Fixed in 2861d25 on branch k17-stop-reason: _stop_reason mapping in Protocol/Anthropic.pm, t/34_anthropic_stop_reason.t. content_filter -> refusal; unknown values fall back to end_turn/tool_use. Stream close had no finish_reason to map (stays end_turn), follow-up ticket filed.
