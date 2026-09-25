@@ -33,6 +33,14 @@ BEGIN {
     ) );
   }
   $INC{'LangerthaX/Engine/TestKnarrAnswering.pm'} = __FILE__;
+
+  # Offline gateway whose model list depends on its url, so each gateway
+  # instance discovers something the other one does not.
+  package LangerthaX::Engine::TestKnarrGatewayByUrl;
+  sub new { my ($class, %args) = @_; bless \%args, $class }
+  sub chat_model { $_[0]{model} }
+  sub list_models { my ($host) = $_[0]{url} =~ m{//([^/]+)}; [ "$host/only-here" ] }
+  $INC{'LangerthaX/Engine/TestKnarrGatewayByUrl.pm'} = __FILE__;
 }
 use JSON::PP ();
 
@@ -313,6 +321,37 @@ YAML
   $LangerthaX::Engine::TestKnarrAnswering::engine_default = undef;
   is $answer_model->('alias-only'), undef,
     'alias-only config with no known model is not relabeled with the alias';
+}
+
+# k23: discovery runs once per endpoint (engine, url, api key variable), not
+# once per engine class. Two gateways of the same class on different urls
+# serve different models; deduping by class hid the second gateway's models.
+{
+  my ($fh, $file) = tempfile(SUFFIX => '.yaml', UNLINK => 1);
+  print $fh <<'YAML';
+auto_discover: 1
+models:
+  gw-a:
+    engine: TestKnarrGatewayByUrl
+    url: http://gw-a.invalid/v1
+    model: seed-a
+  gw-b:
+    engine: TestKnarrGatewayByUrl
+    url: http://gw-b.invalid/v1
+    model: seed-b
+YAML
+  close $fh;
+
+  my $config = Langertha::Knarr::Config->new(file => $file);
+  my $router = Langertha::Knarr::Router->new(config => $config);
+
+  my %discovered = map { $_->{id} => 1 }
+    grep { $_->{source} eq 'discovered' } @{ $router->list_models };
+  ok $discovered{'gw-a.invalid/only-here'}, 'first gateway of the class is discovered';
+  ok $discovered{'gw-b.invalid/only-here'}, 'second gateway of the same class on another url is discovered too';
+
+  my ($engine_b) = $router->resolve('gw-b.invalid/only-here');
+  is $engine_b->{url}, 'http://gw-b.invalid/v1', 'discovered model routes to the gateway that listed it';
 }
 
 done_testing;

@@ -28,7 +28,7 @@ Engine classes are resolved from both C<Langertha::Engine::*> and
 C<LangerthaX::Engine::*>.
 
 When C<auto_discover> is enabled in the config, the router queries each
-configured engine for its full model list on first use, making all discovered
+configured endpoint (engine, URL and API key variable) for its full model list on first use, making all discovered
 models available as routing targets.
 
 =cut
@@ -170,14 +170,18 @@ sub _get_engine {
 
 sub _engine_cache_key {
   my ($self, $def) = @_;
-  my $engine = $def->{engine} // '';
-  my $url = $def->{url} // '';
-  my $key_env = $def->{api_key_env} // '';
   # The model is part of the key: chat_model is read-only on an engine, and
   # core evaluates model-scoped capabilities against it, so each model needs
   # its own instance (k20).
   my $model = $def->{model} // '';
-  return join('|', $engine, $url, $key_env, $model);
+  return join('|', $self->_endpoint_key($def), $model);
+}
+
+# One upstream endpoint: engine, url and API key variable. Discovery runs
+# once per endpoint (k23).
+sub _endpoint_key {
+  my ($self, $def) = @_;
+  return join('|', map { $def->{$_} // '' } qw( engine url api_key_env ));
 }
 
 sub _discover_models {
@@ -188,12 +192,12 @@ sub _discover_models {
   return unless $self->config->auto_discover;
 
   my $models = $self->config->models;
-  my %seen_engines;
+  my %seen_endpoints;
 
   for my $name (keys %$models) {
     my $def = $models->{$name};
     my $engine_class = $def->{engine};
-    next if $seen_engines{$engine_class}++;
+    next if $seen_endpoints{ $self->_endpoint_key($def) }++;
 
     eval {
       my $engine = $self->_get_engine($def, $name);

@@ -31,6 +31,10 @@ Revision history for Langertha-Knarr
       instead of the alias name. Router->resolve returns a third value
       that is true for such alias-only configs.
 
+    - auto_discover now queries every configured endpoint: two models on
+      the same engine class with a different URL or API key variable each
+      contribute their discovered models.
+
 
     - Streams now end with the backend's real finish reason instead of a
       fixed "normal end": the Anthropic message_delta stop_reason uses the
