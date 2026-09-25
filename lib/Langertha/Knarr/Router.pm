@@ -78,6 +78,14 @@ string to use with that engine. The resolution order is:
 
 =back
 
+The third return value is true when the matched model config has no
+C<model> key: the engine is then built without a model, the provider's
+default answers, and the returned model string is just the requested alias.
+L<Langertha::Knarr::Handler::Router> uses it to report the model that
+answered instead of the alias.
+
+    my ($engine, $model, $alias_only) = $router->resolve($model_name);
+
 Croaks if the model cannot be resolved. Pass C<skip_default =E<gt> 1> to allow
 the caller to try passthrough before falling back to the default engine.
 
@@ -110,8 +118,11 @@ sub resolve {
 
   my $engine = $self->_get_engine($def, $model_name);
   my $resolved_model = $def->{model} // $model_name;
+  # No model: key means the engine was built without a model and the
+  # provider default answers; $resolved_model is only the alias then (k22).
+  my $alias_only = defined $def->{model} ? 0 : 1;
 
-  return ($engine, $resolved_model);
+  return ($engine, $resolved_model, $alias_only);
 }
 
 sub _get_engine {

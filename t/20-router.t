@@ -15,11 +15,32 @@ BEGIN {
   sub chat_model { $_[0]{model} }
   sub list_models { [ 'vendor-a/model-one', 'vendor-b/model-two' ] }
   $INC{'LangerthaX/Engine/TestKnarrGateway.pm'} = __FILE__;
+
+  # Offline engine that answers chat_f: the upstream reports `answered_as`
+  # as the model that answered (undef = the upstream names none); chat_model
+  # is the configured model, else `engine_default` (undef = none known).
+  package LangerthaX::Engine::TestKnarrAnswering;
+  use Future;
+  use Langertha::Response;
+  our ($answered_as, $engine_default);
+  sub new { my ($class, %args) = @_; bless \%args, $class }
+  sub chat_model { $_[0]{model} // $engine_default }
+  sub chat_f {
+    my ($self) = @_;
+    return Future->done( Langertha::Response->new(
+      content => 'answer', raw => {},
+      ( defined $answered_as ? ( model => $answered_as ) : () ),
+    ) );
+  }
+  $INC{'LangerthaX/Engine/TestKnarrAnswering.pm'} = __FILE__;
 }
 use JSON::PP ();
 
 use Langertha::Knarr::Config;
 use Langertha::Knarr::Router;
+use Langertha::Knarr::Handler::Router;
+use Langertha::Knarr::Request;
+use Langertha::Knarr::Session;
 
 # Test: resolve configured model
 {
@@ -244,6 +265,54 @@ YAML
   is $engine_gw->chat_model,  'vendor-a/model-one', 'configured gateway model keeps its chat_model';
   is $engine_two->chat_model, 'vendor-b/model-two', 'discovered slug gets an engine with its own chat_model';
   isnt "$engine_two", "$engine_gw", 'discovered slug does not reuse the configured instance';
+}
+
+# k22: a model config without `model:` builds the engine without a model, so
+# the provider default answers. Relabeling that answer with the alias tells
+# the client a model answered that did not exist upstream; the client must
+# see the model that actually answered. A config with `model:` keeps the k20
+# relabel to the configured model.
+{
+  my ($fh, $file) = tempfile(SUFFIX => '.yaml', UNLINK => 1);
+  print $fh <<'YAML';
+models:
+  alias-only:
+    engine: TestKnarrAnswering
+    url: http://test.invalid/v1
+  pinned:
+    engine: TestKnarrAnswering
+    url: http://test.invalid/v1
+    model: pinned-upstream
+YAML
+  close $fh;
+
+  my $config  = Langertha::Knarr::Config->new(file => $file);
+  my $router  = Langertha::Knarr::Router->new(config => $config);
+  my $handler = Langertha::Knarr::Handler::Router->new(router => $router);
+  my $session = Langertha::Knarr::Session->new(id => 's');
+  my $answer_model = sub {
+    my ($name) = @_;
+    my $req = Langertha::Knarr::Request->new(
+      protocol => 'openai', model => $name,
+      messages => [ { role => 'user', content => 'hi' } ],
+    );
+    return $handler->handle_chat_f($session, $req)->get->model;
+  };
+
+  local $LangerthaX::Engine::TestKnarrAnswering::answered_as    = 'provider-default-7b';
+  local $LangerthaX::Engine::TestKnarrAnswering::engine_default = 'engine-default';
+  is $answer_model->('alias-only'), 'provider-default-7b',
+    'alias-only config reports the model the upstream says answered, not the alias';
+  is $answer_model->('pinned'), 'pinned-upstream',
+    'config with model: keeps the relabel to the configured model';
+
+  $LangerthaX::Engine::TestKnarrAnswering::answered_as = undef;
+  is $answer_model->('alias-only'), 'engine-default',
+    'alias-only config without an upstream model reports the engine chat_model';
+
+  $LangerthaX::Engine::TestKnarrAnswering::engine_default = undef;
+  is $answer_model->('alias-only'), undef,
+    'alias-only config with no known model is not relabeled with the alias';
 }
 
 done_testing;

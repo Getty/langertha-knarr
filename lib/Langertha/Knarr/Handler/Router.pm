@@ -35,6 +35,11 @@ unknown model names tunnel through to it instead of failing — this
 preserves the classic Knarr behaviour where configured models go via
 Langertha and everything else passes straight to the upstream API.
 
+Non-streaming answers are labeled with the configured model. For a model
+config without a C<model> key the provider's default answers, so the
+response keeps the model the upstream reported, else the engine's
+C<chat_model>; it is never relabeled with the alias.
+
 Streaming responses are pumped via the engine's
 C<chat_stream_realtime_f> for native token-by-token delivery, with the
 same capability-filtered generation parameters as the non-streaming path.
@@ -83,7 +88,7 @@ sub _resolve {
 
 async sub handle_chat_f {
   my ($self, $session, $request) = @_;
-  my ($engine, $canonical_model) = $self->_resolve( $request->model );
+  my ($engine, $canonical_model, $alias_only) = $self->_resolve( $request->model );
   unless ( $engine ) {
     return Langertha::Knarr::Response->coerce(
       await $self->passthrough->handle_chat_f( $session, $request )
@@ -91,6 +96,13 @@ async sub handle_chat_f {
   }
   my $response = await $engine->chat_f( $request->chat_f_args($engine) );
   my $r = Langertha::Knarr::Response->coerce($response);
+  # An alias without a configured model: the provider default answered, so
+  # report the model that answered, never the alias (k22).
+  if ( $alias_only ) {
+    return $r if defined $r->model;
+    my $chat_model = $engine->can('chat_model') ? $engine->chat_model : undef;
+    return defined $chat_model ? $r->clone_with( model => $chat_model ) : $r;
+  }
   return $r->clone_with( model => $canonical_model );
 }
 

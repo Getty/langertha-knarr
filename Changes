@@ -26,6 +26,11 @@ Revision history for Langertha-Knarr
       the client asked for. This covers auto-discovered gateway models and
       names routed to the default engine as well.
 
+    - A model configured without a model: key now reports the model that
+      actually answered (the upstream's, else the engine's default model)
+      instead of the alias name. Router->resolve returns a third value
+      that is true for such alias-only configs.
+
 
     - Streams now end with the backend's real finish reason instead of a
       fixed "normal end": the Anthropic message_delta stop_reason uses the
