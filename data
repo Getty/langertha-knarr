@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-25T16:03:54Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T16:03:54Z
+created: 2026-09-25T15:59:06Z
+id: 24
+priority: medium
+started: 2026-09-25T16:03:54Z
+status: done
+tags:
+- test
+- passthrough
+- core-drift
+title: t/45_passthrough_tool_calls.t fails against dev core (malformed UTF-8)
+updated: 2026-09-25T16:03:54Z
+---
+
+Found during k14. Under -I/home/getty/dev/langertha/lib (unreleased core) subtest 3 "Knarr re-frames the upstream calls for the client" dies: "malformed UTF-8 character in JSON string ... (before \x{fffd})" at t/45_passthrough_tool_calls.t line 141. Passes with installed core 0.503. Pre-existing: reproduced on e5b4bdf without the k14 change. Likely a core change in how ToolCall arguments / decoded content come back (double-encoded or bytes vs chars) on the passthrough re-framing path. Done = cause identified (knarr or core), fix or core ticket, test green on both cores.
