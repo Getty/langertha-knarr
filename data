@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-25T07:39:48Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T07:39:48Z
+created: 2026-09-25T07:29:15Z
+id: 19
+priority: medium
+started: 2026-09-25T07:39:48Z
+status: done
+tags:
+- protocol
+- streaming
+title: Routed streams drop tool calls (no tool_use / tool_calls deltas reach the client)
+updated: 2026-09-25T07:39:48Z
+---
+
+Split out of k18. Knarr::Stream carries text deltas only; the engine handlers read $chunk->content from Langertha::Stream::Chunk and ignore its tool_calls (core aggregates them via Role::Chat::aggregate_tool_calls). Since k18 the stream closes with the real finish_reason, so a tool-call stream now ends with Anthropic stop_reason tool_use / OpenAI finish_reason tool_calls but carries no tool_use block / tool_calls delta -- honest reason, missing payload. Fix: Stream must carry tool calls (queue items beyond strings, or aggregated at close), Tracing/RequestLog must accumulate them, and each protocol needs stream framing: Anthropic content_block_start type tool_use + input_json_delta, OpenAI delta.tool_calls with index/id/function.arguments fragments, Ollama message.tool_calls on the done line. Handler::Passthrough extraction likewise. Not small: touches the Stream seam, 2 decorators, 3 protocols, Knarr.pm/PSGI pump.
