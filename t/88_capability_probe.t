@@ -13,6 +13,13 @@ use Test2::V0;
 # hanging probe must neither crash nor claim anything, each instance is asked
 # once (no retry storm), and a core without the probe (0.503), an engine
 # without metadata, or probe_capabilities: 0 sends no probe request at all.
+#
+# k38: a gateway with hundreds of discovered models must not cost hundreds of
+# identical catalogue downloads. A catalogue format (OpenRouter's /models) is
+# fetched once per endpoint and imported into that endpoint's other instances
+# -- never into another endpoint's, whose catalogue may say otherwise. A core
+# without import_learned_capabilities keeps the per-instance probe (k37);
+# per-model formats (Ollama /api/show) are unchanged.
 
 BEGIN {
   # Offline discovery (the sync list_models would deadlock against the
@@ -30,7 +37,13 @@ BEGIN {
   package LangerthaX::Engine::TestProbeOpenRouter;
   use Moose;
   extends 'Langertha::Engine::OpenRouter';
-  sub list_models { [] }
+  sub list_models {
+    my $url = $_[0]->url;
+    return [ map { sprintf 'vendor/m%03d', $_ } 1 .. 300 ] if $url =~ m{/gw300/};
+    return [ 'shared/m', 'a/only' ] if $url =~ m{/a/api};
+    return [ 'shared/m' ] if $url =~ m{/b/api};
+    return [];
+  }
   __PACKAGE__->meta->make_immutable;
   $INC{'LangerthaX/Engine/TestProbeOpenRouter.pm'} = __FILE__;
 
@@ -41,6 +54,19 @@ BEGIN {
   sub list_models { [] }
   __PACKAGE__->meta->make_immutable;
   $INC{'LangerthaX/Engine/TestProbeOpenAI.pm'} = __FILE__;
+
+  # A core with the probe but without import_learned_capabilities (k37 era).
+  package LangerthaX::Engine::TestProbeNoImport;
+  use Moose;
+  extends 'Langertha::Engine::OpenRouter';
+  sub list_models { [] }
+  sub can {
+    my ($self, $method) = @_;
+    return undef if $method eq 'import_learned_capabilities';
+    return $self->SUPER::can($method);
+  }
+  __PACKAGE__->meta->make_immutable;
+  $INC{'LangerthaX/Engine/TestProbeNoImport.pm'} = __FILE__;
 
   # What Knarr sees on Langertha 0.503: no probe_model_capabilities_f.
   package LangerthaX::Engine::TestProbeOldCore;
@@ -108,6 +134,21 @@ my $upstream = Net::Async::HTTP::Server->new(
       return $respond->( 404, { error => "model '$model' not found" } )
         unless $ollama_caps{$model};
       return $respond->( 200, { capabilities => $ollama_caps{$model} } );
+    }
+    if ( $path eq '/gw300/api/v1/models' ) {
+      return $respond->( 200, { data => [ map { {
+        id => sprintf( 'vendor/m%03d', $_ ),
+        architecture => { input_modalities => [ $_ % 2 ? qw( text image ) : qw( text ) ] },
+      } } 1 .. 300 ] } );
+    }
+    if ( $path =~ m{\A/([ab])/api/v1/models\z} ) {
+      my $endpoint = $1;
+      return $respond->( 200, { data => [
+        { id => 'shared/m', architecture => { input_modalities =>
+            [ $endpoint eq 'a' ? qw( text image ) : qw( text ) ] } },
+        ( $endpoint eq 'a'
+          ? { id => 'a/only', architecture => { input_modalities => [qw( text image )] } } : () ),
+      ] } );
     }
     if ( $path eq '/api/v1/models' ) {
       return $respond->( 200, { data => [
@@ -237,8 +278,8 @@ subtest 'startup probe teaches /api/show and the manifest' => sub {
   is [ sort map { $json->decode( $_->{body} )->{model} } grep { $_->{path} =~ m{/api/show\z} } @requests ],
     [qw( extra-vis gone-model llama3 llava llava llava )],
     'Ollama: one /api/show per instance, for its own model';
-  is scalar( grep { $_->{path} eq '/api/v1/models' } @requests ), 2,
-    'OpenRouter: one metadata fetch per instance';
+  is scalar( grep { $_->{path} eq '/api/v1/models' } @requests ), 1,
+    'OpenRouter: one catalogue fetch for the endpoint, shared by both instances';
   ok !( grep { $_->{path} =~ m{\A/v1/} } @requests ), 'no request for the engine without metadata';
 
   # The very instance the router hands out learned it.
@@ -270,6 +311,94 @@ subtest 'startup probe teaches /api/show and the manifest' => sub {
   my $before = @requests;
   is $router->probe_capabilities_f( loop => $loop )->get, 0, 'second pass: nothing new to probe';
   is scalar(@requests), $before, 'second pass: no request';
+};
+
+my $core_share = Langertha::Engine::OpenRouter->can('import_learned_capabilities') ? 1 : 0;
+note $core_share ? 'core can share a catalogue' : 'core cannot import: per-instance probing only';
+
+sub catalogue_fetches { scalar grep { $_->{path} eq $_[0] } @requests }
+
+subtest 'a core without import_learned_capabilities probes every instance (k37)' => sub {
+  @requests = ();
+  my (undef, $router) = knarr_for(
+    models => {
+      'ni-vis' => { engine => 'TestProbeNoImport', model => 'vendor/vis', url => "$up/api/v1", api_key => 'sk-test' },
+      'ni-txt' => { engine => 'TestProbeNoImport', model => 'vendor/txt', url => "$up/api/v1", api_key => 'sk-test' },
+    },
+  );
+  is $router->probe_capabilities_f( loop => $loop )->get, 2, 'both instances probed';
+  is catalogue_fetches('/api/v1/models'), 2, 'one catalogue fetch per instance, as before';
+  ok +( $router->resolve('ni-vis') )[0]->supports('image_input'), 'vision model learned';
+  ok !( $router->resolve('ni-txt') )[0]->supports('image_input'), 'text model learned';
+};
+
+unless ($core_share) {
+  done_testing;
+  exit;
+}
+
+subtest '300 discovered gateway models: one catalogue fetch' => sub {
+  @requests = ();
+  my (undef, $router) = knarr_for(
+    auto_discover => 1,
+    models => {
+      'gw' => { engine => 'TestProbeOpenRouter', model => 'vendor/m001',
+                url => "$up/gw300/api/v1", api_key => 'sk-test' },
+    },
+  );
+  # gw and the discovered vendor/m001 are one instance.
+  is $router->probe_capabilities_f( loop => $loop )->get, 300, 'all 300 instances covered';
+  is scalar(@requests), 1, 'exactly one request reached the upstream';
+  is catalogue_fetches('/gw300/api/v1/models'), 1, '... the catalogue';
+
+  my @wrong = grep {
+    my $id = sprintf 'vendor/m%03d', $_;
+    my ($engine) = $router->resolve($id);
+    !$engine->supports('image_input') != !( $_ % 2 )
+  } 1 .. 300;
+  is \@wrong, [], 'every instance answers image_input from the shared catalogue';
+  my ($m002) = $router->resolve('vendor/m002');
+  ok exists $m002->learned_model_capabilities->{'vendor/m002'},
+    'an instance that never asked holds the imported fact';
+
+  # A later instance on the same endpoint imports what was learned, no request.
+  $router->_discovered_models->{'late'} = {
+    engine => 'TestProbeOpenRouter', model => 'vendor/m003', url => "$up/gw300/api/v1",
+    api_key => 'sk-test', user_agent_timeout => 7, discovered => 1,
+  };
+  my $generation = $router->capabilities_generation;
+  is $router->probe_capabilities_f( loop => $loop )->get, 1, 'second pass: only the new instance';
+  is scalar(@requests), 1, 'second pass: no request';
+  ok +( $router->resolve('late') )[0]->supports('image_input'), 'new instance imported the catalogue';
+  ok $router->capabilities_generation > $generation, 'import bumps capabilities_generation';
+};
+
+subtest 'two gateway endpoints: two fetches, no cross-import' => sub {
+  @requests = ();
+  my (undef, $router) = knarr_for(
+    auto_discover => 1,
+    probe_timeout => 2,
+    models => {
+      'a-shared' => { engine => 'TestProbeOpenRouter', model => 'shared/m', url => "$up/a/api/v1", api_key => 'sk-test' },
+      'b-shared' => { engine => 'TestProbeOpenRouter', model => 'shared/m', url => "$up/b/api/v1", api_key => 'sk-test' },
+      'x-one'    => { engine => 'TestProbeOpenRouter', model => 'x/one', url => "$up/broken/api/v1", api_key => 'sk-test' },
+      'x-two'    => { engine => 'TestProbeOpenRouter', model => 'x/two', url => "$up/broken/api/v1", api_key => 'sk-test' },
+    },
+  );
+  # a: a-shared (= discovered shared/m on a), a/only; b: b-shared; broken: x-one, x-two.
+  is $router->probe_capabilities_f( loop => $loop )->get, 5, 'every instance covered';
+  is catalogue_fetches('/a/api/v1/models'), 1, 'endpoint a: one fetch';
+  is catalogue_fetches('/b/api/v1/models'), 1, 'endpoint b: one fetch';
+  is catalogue_fetches('/broken/api/v1/models'), 1, 'failing endpoint: one fetch, no retry';
+
+  my ($a_shared) = $router->resolve('a-shared');
+  my ($b_shared) = $router->resolve('b-shared');
+  ok $a_shared->supports('image_input'), 'endpoint a: its own catalogue says image';
+  ok !$b_shared->supports('image_input'), 'endpoint b: same model id, its own catalogue says text';
+  is [ sort keys %{ $b_shared->learned_model_capabilities } ], [ 'shared/m' ],
+    "endpoint b learned nothing from endpoint a's catalogue";
+  ok +( $router->resolve('a/only') )[0]->supports('image_input'), 'endpoint a: discovered model imported';
+  is +( $router->resolve('x-two') )[0]->learned_model_capabilities, {}, 'failed endpoint: nothing claimed';
 };
 
 done_testing;

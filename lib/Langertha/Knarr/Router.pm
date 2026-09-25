@@ -102,6 +102,13 @@ has _probed => (
   default => sub { {} },
 );
 
+# What a whole-catalogue probe learned, by endpoint key (k38): an instance
+# that turns up on that endpoint later imports it instead of asking again.
+has _catalogue_learned => (
+  is      => 'ro',
+  default => sub { {} },
+);
+
 has capabilities_generation => (
   is      => 'rw',
   default => 0,
@@ -349,22 +356,43 @@ them up without further work.
 
 Every model L</list_models> shows is resolved (running auto-discovery first
 when it is enabled and has not run yet), and every distinct engine instance
-behind them is probed for its upstream model. An instance is skipped when the
-installed core has no probe (Langertha 0.503), when its engine implements
-none (C<model_metadata_format> is undefined: only OpenRouter, Mistral, LM
-Studio, Ollama and llama.cpp read model metadata; the others would answer
+behind them is covered. An instance is skipped when the installed core has no
+probe (Langertha 0.503), when its engine implements none
+(C<model_metadata_format> is undefined: only OpenRouter, Mistral, LM Studio,
+T-Systems, Ollama and llama.cpp read model metadata; the others would answer
 C<{}> without a request anyway), when it has no model to ask about, or when
-it was probed before. Calling the method again therefore probes only engine
+it was covered before. Calling the method again therefore covers only engine
 instances that are new since the last call, such as the ones a later
 discovery added.
 
+How an instance is covered depends on its metadata document:
+
+=over
+
+=item * A catalogue (OpenRouter, Mistral, LM Studio, T-Systems: one document
+names every model; C<< Langertha::ModelProbe->is_catalogue >>) is fetched
+once per endpoint (engine, URL and API key variable, the same key discovery
+uses) with C<< models => 'all' >>, and what it taught is imported into every
+other instance of that endpoint with C<import_learned_capabilities>, without
+a request. A gateway with hundreds of discovered models costs one request.
+Facts never cross endpoints: two OpenRouter entries with different URLs are
+two catalogues. An instance that appears on an endpoint whose catalogue was
+already learned imports it; after a failed catalogue probe the next call
+asks again for the new instances only. A core without
+C<import_learned_capabilities> probes every instance on its own, as below.
+
+=item * A per-model document (Ollama C</api/show>, llama.cpp) is asked once
+per instance, for that instance's upstream model.
+
+=back
+
 The probes run concurrently, at most four at a time. A probe that fails or
 takes longer than L<Langertha::Knarr::Config/probe_timeout> seconds (only
-when C<loop> is given) is logged as a warning and not retried; its engine
-keeps the capabilities it had. The returned Future never fails and resolves
-to the number of engine instances probed. With
-L<Langertha::Knarr::Config/probe_capabilities> off it resolves to C<0> at
-once.
+when C<loop> is given) is logged as a warning and not retried; the engines
+it would have taught keep the capabilities they had. The returned Future
+never fails and resolves to the number of engine instances covered (probed
+or imported into). With L<Langertha::Knarr::Config/probe_capabilities> off
+it resolves to C<0> at once.
 
 L<Langertha::Knarr/start> calls this once the server listens.
 
@@ -379,7 +407,8 @@ sub probe_capabilities_f {
   my $timeout = $args{timeout}
     // ( $config->can('probe_timeout') ? $config->probe_timeout : 0 );
 
-  my @targets;
+  my ( @targets, %endpoint, @endpoint_order );
+  my $imported = 0;
   for my $row (@{ $self->list_models }) {
     my ($engine, $model, $alias_only) = eval { $self->resolve( $row->{id}, skip_default => 1 ) };
     next unless blessed $engine && $engine->can('probe_model_capabilities_f')
@@ -390,13 +419,37 @@ sub probe_capabilities_f {
     my $upstream = $alias_only ? eval { $engine->chat_model } : $model;
     next unless defined $upstream && !ref $upstream && length $upstream;
     $self->_probed->{ refaddr $engine } = 1;
+
+    # A catalogue answers for every model of its endpoint: one request per
+    # endpoint, imported into the endpoint's other instances (k38).
+    my $def = $config->models->{ $row->{id} } // $self->_discovered_models->{ $row->{id} };
+    if ( $def && $self->_shares_catalogue($engine) ) {
+      my $key = $self->_endpoint_key($def);
+      if ( my $learned = $self->_catalogue_learned->{$key} ) {
+        $engine->import_learned_capabilities($learned);
+        $imported++;
+        next;
+      }
+      push @endpoint_order, $key unless $endpoint{$key};
+      push @{ $endpoint{$key} }, [ $engine, $upstream, $row->{id} ];
+      next;
+    }
     push @targets, [ $engine, $upstream, $row->{id} ];
   }
-  return Future->done(0) unless @targets;
+  $self->capabilities_generation( $self->capabilities_generation + 1 ) if $imported;
+  my $covered = $imported + @targets;
+  $covered += @{ $endpoint{$_} } for @endpoint_order;
+  push @targets, map { [ $endpoint{$_}, undef, $_ ] } @endpoint_order;
+  return Future->done($covered) unless @targets;
 
   return ( fmap_void {
-    my ($engine, $upstream, $id) = @{ $_[0] };
-    my $probe = eval { $engine->probe_model_capabilities_f( models => [ $upstream ] ) }
+    # Per model: [ $engine, $upstream, $id ]; per endpoint: [ \@members, undef, $key ].
+    my ($target, $upstream, $id) = @{ $_[0] };
+    my $shared = ref $target eq 'ARRAY';
+    my ($engine, @rest) = $shared ? map { $_->[0] } @$target : ( $target );
+    my $what = $shared ? "the catalogue behind $target->[0][2]" : "$id ($upstream)";
+    my $probe = eval { $engine->probe_model_capabilities_f(
+        models => ( $shared ? 'all' : [ $upstream ] ) ) }
       // Future->fail( $@ || 'probe did not start' );
     $probe = Future->wait_any( $probe,
       $loop->delay_future( after => $timeout )
@@ -404,20 +457,37 @@ sub probe_capabilities_f {
       if $loop && $timeout && $timeout > 0;
     $probe->then(sub {
       my ($learned) = @_;
-      $log->debugf( "Capability probe for %s (%s): %s", $id, $upstream,
+      if ($shared) {
+        $self->_catalogue_learned->{$id} = $learned;
+        $_->import_learned_capabilities($learned) for @rest;
+        $log->debugf( "Capability probe for %s: %d models learned, %d instances taught",
+          $what, scalar keys %{ $learned || {} }, 1 + @rest );
+        return Future->done;
+      }
+      $log->debugf( "Capability probe for %s: %s", $what,
         join( ', ', map { my $m = $_; map { "$m $_=$learned->{$m}{$_}" } sort keys %{ $learned->{$m} } }
           sort keys %{ $learned || {} } ) || 'nothing learned' );
       Future->done;
     })->else(sub {
       my ($err) = @_;
       ( my $text = "$err" ) =~ s/\s+\z//;
-      $log->warnf( "Capability probe for %s (%s) failed: %s", $id, $upstream, $text );
+      $log->warnf( "Capability probe for %s failed: %s", $what, $text );
       Future->done;
     })->on_ready(sub {
       $self->capabilities_generation( $self->capabilities_generation + 1 );
     });
   } foreach => [ @targets ], concurrent => 4 )   # fmap consumes the array it is given
-    ->then(sub { Future->done( scalar @targets ) });
+    ->then(sub { Future->done($covered) });
+}
+
+# True when the engine's metadata document is a catalogue AND the core can
+# hand learned facts to another instance (k38). Either missing: per-instance
+# probing as before (k37).
+sub _shares_catalogue {
+  my ($self, $engine) = @_;
+  return 0 unless $engine->can('import_learned_capabilities');
+  return 0 unless eval { require Langertha::ModelProbe; Langertha::ModelProbe->can('is_catalogue') };
+  return eval { Langertha::ModelProbe->is_catalogue( $engine->model_metadata_format ) } ? 1 : 0;
 }
 
 sub is_passthrough_model {

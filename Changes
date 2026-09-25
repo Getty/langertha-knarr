@@ -4,11 +4,14 @@ Revision history for Langertha-Knarr
 
     - /api/show "vision" and the manifest's image_input are now right for
       gateway and self-hosted models. Once the server listens (after
-      auto-discovery), Knarr asks each routed OpenRouter, Mistral,
-      LM Studio, Ollama and llama.cpp engine once, concurrently and in the
-      background, whether its model sees images, using the provider's own
-      model metadata (needs a Langertha with probe_model_capabilities_f;
-      older ones send nothing). A probe that fails or exceeds probe_timeout
+      auto-discovery), Knarr asks the provider's own model metadata,
+      concurrently and in the background, whether each routed model sees
+      images: a catalogue endpoint (OpenRouter, Mistral, LM Studio,
+      T-Systems) once for all its models, however many were discovered,
+      and Ollama and llama.cpp once per model (needs a Langertha with
+      probe_model_capabilities_f, and import_learned_capabilities for the
+      one-request-per-endpoint catalogue; older ones probe each model or
+      send nothing). A probe that fails or exceeds probe_timeout
       (KNARR_PROBE_TIMEOUT, default 10 seconds) is logged and not retried,
       and the model keeps its previous answer. probe_capabilities: 0
       (KNARR_PROBE_CAPABILITIES=0) turns it off; under PSGI call the

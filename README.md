@@ -354,7 +354,9 @@ routed engine takes tools, plus `vision` when the routed engine claims
 `thinking`. For gateway and self-hosted models (OpenRouter, Mistral,
 LM Studio, Ollama, llama.cpp) Knarr asks the provider's own model metadata
 once after startup whether the model sees images (needs a Langertha core with
-`probe_model_capabilities_f`; `probe_capabilities: 0` turns it off). A context length
+`probe_model_capabilities_f`; `probe_capabilities: 0` turns it off). A gateway
+whose metadata is one catalogue (OpenRouter, Mistral, LM Studio) is asked once per
+endpoint, however many models were discovered on it. A context length
 appears in `model_info` only when the engine knows one.
 
 In container mode Knarr binds an extra `:11434` socket as well, so
