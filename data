@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-29T18:11:52Z
+claimed_by: knarr-worker-binary
+class: standard
+completed: 2026-09-29T18:11:48Z
+created: 2026-09-29T16:44:33Z
+id: 39
+priority: medium
+started: 2026-09-29T16:44:41Z
+status: done
+tags:
+- release
+- binary
+- packaging
+title: Single-binary release (PAR::Packer) nach karr-Muster
+updated: 2026-09-29T18:11:52Z
+---
+
+knarr zusaetzlich als Single-Binary (linux x86_64/aarch64) an GitHub-Releases haengen, nach dem Muster von ~/dev/karr (scripts/build-binary.sh, verify-binary.sh, check-binary-libs.sh, .github/workflows/release-binaries.yml, Skill karr-single-binary). Machbarkeit lokal verifizieren: Build, frischer PAR-Cache, alle Subcommands + echter Serverstart mit Request.
+
+2026-09-29 16:45 Recon: dynamic loads = Protocol::* via use_module (Knarr.pm), Langertha::Engine::* via Module::Pluggable + require_module (core resolve_engine_class), MooX::Cmd subcommands (Start/Models/Check/Init/Container), Langertha::Spec::* via use_module. Share trees: core Langertha share (openai/ollama/mistral/lmstudio.yaml via File::ShareDir::ProjectDistDir dist_file) must be packed; knarr share/example-config.yaml is not read at runtime. ~/perl5 has an older installed Langertha::Knarr -> pp must scan with -I lib first. No libperl-dev, no sudo -> karr's user-space shim for PAR::Packer install.
+
+2026-09-29 17:23 Dev-box binary (19M) passes verify-binary.sh: trap1 all 5 subcommands --help; trap2 check/models(+LWP auto-discovery)/init; trap3 real server: openai/anthropic/ollama routed incl. streaming end markers, raw passthrough byte marker, TLS stack (SSL wrong-version error from libssl); trap4 Langfuse ingestion + JSONL log. Traps found beyond karr's: YAML::PP schemas (Module::Load), MooseX::NonMoose metaroles, XS::Parse::Keyword/Sublike loaded from Future::AsyncAwait BOOT, MooX::TypeTiny accessor role, IO::Async::Internals::TimeQueue. Fixed generically: build-binary.sh requires every Langertha::* module + lazy loads and passes %INC to pp as -M. Next: bookworm container build for the real RUNTIME_LIBS.
+
+2026-09-29 17:53 Done, works. Added scripts/build-binary.sh, verify-binary.sh, check-binary-libs.sh, .github/workflows/release-binaries.yml; .gitignore ignores /knarr and /knarr-*-linux-*. README section NOT applied (per coordinator) - text in scratchpad readme-binary-section.md; workflow's README lib check needs it to land. Build: generic 'loaded set' (require every Langertha::* + lazy loads, %INC -> pp -M) because scanner-only builds died on YAML::PP schemas, MooseX::NonMoose metaroles, XS::Parse::Keyword/Sublike (Future::AsyncAwait BOOT), MooX::TypeTiny, IO::Async internals. Verified: dev-box binary (19M) and perl:5.40-bookworm CI replay (14M, x86_64) pass verify-binary.sh from fresh PAR cache + env -i: all 5 subcommand --help, check/models(auto-discovery)/init, real server with openai/anthropic/ollama routed + streaming end markers, raw passthrough, TLS stack, Langfuse ingestion + JSONL log. Bookworm binary needs only libssl+libcrypto (check-binary-libs OK); on bare debian:bookworm-slim it passes after apt libssl3 (without: only https fails, 'libssl.so.3: cannot open'); real TLS passthrough verified against a CA in the system store (ca-certificates needed for https; untrusted -> certificate verify failed). Warm start ~0.54s vs perl ~0.2-0.25s, first run ~5-6s extraction (loaded box). dzil build OK, scripts/ + .github in tarball. Caveats: CI needs Langertha 0.503 on CPAN first (cpanfile pin; CI replay used a sibling dzil build); aarch64 not built locally.
+
+2026-09-29 18:11 Committed as 0c6e933
