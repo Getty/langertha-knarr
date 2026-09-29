@@ -111,6 +111,10 @@ passthrough:
 # probe_capabilities: 1
 # probe_timeout: 10
 
+# Optional: worker processes on the same listen sockets (or KNARR_WORKERS;
+# knarr start -w wins); 1 = one process, no fork
+# workers: 1
+
 # Optional: Ollama version reported at GET /api/version (x.y.z only)
 # ollama_compat_version: 0.34.4
 

@@ -330,6 +330,25 @@ Revision history for Langertha-Knarr
       Content-Encoding. Under PSGI the server already joins a repeated
       request header into one value, which is forwarded as that one line.
 
+    - knarr start serves from several worker processes: -w/--workers N,
+      the config's workers: or KNARR_WORKERS (-w wins; the Docker image
+      picks up KNARR_WORKERS as is). Knarr binds the listen addresses,
+      runs auto-discovery and the capability probe once, then forks N
+      workers that accept on the same sockets. The first process
+      supervises them, restarts a worker that exits (pausing up to 30
+      seconds when one keeps dying at start) and passes SIGTERM/SIGINT on
+      to all of them. Sessions stay in the worker that created them. The
+      default of 1 forks nothing, as before; a worker count below 1 stops
+      start before anything is bound.
+
+    - Request log lines are written in one piece, so workers sharing a log
+      file never interleave them, and per-request files in logging.dir are
+      named {timestamp}_{pid}-{seq}_{format}_{model}.json, so requests that
+      finish in the same millisecond no longer overwrite each other's file.
+
+    - Listen sockets queue up to SOMAXCONN pending connections instead of
+      IO::Async's default of 3.
+
 
 1.101     2026-08-15 00:13:51Z
 

@@ -99,7 +99,18 @@ without C<-p>.
 
 =item B<-w>, B<--workers> I<n>
 
-Accepted, but currently without effect: Knarr runs as a single process.
+Number of worker processes. Wins over the config's C<workers:> and
+C<KNARR_WORKERS>; without any of them C<1> (one process, nothing forked).
+Anything but a whole number of C<1> or more stops C<start> before it
+binds anything.
+With more, Knarr binds the listen addresses, runs auto-discovery and the
+capability probe once, then forks I<n> workers that accept on the same
+sockets. The first process stays as their supervisor: it restarts a worker
+that exits (pausing up to 30 seconds when one keeps dying right after its
+start) and passes C<SIGTERM>/C<SIGINT> on to all of them, exiting once they
+are gone. Each worker keeps its own sessions: a Raider conversation
+continues only when its next request reaches the same worker, which
+nothing guarantees.
 
 =item B<-n>, B<--trace-name> I<name>
 

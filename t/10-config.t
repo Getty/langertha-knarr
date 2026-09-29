@@ -370,6 +370,32 @@ YAML
   }
 }
 
+# Test: workers (k51) -- config key, else KNARR_WORKERS, else 1; bad values
+# croak on read and are reported by validate
+{
+  local $ENV{KNARR_WORKERS};
+  my $models = { m => { engine => 'OpenAI' } };
+  is( Langertha::Knarr::Config->new( data => { models => $models } )->workers, 1,
+    'workers default 1' );
+  is( Langertha::Knarr::Config->new( data => { models => $models, workers => 4 } )->workers, 4,
+    'workers from the config' );
+  {
+    local $ENV{KNARR_WORKERS} = '3';
+    is( Langertha::Knarr::Config->new( data => { models => $models } )->workers, 3,
+      'workers from KNARR_WORKERS' );
+    is( Langertha::Knarr::Config->new( data => { models => $models, workers => 2 } )->workers, 2,
+      'the config wins over KNARR_WORKERS' );
+    is( Langertha::Knarr::Config->from_env( include_test => 0 )->workers, 3,
+      'KNARR_WORKERS applies under --from-env' );
+  }
+  for my $bad ( 0, -1, 'two', '1.5' ) {
+    my $config = Langertha::Knarr::Config->new( data => { models => $models, workers => $bad } );
+    ok( !eval { $config->workers; 1 }, "workers '$bad' croaks on read" );
+    like( $@, qr/workers '\Q$bad\E' must be a whole number of 1 or more/, "... with the reason" );
+    ok( ( grep { /workers '\Q$bad\E' must be/ } $config->validate ), "... and validate reports it" );
+  }
+}
+
 # Test: unknown engines resolve to no default model instead of dying
 {
   is(Langertha::Knarr::Config->default_model_for('NoSuchEngineHere'), undef,

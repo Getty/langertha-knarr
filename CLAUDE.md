@@ -170,6 +170,7 @@ upstream_stall_timeout: 120
 probe_capabilities: 1
 probe_timeout: 10
 ollama_compat_version: 0.34.4      # x.y.z only, >= 0.6.4 for VS Code Copilot
+workers: 1                         # KNARR_WORKERS; knarr start -w wins
 a2a: { name: Langertha Knarr Agent, description: LLM agent served through Langertha Knarr }  # agent card
 ```
 
@@ -197,7 +198,10 @@ knarr init -e .env -e .env.local           # Scan .env files (.env, .env.local, 
 knarr init -l 0.0.0.0:8080 -o knarr.yaml   # Listen address, output file
 ```
 
-`-w/--workers` is accepted but has no effect (single process).
+`-w/--workers N` (else `workers:` / `KNARR_WORKERS`, default 1 = no fork): prefork — the parent binds, runs discovery +
+capability probe once, forks N workers on the same sockets, restarts dead ones (backoff
+up to 30 s), forwards SIGTERM/SIGINT (`Knarr::run` / `_run_workers`, k51). Sessions are
+per worker.
 
 ## Environment
 
@@ -207,4 +211,5 @@ knarr init -l 0.0.0.0:8080 -o knarr.yaml   # Listen address, output file
 - `KNARR_TRACE_NAME`, `LANGFUSE_TRACE_NAME`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_URL` / `LANGFUSE_BASE_URL`
 - `KNARR_UPSTREAM_TIMEOUT`, `KNARR_UPSTREAM_STALL_TIMEOUT`, `KNARR_PROBE_CAPABILITIES`, `KNARR_PROBE_TIMEOUT`, `KNARR_OLLAMA_COMPAT_VERSION`
 - `KNARR_A2A_NAME`, `KNARR_A2A_DESCRIPTION` (a2a.name / a2a.description)
+- `KNARR_WORKERS` (workers)
 - Provider keys for `--from-env` / `knarr init`: `Config.pm` `@ENGINE_DEFS` (`LANGERTHA_*` > bare > `TEST_LANGERTHA_*`)

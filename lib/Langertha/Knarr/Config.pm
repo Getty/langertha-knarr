@@ -617,6 +617,31 @@ sub _build_probe_timeout {
     $self->data->{probe_timeout} // _strip_quotes($ENV{KNARR_PROBE_TIMEOUT}), 10 );
 }
 
+has workers => (
+  is      => 'lazy',
+  builder => '_build_workers',
+);
+
+=attr workers
+
+Number of processes C<knarr start> serves from. Default C<1>: one process,
+nothing forked. With more, it forks that many workers on the same listen
+sockets and supervises them (see L<Langertha::Knarr/workers>). Falls back
+to C<KNARR_WORKERS>, so it also applies under C<--from-env>; C<knarr start
+-w N> wins over both. A value that is not a whole number of C<1> or more
+croaks when read, and L</validate> reports it.
+
+=cut
+
+sub _build_workers {
+  my ($self) = @_;
+  my $value = $self->data->{workers} // _strip_quotes($ENV{KNARR_WORKERS});
+  return 1 unless defined $value && length $value;
+  croak "workers '$value' must be a whole number of 1 or more"
+    unless $value =~ /\A[1-9][0-9]*\z/;
+  return $value + 0;
+}
+
 sub _seconds {
   my ($name, $value, $default) = @_;
   return $default unless defined $value && length $value;
@@ -734,7 +759,8 @@ C<context_size> (and the default engine's), when set, is a positive integer, and
 C<user_agent_timeout> a non-negative number, and that
 L</ollama_compat_version>, when set, is three dot-separated numbers, and that
 L</upstream_timeout>, L</upstream_stall_timeout> and L</probe_timeout> are
-non-negative numbers.
+non-negative numbers, and that L</workers> is a whole number of C<1> or
+more.
 
 =cut
 
@@ -772,7 +798,7 @@ sub validate {
     push @errors, "No models configured and no default engine set";
   }
 
-  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout probe_timeout )) {
+  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout probe_timeout workers )) {
     next if eval { $self->$attr; 1 };
     ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
     push @errors, $err;

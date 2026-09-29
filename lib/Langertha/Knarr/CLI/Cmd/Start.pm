@@ -19,8 +19,15 @@ variables when no config file is found — this is how the Docker image starts.
 The listen addresses come from C<-p> when given (each port on C<-H>,
 default C<0.0.0.0>), otherwise from the config's C<listen:>, which defaults
 to C<127.0.0.1:8080> and C<127.0.0.1:11434>. C<-H> alone changes nothing.
-C<-w>/C<--workers> is accepted but currently has no effect: Knarr runs as
-one process.
+
+C<-w>/C<--workers> I<N> (else the config's C<workers:> or C<KNARR_WORKERS>,
+default C<1>; a value below C<1> stops C<start> before the banner) serves
+from N processes: Knarr binds
+the listen addresses, runs auto-discovery and the capability probe once,
+then forks N workers that accept on the same sockets, and supervises them
+-- a worker that exits is restarted, C<SIGTERM>/C<SIGINT> stops them all.
+Sessions (a Raider conversation) live in one worker and are not routed
+back to it. See L<Langertha::Knarr/workers> and L<Langertha::Knarr/run>.
 
 See L<knarr> for the full option reference and L<Langertha::Knarr::Config>
 for the configuration file format.
@@ -57,8 +64,8 @@ option workers => (
   is      => 'ro',
   format  => 'i',
   short   => 'w',
-  doc     => 'Accepted, but without effect: Knarr runs as one process',
-  default => 1,
+  doc     => 'Number of worker processes; more than 1 forks that many, supervised and restarted by this process (default: the config workers:, else KNARR_WORKERS, else 1, no fork)',
+  predicate => 'has_workers',
 );
 
 option from_env => (
@@ -120,6 +127,8 @@ sub execute {
     print STDERR "\n";
     exit 1;
   }
+
+  my $workers = $self->_workers($config);
 
   # Inject CLI trace_name into config
   if ($self->has_trace_name) {
@@ -282,15 +291,33 @@ sub execute {
     ( defined $config->ollama_compat_version
       ? ( ollama_compat_version => $config->ollama_compat_version ) : () ),
     protocol_args => $config->protocol_args,
+    workers       => $workers,
   );
 
   _log("Starting server:");
   for my $addr (@$listen_addrs) {
     _log("  http://$addr");
   }
+  _log("Workers: $workers") if $workers > 1;
   _log("");
 
   $knarr->run;
+}
+
+# The worker count: -w, else the config's workers: / KNARR_WORKERS (k51).
+# A bad value stops start here, before the banner and before any bind.
+sub _workers {
+  my ($self, $config) = @_;
+  if ( $self->has_workers ) {
+    return $self->workers if $self->workers >= 1;
+    _err("-w/--workers must be 1 or more, got " . $self->workers);
+    exit 1;
+  }
+  my $workers = eval { $config->workers };
+  return $workers if defined $workers;
+  ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
+  _err($err);
+  exit 1;
 }
 
 sub _log { print STDERR "[knarr] $_[0]\n" }

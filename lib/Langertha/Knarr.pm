@@ -14,6 +14,8 @@ use Module::Runtime qw( use_module );
 use Scalar::Util qw( blessed );
 use Try::Tiny;
 use Carp ();
+use POSIX ();
+use Socket ();
 use Log::Any qw( $log );
 use Langertha::Knarr::Session;
 use Langertha::Knarr::Manifest;
@@ -166,6 +168,25 @@ Default C<8088>. Used when L</listen> is not given.
 
 Optional L<IO::Async::Loop> instance. Defaults to a fresh one.
 
+=attr workers
+
+Number of processes that serve requests. Default C<1>: L</run> serves from
+the calling process, nothing is forked. With more, L</run> binds the listen
+sockets, runs auto-discovery and the capability probe once (see L</run>),
+then forks that many workers that all accept on the same sockets, and stays
+behind as their supervisor, serving no request itself. Must be C<1> or more;
+anything else croaks at construction. C<knarr start> sets it from C<-w N>,
+else from L<Langertha::Knarr::Config/workers> (C<workers:> or
+C<KNARR_WORKERS>).
+
+Every worker has its own state: L<Langertha::Knarr::Session>s (so a
+L<Langertha::Knarr::Handler::Raider> conversation is only continued when
+its next request reaches the same worker -- nothing routes it there), the
+engine cache, and its own Langfuse batches, flushed by that worker. Request
+log lines from all workers go to the same C<logging.file>, one whole line
+per write. L<Langertha::Knarr::PSGI> never calls L</run>; there the PSGI
+server decides about processes.
+
 =attr protocols
 
 ArrayRef of protocol class basenames to load. Defaults to all six
@@ -297,7 +318,9 @@ requests are not written to the request log.
     $knarr->start;
 
 Binds all listen sockets and registers the dispatcher. Returns
-C<$self>. Does not enter the event loop.
+C<$self>. Does not enter the event loop. Each socket queues up to
+C<SOMAXCONN> pending connections (C<128> where L<Socket> does not know it;
+the kernel caps it at its own limit, C<net.core.somaxconn> on Linux).
 
 Once the sockets listen, it starts
 L<Langertha::Knarr::Router/probe_capabilities_f> on the L</loop> when a
@@ -311,7 +334,34 @@ call L</start>, so under PSGI the probe runs only when you call it.
 
     $knarr->run;   # blocks
 
-Calls L</start> if needed, then enters the L</loop> and blocks.
+With one L</workers> (the default): calls L</start> if needed, then enters
+the L</loop> and blocks.
+
+With more, it prefork-serves and returns only once all workers are gone:
+
+=over
+
+=item 1. The listen sockets are bound here (L</start> may have done it),
+and this process stops accepting on them.
+
+=item 2. Auto-discovery and the capability probe run here, once, to the
+end, before any worker exists -- each worker inherits the discovered models
+and the learned capabilities instead of asking the upstreams again. Until
+the probe is done (each probe gives up after
+L<Langertha::Knarr::Config/probe_timeout>), connections wait in the
+sockets' backlog. Upstream connections the probe kept open are closed, so
+no two workers share one.
+
+=item 3. L</workers> processes are forked; each rebuilds the loop's kernel
+state (L<IO::Async::Loop/post_fork>) and accepts on the inherited sockets.
+
+=item 4. This process supervises them: a worker that exits is replaced --
+one that dies within five seconds of its start after a pause of 1, 2, 4
+... up to 30 seconds, so a worker that cannot start does not spin.
+C<SIGTERM> or C<SIGINT> is passed on to the workers as C<SIGTERM>; once
+they have exited, L</run> returns.
+
+=back
 
 =method session
 
@@ -373,6 +423,16 @@ has loop => (
   builder => '_build_loop',
 );
 sub _build_loop { IO::Async::Loop->new }
+
+# Serving processes (k51): 1 is this one, more are forked by run().
+has workers => (
+  is => 'ro',
+  isa => 'Int',
+  default => 1,
+  trigger => sub {
+    Carp::croak( "workers '$_[1]' must be 1 or more" ) unless $_[1] >= 1;
+  },
+);
 
 has protocols => (
   is => 'ro',
@@ -536,6 +596,13 @@ sub _listen_addrs {
 
 sub start {
   my ($self) = @_;
+  $self->_listen;
+  $self->_start_capability_probe;
+  return $self;
+}
+
+sub _listen {
+  my ($self) = @_;
   my @servers;
   for my $a ( $self->_listen_addrs ) {
     my $server = Net::Async::HTTP::Server->new(
@@ -552,13 +619,23 @@ sub start {
         port     => $a->{port},
         ip       => $a->{host},
       },
+      queuesize => $self->_listen_backlog,
     )->get;
     push @servers, $server;
   }
   $self->_servers(\@servers);
   $self->_server( $servers[0] );
-  $self->_start_capability_probe;
-  return $self;
+  return;
+}
+
+# Connections the kernel queues until a process accepts them (k51): the
+# system maximum, not IO::Async's default of 3 -- with workers, connections
+# wait here while the probe runs before the fork. The kernel caps it at
+# net.core.somaxconn.
+sub _listen_backlog {
+  my ($self) = @_;
+  my $max = eval { Socket::SOMAXCONN() };
+  return $max && $max > 0 ? $max : 128;
 }
 
 # k37: once the server listens, ask each routed engine for its model's
@@ -582,8 +659,126 @@ sub _start_capability_probe {
 
 sub run {
   my ($self) = @_;
+  return $self->_run_workers if $self->workers > 1;
   $self->start unless $self->_server;
   $self->loop->run;
+}
+
+# k51: prefork. This process binds, discovers and probes once, forks the
+# workers -- which inherit all of it -- and supervises them until SIGTERM or
+# SIGINT. It serves no request itself.
+sub _run_workers {
+  my ($self) = @_;
+  $self->_prepare_workers;
+
+  my %workers;   # pid => start time
+  my $stopping = 0;
+  my $stop = sub {
+    my ($signal) = @_;
+    $log->infof( "SIG%s: stopping %d worker(s)", $signal, scalar keys %workers )
+      unless $stopping;
+    $stopping = 1;
+    kill TERM => keys %workers;
+  };
+  local $SIG{TERM} = $stop;
+  local $SIG{INT}  = $stop;
+
+  my $spawn = sub {
+    my $pid = $self->_fork_worker;
+    $workers{$pid} = time;
+    kill TERM => $pid if $stopping;   # the signal came in during the fork
+    $log->infof( "Worker %d started", $pid );
+  };
+
+  try {
+    $spawn->() for 1 .. $self->workers;
+    my $delay = 0;
+    while ( %workers ) {
+      my $pid = waitpid( -1, 0 );
+      last if $pid < 0;
+      my $started = delete $workers{$pid} // next;
+      next if $stopping;
+      my $status = $?;
+      # A worker that dies within 5s of its start is crashing: pause 1, 2,
+      # 4 ... 30 seconds before the next one, so it cannot spin.
+      $delay = time - $started < 5 ? ( $delay ? $delay * 2 : 1 ) : 0;
+      $delay = 30 if $delay > 30;
+      $log->warnf( "Worker %d %s, starting a new one%s", $pid,
+        $self->_exit_text($status), $delay ? " in ${delay}s" : '' );
+      sleep $delay if $delay;   # a signal ends it early
+      $spawn->() unless $stopping;
+    }
+  } catch {
+    my $err = $_;
+    kill TERM => keys %workers;
+    waitpid( $_, 0 ) for keys %workers;
+    die $err;
+  };
+  return;
+}
+
+sub _prepare_workers {
+  my ($self) = @_;
+  $self->_listen unless $self->_server;
+  my $loop = $self->loop;
+  # The sockets stay bound here for the workers, but this process accepts
+  # nothing on them.
+  $loop->remove($_) for grep { $_->loop } @{ $self->_servers };
+  if ( my $router = $self->router ) {
+    $router->list_models if $router->can('list_models');   # auto-discovery
+    $self->_start_capability_probe;
+    $self->_capability_probe->get if $self->_capability_probe;
+  }
+  $self->_drop_upstream_connections;
+  return;
+}
+
+# Keep-alive upstream connections (the probe's) must not reach the workers:
+# two processes on one socket read each other's responses. A
+# Net::Async::HTTP closes its pooled connections when it leaves the loop and
+# connects anew once it is back.
+sub _drop_upstream_connections {
+  my ($self) = @_;
+  my $loop = $self->loop;
+  for my $http ( grep { $_->isa('Net::Async::HTTP') } $loop->notifiers ) {
+    if ( my $parent = $http->parent ) {
+      $parent->remove_child($http);
+      $parent->add_child($http);
+    }
+    else {
+      $loop->remove($http);
+      $loop->add($http);
+    }
+  }
+  return;
+}
+
+# Returns the worker's pid in the supervisor; the worker itself never
+# returns. It drops the supervisor's signal handlers, rebuilds the loop's
+# kernel state (epoll/kqueue fd, signal pipe) and accepts on the inherited
+# sockets. POSIX::_exit: the supervisor's END blocks and destructors are not
+# the worker's to run.
+sub _fork_worker {
+  my ($self) = @_;
+  my $pid = fork;
+  Carp::croak( "Cannot fork a worker: $!" ) unless defined $pid;
+  return $pid if $pid;
+  my $ok = eval {
+    $SIG{$_} = 'DEFAULT' for qw( TERM INT );
+    my $loop = $self->loop;
+    $loop->post_fork;
+    $loop->add($_) for @{ $self->_servers };
+    $loop->run;
+    1;
+  };
+  $log->errorf( "Worker %d failed: %s", $$, $@ ) unless $ok;
+  POSIX::_exit( $ok ? 0 : 1 );
+}
+
+sub _exit_text {
+  my ($self, $status) = @_;
+  return 'was killed by signal ' . ( $status & 127 ) if $status & 127;
+  return 'exited with status ' . ( $status >> 8 );
 }
 
 sub _match_route {

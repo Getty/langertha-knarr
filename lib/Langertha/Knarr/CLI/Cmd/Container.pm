@@ -31,7 +31,6 @@ sub start_command {
     from_env => 1,
     host     => '0.0.0.0',
     port     => [ 8080, 11434 ],
-    workers  => 1,
   );
 }
 
@@ -40,7 +39,8 @@ sub start_command {
     my $start = $container->start_command;
 
 The L<Langertha::Knarr::CLI::Cmd::Start> object C<execute> runs:
-C<--from-env> on C<0.0.0.0> ports C<8080> and C<11434>.
+C<--from-env> on C<0.0.0.0> ports C<8080> and C<11434>, with the worker
+count of the config's C<workers:> or C<KNARR_WORKERS>.
 
 =cut
 

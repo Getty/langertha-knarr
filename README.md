@@ -744,6 +744,7 @@ there is one; the config value wins):
 | `probe_capabilities` | ask gateway / self-hosted engines which models see images (`KNARR_PROBE_CAPABILITIES`) | `1` |
 | `probe_timeout` | seconds per capability probe (`KNARR_PROBE_TIMEOUT`) | `10` |
 | `ollama_compat_version` | version at `GET /api/version`, `x.y.z` (`KNARR_OLLAMA_COMPAT_VERSION`) | `0.34.4` |
+| `workers` | worker processes on the same listen sockets; `knarr start -w` wins (`KNARR_WORKERS`) | `1` (no fork) |
 | `a2a` | `name` and `description` of the A2A agent card (`KNARR_A2A_NAME`, `KNARR_A2A_DESCRIPTION`) | `Langertha Knarr Agent` |
 
 The full reference is the POD of `Langertha::Knarr::Config`
@@ -938,6 +939,7 @@ variant is the last resort (`knarr init` only; `--from-env` ignores
 | `KNARR_PROBE_CAPABILITIES` | Ask gateway / self-hosted engines' model metadata once at startup which models see images (`0` disables) | `1` |
 | `KNARR_PROBE_TIMEOUT` | Seconds one such capability probe may take before it is logged and given up (`0`: only the engine's own timeout) | `10` |
 | `KNARR_OLLAMA_COMPAT_VERSION` | Ollama version reported at `GET /api/version` (a compatibility claim, not Knarr's version); digits and dots only (`x.y.z`), at least `0.6.4` for VS Code Copilot | `0.34.4` |
+| `KNARR_WORKERS` | Worker processes serving on the same listen sockets (`workers:`); `knarr start -w` wins. Works with the Docker image's own command | `1` (no fork) |
 
 ## CLI Reference
 
@@ -975,8 +977,15 @@ knarr check                                Validate config file
 - `init` always scans `.env` and `.env.local` in the current directory and
   `~/.env`, plus every `-e` file; its config listens on `127.0.0.1:8080`
   and `127.0.0.1:11434` unless `-l` says otherwise.
-- `-w` / `--workers` is accepted but currently has no effect: Knarr runs
-  as a single process.
+- `-w` / `--workers N` (default: `workers:` / `KNARR_WORKERS`, else 1)
+  serves from N worker processes: Knarr
+  binds the listen addresses, runs auto-discovery and the capability probe
+  once, then forks N workers that accept on the same sockets. The first
+  process stays as their supervisor — it restarts a worker that exits
+  (pausing up to 30 s when one keeps dying at start) and passes
+  `SIGTERM` / `SIGINT` on to all of them. Sessions (a Raider conversation)
+  live in one worker and are not routed back to it; the request log file is
+  shared, one whole line per write.
 - `knarr container` is a deprecated alias of the Docker image's own
   command, `knarr start --from-env -p 8080 -p 11434`: it always listens on
   `0.0.0.0:8080` and `0.0.0.0:11434` and takes no options of its own (the

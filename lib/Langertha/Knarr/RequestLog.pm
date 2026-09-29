@@ -79,7 +79,9 @@ sub _build_log_file {
 
 Path to the JSONL log file. One JSON object per line, suitable for
 C<tail -f knarr.jsonl | jq>. Resolved from C<logging.file> in config or
-C<KNARR_LOG_FILE> environment variable.
+C<KNARR_LOG_FILE> environment variable. Several workers (C<knarr start -w>)
+append to the same file: each line goes out as one write under an
+exclusive lock, so lines never interleave.
 
 =cut
 
@@ -96,7 +98,10 @@ sub _build_log_dir {
 =attr log_dir
 
 Path to a directory for per-request JSON files. Each request produces a
-pretty-printed C<{timestamp}_{format}_{model}.json> file. Resolved from
+pretty-printed C<{timestamp}_{pid}-{seq}_{format}_{model}.json> file, e.g.
+C<20260929_201530_123_4711-1_openai_gpt-4o.json>: the process id and a
+sequence number counted per process keep requests that finish in the same
+millisecond -- in one process or in several workers -- in separate files. Resolved from
 C<logging.dir> in config or C<KNARR_LOG_DIR> environment variable.
 
 =cut
@@ -127,6 +132,17 @@ has _json_pretty => (
 
 sub _build__json_pretty {
   return JSON::MaybeXS->new(utf8 => 1, convert_blessed => 1, pretty => 1, canonical => 1);
+}
+
+# Sequence number of the next per-request file of this process.
+has _file_seq => (
+  is      => 'rw',
+  default => 0,
+);
+
+sub _next_file_seq {
+  my ($self) = @_;
+  return $self->_file_seq( $self->_file_seq + 1 );
 }
 
 has _json_compact => (
@@ -298,7 +314,12 @@ sub _write_jsonl {
     open my $fh, '>>', $self->log_file
       or die "Cannot open log file " . $self->log_file . ": $!";
     flock($fh, 2); # LOCK_EX
-    print $fh $self->_json->encode($entry) . "\n";
+    # One write(2) on the O_APPEND handle: lines from several workers
+    # (k51) never interleave.
+    my $line = $self->_json->encode($entry) . "\n";
+    my $written = syswrite( $fh, $line );
+    die "Short write to log file " . $self->log_file . ": " . ( $! || 'partial line' )
+      unless defined $written && $written == length $line;
     close $fh;
   };
   if ($@) {
@@ -321,7 +342,10 @@ sub _write_file {
     $model  =~ s/[^a-zA-Z0-9._-]/_/g;
     $format =~ s/[^a-zA-Z0-9._-]/_/g;
 
-    my $filename = _file_timestamp() . "_${format}_${model}.json";
+    # pid and a per-process sequence number: two requests finishing in the
+    # same millisecond, in one worker or in two (k51), get two files.
+    my $filename = _file_timestamp() . '_' . $$ . '-' . $self->_next_file_seq
+      . "_${format}_${model}.json";
     my $path = File::Spec->catfile($dir, $filename);
 
     open my $fh, '>', $path

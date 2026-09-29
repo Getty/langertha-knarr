@@ -138,8 +138,9 @@ run_ok( [ '-c', 'k.yaml', 'container' ],
   ( my $help = $out . $err ) =~ s/\s+/ /g;   # usage wraps long lines
   like( $help, qr/-p --port.*replaces the config listen:/, 'start --help: -p replaces listen:' );
   like( $help, qr/-H --host.*no effect without -p/, 'start --help: -H needs -p' );
-  like( $help, qr/-w --workers: Int Accepted, but without effect/, 'start --help: -w has no effect' );
-  unlike( $help, qr/Number of worker processes/, 'start --help: no worker-process promise' );
+  like( $help, qr/-w --workers: Int Number of worker processes.*default: the config workers:, else KNARR_WORKERS, else 1, no fork/,
+    'start --help: -w forks worker processes (k51)' );
+  unlike( $help, qr/without effect/, 'start --help: no "without effect" left' );
   unlike( $help, qr/default: 8080 11434/, 'start --help: no wrong -p default' );
 }
 
