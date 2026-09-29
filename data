@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T20:43:00Z
+claimed_by: knarr-worker-pt
+class: standard
+completed: 2026-09-29T20:42:55Z
+created: 2026-09-29T20:23:53Z
+id: 54
+priority: high
+started: 2026-09-29T20:24:22Z
+status: done
+tags:
+- routing
+- passthrough
+- bug
+title: k47 is_upstream_for vergleicht nur scheme/host/port -- Gateway mit Pfad-Backends
+  routet falsch
+updated: 2026-09-29T20:43:00Z
+---
+
+Review von k47 (6e8048f), bestaetigt: Handler/Passthrough.pm is_upstream_for ignoriert den Pfad. Gateway (Cloudflare-AI-Gateway-Stil) .../gw/openai, .../gw/anthropic, .../gw/groq auf einem Host: ein Groq-discovered Modell ueber OpenAI-Protokoll geht raw an /openai -> 404, Engine nie gefragt (vor k47 ging es ueber die Engine). Fix-Richtung: zusaetzlich Pfad-Praefix pruefen (Engine-URL-Pfad beginnt mit Passthrough-Basispfad, nach Strippen eines abschliessenden /v1) und/oder Protokollfamilie der entdeckenden Engine muss zum Client-Protokoll passen. Repro: /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review/gw_e2e.pl, /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review/upstream_for.pl
+
+2026-09-29 20:33 Done. Cause: Handler::Passthrough::is_upstream_for compared scheme/host/port only, so every model discovered through a path-based gateway counted as the upstream's own. Fix (lib/Langertha/Knarr/Handler/Passthrough.pm): new class-callable same_upstream(base, url) -- URI canonical (host case, default port kept) + equal path after stripping trailing slashes and one trailing /v1 on both sides; is_upstream_for delegates to it. Chose equality, not the card's prefix check: a prefix would still let a gateway hosted at root (base '') claim every '/groq/v1' engine on its host. same_upstream is public so the Router (k55) reuses the same comparison. Docs: Passthrough POD, Config auto_discover POD, CLAUDE.md. Test: t/94_discovered_upstream_path.t -- 16 is_upstream_for cases (the review's upstream_for.pl ones plus /v1, trailing slash, look-alike path, root sub-path, scheme) and the gw_e2e scenario native+PSGI (Groq model -> engine, gateway OpenAI model -> raw to /gw/openai/v1/chat/completions); 11 failed before, all pass after; 94_* green.
+
+Committed as aa33ee9
