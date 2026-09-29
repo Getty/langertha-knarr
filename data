@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T17:17:34Z
+claimed_by: knarr-worker-bugs
+class: standard
+completed: 2026-09-29T17:17:34Z
+created: 2026-09-29T16:51:26Z
+id: 40
+priority: high
+started: 2026-09-29T16:51:39Z
+status: done
+tags:
+- cli
+- bug
+- docs-drift
+title: knarr start -c FILE / -v nach dem Subcommand schlaegt fehl
+updated: 2026-09-29T17:17:39Z
+---
+
+README, CLAUDE.md, bin/knarr POD und der CLI-Banner zeigen alle `knarr start -c production.yaml` bzw. `knarr start -v`. Real: "Unknown option: c" -- -c/-v sind globale Optionen in CLI.pm:37,52 und gehen nur VOR dem Subcommand. Fix im Code: -c/--config und -v/--verbose (und ggf. die anderen globalen) auch nach dem Subcommand akzeptieren, beide Stellungen muessen gehen. Dazu: --log-file (dashed) scheitert nach --from-env ("Unknown option: log-file") -- mitpruefen. Regressionstest.
+
+2026-09-29 17:01 Cause 1: MooX::Cmd gives args after the subcommand only to the subcommand; -c/-v existed only on Langertha::Knarr::CLI. Fix: new Moo role Langertha::Knarr::CLI::Role::GlobalOptions (-c/--config, -v/--verbose/--no-verbose, predicates; config_file($chain)/verbose_enabled($chain) resolve sub-position first, else global) composed into start/check/models. Cause 2: MooX::Options 4.103 _options_fix_argv takes the token after a boolean flag (--from-env) as its value and pushes it unmapped, so --log-file reached Getopt::Long verbatim. Fix: CLI around new_with_cmd normalizes --dashed-long names to underscores (values, short opts and args after -- untouched). Regression test t/75_cli_options.t (child perl, execute stubbed, no network) red before, green after.
+
+2026-09-29 17:15 Done: -c/--config and -v/--verbose/--no-verbose now work before and after start/check/models (new Moo role Langertha::Knarr::CLI::Role::GlobalOptions; config_file/verbose_enabled resolvers, sub position wins). Dashed long options (--log-file, --log-dir, --trace-name, --from-env, --env-file) work in any position via Langertha::Knarr::CLI->normalize_argv in an around new_with_cmd (works around MooX::Options 4.103 swallowing the token after a boolean flag unmapped). init and the deprecated container alias unchanged (init reads no config; global -c/-v before them still accepted). Verified: t/75_cli_options.t (68 tests, child perl with execute stubbed, red before / green after), full prove -l t/ green (48 files, 2358 tests). Not committed.
+
+Committed 7bc16f2.
