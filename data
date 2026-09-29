@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-29T18:12:01Z
+claimed_by: knarr-worker-fix2
+class: standard
+completed: 2026-09-29T18:11:57Z
+created: 2026-09-29T17:42:04Z
+id: 44
+priority: critical
+started: 2026-09-29T17:43:40Z
+status: done
+tags:
+- security
+- passthrough
+- bug
+title: Raw passthrough leitet proxy_api_key-Header an den Upstream weiter
+updated: 2026-09-29T18:12:01Z
+---
+
+Aus Doku-Durchgang k43: Raw passthrough forwardet jeden Client-Header, inklusive des Headers der den proxy_api_key traegt, an api.openai.com / api.anthropic.com. Der Knarr-Proxy-Key darf den Proxy nie verlassen. Erst Test (lokaler Fake-Upstream, der die empfangenen Header aufzeichnet), dann nur den/die Header entfernen, die Knarr selbst fuer seine Auth konsumiert (Achtung: wenn proxy key und Upstream-Key im selben Header stecken koennen, z.B. Authorization Bearer, sauber unterscheiden). Sonst bleibt der Bytes-Pfad 1:1.
+
+2026-09-29 17:50 Done. Cause: _raw_passthrough_request forwarded every client header, and the protocol parsers' forward_headers (Handler::Passthrough in the chain) carried Authorization/x-api-key, so the header holding auth_token reached the upstream. Semantics: auth_token is checked on every route incl. passthrough, accepted as 'Authorization: Bearer <key>' or 'x-api-key: <key>'. Fix: Knarr::_is_proxy_auth_header (same match as _check_auth, which now uses it) drops exactly the header(s) whose value is Knarr's key — raw passthrough header copy and forward_headers via new Knarr::_parse_chat_request (native + PSGI). The client's own provider key in the other header is still forwarded; bodies untouched. Edge: a proxy key identical to the provider key is no longer forwarded (intended). Test t/91_passthrough_proxy_key.t (raw + chain, native + PSGI, fake upstream records headers), red before, green after; 76_auth*, 70, 77, 80, 85, 89, 60 green. Docs: README Proxy Authentication, Knarr.pm auth_token POD, PSGI POD, Config proxy_api_key POD, CLAUDE.md.
+
+2026-09-29 18:12 Committed as e096ced
