@@ -66,6 +66,10 @@ that need to forward without re-encoding.
 =attr extra
 
 Per-protocol scratch space (e.g. JSON-RPC id for A2A, run_id for ACP).
+The Ollama parser records the path the client asked for as C<path>
+(C</api/chat> or C</api/generate>): it picks the answer's shape, and
+L<Langertha::Knarr::Handler::Passthrough> sends the request to the same path
+upstream.
 
 =cut
 

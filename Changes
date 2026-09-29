@@ -298,6 +298,12 @@ Revision history for Langertha-Knarr
       their engine. Discovery still fills /v1/models, /api/tags, the
       manifest and the capability probe.
 
+    - Ollama's /api/generate answers in Ollama's generate shape on the
+      routed path as well: the text on response, streaming and
+      non-streaming, instead of the /api/chat shape. A passthrough handler
+      in the handler chain sends it to the upstream's /api/generate and
+      reads its answer.
+
 
 1.101     2026-08-15 00:13:51Z
 

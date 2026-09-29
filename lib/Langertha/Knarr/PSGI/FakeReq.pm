@@ -8,7 +8,7 @@ use warnings;
 
 Internal to L<Langertha::Knarr::PSGI>: wraps a PSGI C<$env> so the Knarr
 code shared with the native server (auth check, protocol parsers, raw
-passthrough) can read request headers the way it reads them from a
+passthrough) can read request headers and the path the way it reads them from a
 L<Net::Async::HTTP::Server::Request>.
 
 =cut
@@ -21,6 +21,18 @@ sub new {
 =method new
 
     my $req = Langertha::Knarr::PSGI::FakeReq->new($env);
+
+=cut
+
+sub path { $_[0]{env}{PATH_INFO} // '/' }
+
+=method path
+
+    my $path = $req->path;   # /api/generate
+
+The request path (C<PATH_INFO>), like
+L<Net::Async::HTTP::Server::Request/path>; the Ollama protocol reads it to
+tell C</api/generate> from C</api/chat>.
 
 =cut
 

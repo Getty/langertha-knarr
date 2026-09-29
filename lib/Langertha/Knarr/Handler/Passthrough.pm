@@ -49,9 +49,10 @@ keys once, point everything at me" use case.
 
 Required. HashRef mapping protocol name (C<openai>, C<anthropic>,
 C<ollama>) to upstream base URL. The protocol's default chat path is
-appended (C</v1/chat/completions>, C</v1/messages>, C</api/chat>); the raw
-passthrough of L<Langertha::Knarr> sends an Ollama C</api/generate> request
-to the upstream's C</api/generate>.
+appended (C</v1/chat/completions>, C</v1/messages>, C</api/chat>); an
+Ollama C</api/generate> request goes to the upstream's C</api/generate>,
+here and on the raw passthrough of L<Langertha::Knarr>, and its answer is
+read from C<response>.
 
 =attr default_auth
 
@@ -179,12 +180,22 @@ when this is true; any other request goes to the default engine instead.
 
 =cut
 
+# An Ollama /api/generate request: its upstream answer carries the text on
+# response, not message.content, and no tool calls (k48).
+sub _is_ollama_generate {
+  my ($self, $request) = @_;
+  return $request->protocol eq 'ollama'
+    && ( $request->extra->{path} // '' ) eq '/api/generate' ? 1 : 0;
+}
+
 sub _build_upstream_request {
   my ($self, $request, $force_stream) = @_;
   my $body = { %{ $request->raw || {} } };
   $body->{stream} = $force_stream ? JSON::MaybeXS::true() : JSON::MaybeXS::false()
     if defined $force_stream;
-  my $url = $self->_upstream_url( $request->protocol );
+  # The client's path, where the protocol's parser recorded it: an Ollama
+  # /api/generate goes to the upstream's /api/generate (k48).
+  my $url = $self->_upstream_url( $request->protocol, $request->extra->{path} );
   my $http_req = HTTP::Request->new( POST => $url );
   $http_req->header( 'Content-Type' => 'application/json' );
   # Forward client auth headers (captured by protocol parsers)
@@ -204,8 +215,10 @@ sub _build_upstream_request {
 # assistant text, the tool calls as Langertha::ToolCall objects (through
 # core's canonical inbound door, the same one the streaming path uses) and
 # the terminal reason verbatim -- the client-side protocol maps it (k21).
+# $generate: the body is an Ollama /api/generate answer, the text on
+# response instead of message.content (k48).
 sub _parse_response {
-  my ($self, $protocol_name, $resp_body) = @_;
+  my ($self, $protocol_name, $resp_body, $generate) = @_;
   my %parsed = ( content => '', tool_calls => [], finish_reason => undef );
   my $data = eval { $self->_json->decode($resp_body) };
   return %parsed unless ref $data eq 'HASH';
@@ -220,7 +233,7 @@ sub _parse_response {
     $parsed{finish_reason} = $data->{stop_reason};
   }
   elsif ( $protocol_name eq 'ollama' ) {
-    $parsed{content}       = $data->{message}{content} // '';
+    $parsed{content}       = ( $generate ? $data->{response} : $data->{message}{content} ) // '';
     $parsed{finish_reason} = $data->{done_reason};
   }
   else {
@@ -236,7 +249,8 @@ async sub handle_chat_f {
   my $resp = await $self->_upstream_request_f( request => $http_req );
   die "Passthrough upstream failed: " . $resp->status_line . "\n" unless $resp->is_success;
   return Langertha::Knarr::Response->new(
-    $self->_parse_response( $request->protocol, $resp->decoded_content ),
+    $self->_parse_response( $request->protocol, $resp->decoded_content,
+      $self->_is_ollama_generate($request) ),
     model => $request->model // $self->model_id,
   );
 }
@@ -273,6 +287,7 @@ async sub handle_stream_f {
   );
 
   my $proto_name = $request->protocol;
+  my $generate   = $self->_is_ollama_generate($request);
   # The upstream's terminal reason, verbatim; the client-side protocol maps
   # it when it closes the stream (k18).
   my $note_finish = sub {
@@ -346,6 +361,7 @@ async sub handle_stream_f {
       my $d = eval { $self->_json->decode($line) };
       return undef unless ref $d eq 'HASH';
       $note_finish->( $d->{done_reason} ) if $d->{done};
+      return $d->{response} if $generate;
       $note_calls->( Langertha::ToolCall->extract( 'ollama', $d ) );
       return $d->{message}{content};
     }

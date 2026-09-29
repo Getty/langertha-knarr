@@ -8,7 +8,9 @@ L<Langertha::Knarr::Protocol>. Loaded by default.
 
 =over
 
-=item * C<POST /api/chat>, C<POST /api/generate> — chat with NDJSON streaming
+=item * C<POST /api/chat>, C<POST /api/generate> — chat with NDJSON streaming;
+C</api/generate> answers in Ollama's generate shape, the text on C<response>
+instead of C<message> (see L</format_chat_response>)
 
 =item * C<GET /api/tags> — model listing
 
@@ -33,6 +35,7 @@ use Moose;
 use JSON::MaybeXS;
 use Time::HiRes qw( time );
 use POSIX qw( strftime );
+use Scalar::Util ();
 use Langertha::Knarr::Request;
 use Langertha::Knarr::Response;
 use Langertha::Knarr::Image;
@@ -45,6 +48,8 @@ with 'Langertha::Knarr::Protocol';
 # Each chunk: { model, created_at, message:{role,content}, done:false }
 # Final:     { model, created_at, message:{role,content:""}, done:true,
 #              total_duration, eval_count, ... }
+# /api/generate carries the text on response instead of message (k48):
+#            { model, created_at, response, done, ... }
 # Content-Type stays application/x-ndjson (or application/json with chunked).
 # ----------------------
 
@@ -102,9 +107,33 @@ sub manifest_endpoint {
 
 sub _ts { strftime( "%Y-%m-%dT%H:%M:%S.000000000Z", gmtime ) }
 
+# The path the client asked for, recorded by parse_chat_request as
+# extra->{path} (k48). /api/generate answers in its own shape, and a
+# passthrough handler in the chain sends it to the upstream's /api/generate.
+sub _is_generate {
+  my ($self, $request) = @_;
+  return ( $request->extra->{path} // '' ) eq '/api/generate' ? 1 : 0;
+}
+
+# The client's answer text and the fields around it: message for /api/chat,
+# response for /api/generate.
+sub _text_fields {
+  my ($self, $request, $text, $tool_calls) = @_;
+  return ( response => $text ) if $self->_is_generate($request);
+  my $message = { role => 'assistant', content => $text };
+  $message->{tool_calls} = [ map { $_->to_ollama } @$tool_calls ]
+    if $tool_calls && @$tool_calls;
+  return ( message => $message );
+}
+
 sub parse_chat_request {
   my ($self, $http_req, $body_ref) = @_;
   my $data = $self->_json->decode( $$body_ref || '{}' );
+  # The native server's request and the PSGI adapter's both know the path;
+  # which of the two chat routes the request came in on picks the answer's
+  # shape (k48).
+  my $path = $http_req && Scalar::Util::blessed($http_req) && $http_req->can('path')
+    ? $http_req->path : undef;
   my @msgs;
   if ( $data->{messages} ) {
     @msgs = @{ Langertha::Knarr::Image::ollama_messages( $data->{messages} ) };
@@ -129,6 +158,7 @@ sub parse_chat_request {
     reasoning_effort => scalar $self->reasoning->from_ollama( $data->{think}, $data->{reasoning_effort} ),
     tools           => $data->{tools},
     response_format => $data->{format},
+    extra           => { defined $path ? ( path => $path ) : () },
   );
 }
 
@@ -151,13 +181,10 @@ sub _done_reason {
 sub format_chat_response {
   my ($self, $response, $request) = @_;
   my $r = Langertha::Knarr::Response->coerce($response);
-  my $message = { role => 'assistant', content => $r->content };
-  $message->{tool_calls} = [ map { $_->to_ollama } @{ $r->tool_calls } ]
-    if $r->has_tool_calls;
   my $payload = {
     model      => $r->model // $request->model // 'unknown',
     created_at => _ts(),
-    message    => $message,
+    $self->_text_fields( $request, $r->content, $r->has_tool_calls ? $r->tool_calls : [] ),
     done       => JSON::MaybeXS::true(),
     done_reason => _done_reason( $r->finish_reason ),
   };
@@ -167,6 +194,20 @@ sub format_chat_response {
   }
   return ( 200, { 'Content-Type' => 'application/json' }, $self->_json->encode($payload) );
 }
+
+=method format_chat_response
+
+    my ($status, $headers, $body) = $proto->format_chat_response( $response, $request );
+
+The non-streaming answer: C<model>, C<created_at>, C<done>, C<done_reason>
+and the usage counters (C<prompt_eval_count>, C<eval_count>, ...) when the
+backend reported usage. A C</api/chat> request gets the text on C<message>
+(with C<tool_calls>), a C</api/generate> request on C<response>, as Ollama
+answers it -- streaming alike, where every chunk carries its piece on
+C<message.content> or C<response> and the final C<{"done": true}> line an
+empty one.
+
+=cut
 
 sub format_models_response {
   my ($self, $models) = @_;
@@ -251,7 +292,7 @@ sub format_stream_chunk {
   my $payload = {
     model      => $request->model // 'unknown',
     created_at => _ts(),
-    message    => { role => 'assistant', content => $delta_text },
+    $self->_text_fields( $request, $delta_text ),
     done       => JSON::MaybeXS::false(),
   };
   return $self->_json->encode($payload) . "\n";
@@ -269,13 +310,10 @@ sub format_stream_error {
 # wire sends message.tool_calls whole, so they ride on the done line (k19).
 sub format_stream_done {
   my ($self, $request, $finish_reason, $tool_calls) = @_;
-  my $message = { role => 'assistant', content => '' };
-  $message->{tool_calls} = [ map { $_->to_ollama } @$tool_calls ]
-    if $tool_calls && @$tool_calls;
   my $payload = {
     model      => $request->model // 'unknown',
     created_at => _ts(),
-    message    => $message,
+    $self->_text_fields( $request, '', $tool_calls ),
     done       => JSON::MaybeXS::true(),
     done_reason => _done_reason($finish_reason),
   };
