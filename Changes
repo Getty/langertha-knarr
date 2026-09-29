@@ -245,6 +245,13 @@ Revision history for Langertha-Knarr
       protocol's error shape instead of a 500 carrying a Perl error;
       streaming requests get the 404 before the stream starts.
 
+    - A request that names no model (A2A always, ACP without agent_name,
+      AG-UI, OpenAI, Anthropic and Ollama bodies without one) reaches the
+      default engine with the model configured under default:, or the
+      provider's default when none is set, instead of a model called
+      'default' that a real upstream rejects. A model the client names
+      still reaches the default engine as asked.
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

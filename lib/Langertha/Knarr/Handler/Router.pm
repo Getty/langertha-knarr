@@ -42,6 +42,13 @@ config without a C<model> key the provider's default answers, so the
 response keeps the model the upstream reported, else the engine's
 C<chat_model>; it is never relabeled with the alias.
 
+A request that names no model (A2A always; ACP without C<agent_name>, and
+any other protocol whose body leaves the model out) goes to the default
+engine with the C<model> configured under C<default:>, or with the
+provider's default when none is configured -- see
+L<Langertha::Knarr::Router/resolve>. A model the client does name reaches
+the default engine as asked.
+
 Streaming responses are pumped via the engine's
 C<chat_stream_realtime_f> for native token-by-token delivery, with the
 same capability-filtered generation parameters as the non-streaming path.
@@ -86,9 +93,13 @@ has passthrough => (
 # protocol; otherwise to the default engine (k41). With neither, the
 # failure carries the category 'model_not_found', which Knarr answers as a
 # 404 in the client protocol's error shape.
+#
+# A request without a model (A2A never names one) is resolved as such, not
+# as a placeholder name: the default engine then answers with its own
+# configured model instead of being sent a model called 'default' (k42).
 sub _resolve {
   my ($self, $request) = @_;
-  my $model  = $request->model // 'default';
+  my $model  = $request->model;
   my $router = $self->router;
   if ( $self->_passthrough_serves( $request->protocol ) ) {
     # With passthrough: try without default engine first so unknown models

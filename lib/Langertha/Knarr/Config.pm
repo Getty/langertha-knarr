@@ -308,6 +308,10 @@ without an C<ollama> entry, and A2A, ACP and AG-UI always). Without a
 default engine such a request is answered with C<404> in the client
 protocol's error shape.
 
+A C<model> in this section is what the default engine uses for a request
+that names no model (A2A always, ACP without C<agent_name>); a model the
+client names replaces it.
+
 =cut
 
 sub _build_default_engine {

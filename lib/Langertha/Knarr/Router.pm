@@ -141,6 +141,13 @@ string to use with that engine. The resolution order is:
 
 =back
 
+On the default engine a named model replaces the C<model> of the
+C<default:> section, so the client's model reaches the provider as asked.
+Without a model name (C<undef> or empty -- an A2A request never names one)
+only the default engine can answer, and it answers as configured: with its
+own C<model>, or with the provider's default when C<default:> names none
+(the third return value is then true and the returned model C<undef>).
+
 The third return value is true when the matched model config has no
 C<model> key: the engine is then built without a model, the provider's
 default answers, and the returned model string is just the requested alias.
@@ -149,32 +156,38 @@ answered instead of the alias.
 
     my ($engine, $model, $alias_only) = $router->resolve($model_name);
 
-Croaks if the model cannot be resolved. Pass C<skip_default =E<gt> 1> to allow
-the caller to try passthrough before falling back to the default engine.
+Croaks if the model cannot be resolved, and croaks C<No model specified>
+when no model is named and there is no default engine. Pass
+C<skip_default =E<gt> 1> to allow the caller to try passthrough before
+falling back to the default engine; with it, an unresolved or missing model
+name returns an empty list.
 
 =cut
 
 sub resolve {
   my ($self, $model_name, %opts) = @_;
-  croak "No model specified" unless defined $model_name && length $model_name;
+  my $named = defined $model_name && length $model_name ? 1 : 0;
+  my $def;
 
-  # Check explicit config first
-  my $models = $self->config->models;
-  my $def = $models->{$model_name};
+  if ($named) {
+    # Check explicit config first
+    $def = $self->config->models->{$model_name};
 
-  # Check discovered models
-  unless ($def) {
-    $self->_discover_models unless $self->_discovery_done;
-    $def = $self->_discovered_models->{$model_name};
+    # Check discovered models
+    unless ($def) {
+      $self->_discover_models unless $self->_discovery_done;
+      $def = $self->_discovered_models->{$model_name};
+    }
   }
 
   # Fall back to default engine (skip_default allows caller to try passthrough first)
   unless ($def) {
     return () if $opts{skip_default};
     $def = $self->config->default_engine;
-    if ($def) {
-      $def = { %$def, model => $model_name };
-    }
+    croak "No model specified" unless $named || $def;
+    # A named model replaces the default engine's model:; a request without
+    # one (A2A, ...) gets the default engine as configured (k42).
+    $def = { %$def, model => $model_name } if $def && $named;
   }
 
   croak "Model '$model_name' not configured and no default engine" unless $def;
