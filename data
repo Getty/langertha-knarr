@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T18:12:30Z
+claimed_by: knarr-worker-fix2
+class: standard
+completed: 2026-09-29T18:12:25Z
+created: 2026-09-29T17:43:17Z
+id: 47
+priority: high
+started: 2026-09-29T17:43:54Z
+status: done
+tags:
+- routing
+- passthrough
+- from-env
+title: 'Unter from-env: auto-discovered Modelle sollen raw passthrough gehen, nicht
+  Engine'
+updated: 2026-09-29T18:12:30Z
+---
+
+Maintainer-Entscheidung 2026-09-29: Unter --from-env (auto_discover + passthrough) werden die vom Provider gelisteten Modelle heute "konfiguriert" und ueber die Langertha-Engine geroutet -- Claude Code verliert damit 1:1-Bytes (cache_control, usage, tool_use-Details). Gewollt: Passthrough bevorzugen. Ein Modell, das NUR durch auto_discover bekannt ist, geht bei vorhandenem Passthrough-Upstream fuer das Client-Protokoll raw durch; auto_discover speist dann nur die Modell-Listen (/v1/models, /api/tags, manifest, capability probe). Explizit in models: konfigurierte Modelle werden weiter geroutet. Ohne Passthrough-Upstream fuer das Protokoll bleibt Engine-Routing (k41-Logik). Test mit Fake-Upstream + Handler::Code. Doku (README/CLAUDE.md/Config POD) nachziehen.
+
+2026-09-29 18:05 Done, with one refinement to flag: a model known ONLY through auto_discover goes raw passthrough when the client protocol has a passthrough upstream AND that upstream is the endpoint that listed it (same scheme/host/port). Without that guard, from-env with several keys would send e.g. a discovered Groq model asked for over the OpenAI protocol raw to api.openai.com. Such cross-provider models, models under models:, and any protocol without an upstream (k41) stay routed. Code: Router records discovered_url at discovery + new discovered_url(); Handler::Passthrough::is_upstream_for (URI origin compare, cpanfile requires URI); Knarr::_is_raw_passthrough uses both (native + PSGI share it). Handler::Router's chain passthrough is unchanged. Consequence: those models now use the client's own key, not Knarr's env key (configure the model under models: to route it). Test t/94_discovered_passthrough.t (fake upstream + offline LangerthaX engine, native + PSGI, sync + stream): red before, green after. Full prove -l t/: 53 files, 2589 tests, PASS (streaming 40/41 included). Docs: README (Getting Started, How it works, diagram, auto-discover, Passthrough Mode, config table), CLAUDE.md, Config auto_discover/passthrough POD, Knarr.pm raw_passthrough/router POD, share/example-config.yaml.
+
+2026-09-29 18:12 Committed as 6e8048f
