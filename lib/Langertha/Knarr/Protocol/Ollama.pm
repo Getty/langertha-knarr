@@ -25,6 +25,11 @@ a model Knarr does not list
 
 =back
 
+The client's C<Authorization> header is kept as C<forward_headers>, like
+the OpenAI and Anthropic protocols do, so a
+L<Langertha::Knarr::Handler::Passthrough> in the handler chain reaches an
+authenticated remote Ollama with it.
+
 Streaming uses newline-delimited JSON (NDJSON) rather than SSE — the
 C<Content-Type> is C<application/x-ndjson> and each chunk is a single
 JSON object per line. The final chunk has C<done: true>.
@@ -134,6 +139,16 @@ sub parse_chat_request {
   # shape (k48).
   my $path = $http_req && Scalar::Util::blessed($http_req) && $http_req->can('path')
     ? $http_req->path : undef;
+  # Capture auth headers for passthrough, like the OpenAI and Anthropic
+  # parsers: a Handler::Passthrough in the chain forwards them to an
+  # authenticated remote Ollama (k49). Knarr takes its own key out.
+  my %fwd;
+  if ( $http_req && Scalar::Util::blessed($http_req) && $http_req->can('header') ) {
+    for my $h (qw( authorization )) {
+      my $v = scalar $http_req->header($h);
+      $fwd{$h} = $v if defined $v && length $v;
+    }
+  }
   my @msgs;
   if ( $data->{messages} ) {
     @msgs = @{ Langertha::Knarr::Image::ollama_messages( $data->{messages} ) };
@@ -158,7 +173,7 @@ sub parse_chat_request {
     reasoning_effort => scalar $self->reasoning->from_ollama( $data->{think}, $data->{reasoning_effort} ),
     tools           => $data->{tools},
     response_format => $data->{format},
-    extra           => { defined $path ? ( path => $path ) : () },
+    extra           => { forward_headers => \%fwd, defined $path ? ( path => $path ) : () },
   );
 }
 

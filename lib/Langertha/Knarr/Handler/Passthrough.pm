@@ -42,6 +42,12 @@ L<Langertha::ToolCall> objects on the stream's C<tool_calls>
 which the front-side protocol then re-frames — keeping symmetry even
 when client and upstream use the same protocol.
 
+The client's auth headers go along as the protocol's parser captured them
+in C<< $request->extra->{forward_headers} >>: C<Authorization> for OpenAI
+and Ollama, C<x-api-key>, C<anthropic-version> and C<Authorization> for
+Anthropic. L<Langertha::Knarr> takes its own proxy key out of them first
+(see L<Langertha::Knarr/auth_token>).
+
 This is the building block behind Knarr's classic "configure your API
 keys once, point everything at me" use case.
 

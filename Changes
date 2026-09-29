@@ -677,3 +677,7 @@ Revision history for Langertha-Knarr
   - Passthrough mode with Langfuse tracing
   - Docker container mode with auto-detect from ENV
   - CLI: start, container, models, check, init
+
+    - The Passthrough handler in the handler chain now forwards the
+      client's Authorization on Ollama requests too, so an authenticated
+      remote Ollama works behind it. Knarr's own proxy key is never sent.
