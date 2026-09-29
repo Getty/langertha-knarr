@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T20:43:09Z
+claimed_by: knarr-worker-pt
+class: standard
+completed: 2026-09-29T20:43:04Z
+created: 2026-09-29T20:23:58Z
+id: 55
+priority: medium
+started: 2026-09-29T20:24:27Z
+status: done
+tags:
+- routing
+- discovery
+- bug
+title: 'Discovery-Kollision: gleiche Model-ID bei mehreren Endpoints -- Besitzer haengt
+  von Hash-Reihenfolge ab'
+updated: 2026-09-29T20:43:09Z
+---
+
+Review, plausibel/bestaetigt per PERL_HASH_SEED: Router.pm:287 iteriert keys %$models, first-wins in _discovered_models. Welcher Endpoint eine mehrfach gelistete ID besitzt, ist zufaellig; seit k47 entscheidet das auch raw passthrough vs Engine und wessen Credentials. Fix: deterministisch (sort keys), bevorzugt den Endpoint, der der Passthrough-Upstream des jeweiligen Protokolls ist; Kollision loggen (debug/info). Repro: /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review/collide.pl
+
+2026-09-29 20:38 Done. Router::_discover_models iterated 'keys %$models' first-wins, so the owner of an id several endpoints list (and since k47 raw-vs-engine and whose key) depended on PERL_HASH_SEED. Fix (lib/Langertha/Knarr/Router.pm): endpoints collected in sort order, engines built up front, split into those whose URL is a passthrough upstream of any protocol (_is_passthrough_upstream via Handler::Passthrough->same_upstream from k54, named once in _passthrough_class) and the rest; listed in that order; first owner wins; every further endpoint listing the id logged at debug ('Discovered model X also listed by Y, stays with Z'). Router now 'use's Handler::Passthrough. POD (Router DESCRIPTION) + CLAUDE.md. Test: t/94_discovered_collision.t -- in-process ownership with/without/other passthrough, debug log via Log::Any::Test, and 12 PERL_HASH_SEEDs in subprocesses must agree; 7/8 failed before, all pass after. Full prove -l t/ green (60 files, 3197 tests).
+
+Committed as 96ab8fa
