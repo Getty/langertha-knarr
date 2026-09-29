@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-29T20:23:44Z
+claimed_by: knarr-worker-a2aname
+class: standard
+completed: 2026-09-29T20:23:39Z
+created: 2026-09-29T20:15:22Z
+id: 50
+priority: medium
+started: 2026-09-29T20:15:46Z
+status: done
+tags:
+- a2a
+- config
+title: 'A2A-Agent-Card: Name/Beschreibung konfigurierbar, Default ''Langertha Knarr
+  Agent'' statt Steerboard'
+updated: 2026-09-29T20:23:44Z
+---
+
+Maintainer-Entscheidung 2026-09-29: Protocol/A2A.pm:70-71 liefert oeffentlich "Langertha Steerboard Agent"/"Steerboard-exposed agent" (alter Projektname). Neu: per Config einstellbar (Key-Namen passend zu Config.pm-Stil, z.B. a2a: {name, description} oder a2a_agent_name/_description, mit KNARR_* env falls Muster das vorsieht), Default "Langertha Knarr Agent" + sinnvolle Beschreibung. Die Steerboard-Kommentare (A2A.pm:94, Handler/Raider.pm:55) mit aufraeumen. Test + Doku (Config POD, README A2A-Abschnitt, example-config).
+
+2026-09-29 20:20 Also found: the A2A card still hardcodes version => '0.0.1' (Protocol/A2A.pm _build_agent_card) - not Knarr's version; left untouched, out of scope. Config a2a: is read like logging: (data->{a2a}{name}) - a non-hash a2a: value dies on read, same as logging:.
+
+2026-09-29 20:20 Done: Protocol::A2A gains agent_name (default 'Langertha Knarr Agent') / agent_description (default 'LLM agent served through Langertha Knarr') feeding the default agent_card. Plumbing: Knarr gets protocol_args (HashRef keyed by protocols entry, passed to each protocol's ->new in _build_protocol_objects - PSGI reuses Knarr's protocol objects so it follows automatically). Config: a2a.name / a2a.description with KNARR_A2A_NAME / KNARR_A2A_DESCRIPTION (quotes stripped, config wins) as a2a_name / a2a_description, plus Config->protocol_args which Start.pm passes. Steerboard comments cleaned (A2A.pm, Handler/Raider.pm, t/50_translator.t). Docs: POD, README A2A section + key table + library example, CLAUDE.md, share/example-config.yaml, .env.example. Verified: new t/96_a2a_agent_card.t (35 tests, native + PSGI, default/configured/partial, Config+env) fails on old lib, passes now; prove -l t/ 55 files / 2668 tests PASS.
+
+2026-09-29 20:23 Coordinator follow-up done: A2A card version is now $Langertha::Knarr::VERSION (Protocol::A2A does 'use Langertha::Knarr ();' - no compile-time cycle, Knarr.pm loads protocols via use_module at runtime), fallback 'dev' if undef. Only other place Knarr reports its own version is knarr --version (CLI prints $VERSION, no fallback); /api/version is the Ollama compat version and the manifest carries none. t/96 extended (card version == Knarr version on native + PSGI, not 0.0.1, local undef -> 'dev'). prove -l t/: 55 files / 2674 tests PASS. Card stays in review.
+
+Committed as b9d54c8
