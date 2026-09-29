@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T20:42:51Z
+claimed_by: knarr-worker-pt
+class: standard
+completed: 2026-09-29T20:42:46Z
+created: 2026-09-29T20:23:49Z
+id: 53
+priority: critical
+started: 2026-09-29T20:24:17Z
+status: done
+tags:
+- security
+- passthrough
+- bug
+title: Proxy-Key leakt bei doppelten/zusammengefuehrten Auth-Headern (PSGI raw, Chain-Passthrough)
+updated: 2026-09-29T20:42:51Z
+---
+
+Review von k44 (e096ced), bestaetigt: _is_proxy_auth_header matcht nur, wenn der ganze Header-Wert exakt der Key ist. PSGI-Server mergen doppelte Header zu einem HTTP_*-Wert; die Parser lesen scalar $http_req->header(...), das Duplikate mit ', ' joint. Szenario: auth_token=PROXYSECRET, Client schickt x-api-key: PROXYSECRET + Authorization: Bearer PROXYSECRET + Authorization: Bearer sk-own -> Upstream bekommt 'Authorization: Bearer PROXYSECRET, Bearer sk-own'. Betroffen: PSGI raw path; Chain-Passthrough native+PSGI (erreichbar z.B. mit OpenAI/Anthropic-Request ohne model). Native raw ist sauber. Fix-Richtung: Header gilt als Knarrs, wenn irgendein komma-getrenntes Element den Key traegt (bzw. Wert den Key enthaelt) -> dann nur dieses Element entfernen oder Header droppen; oder den von _check_auth akzeptierten Header per Name droppen. Repro-Skripte: /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review/dup_hdr.pl, /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review/dup_hdr_chain.pl
+
+2026-09-29 20:27 Reproduced against HEAD b9d54c8: PSGI raw and chain (native+PSGI) forward 'Authorization: Bearer PROXYSECRET, Bearer sk-own' (HTTP::Headers/PSGI merge duplicates with ', '). Plan: one stripping function (_without_proxy_key) applied on every forwarding path -- removes each comma-separated element of Authorization / x-api-key that is the key or 'Bearer <key>', drops the header when nothing remains, leaves an unmatched value byte-identical; _check_auth accepts the key per element so auth and stripping agree.
+
+2026-09-29 20:30 Done. Cause: _is_proxy_auth_header matched only a header whose whole value was the key; duplicate headers arrive merged with ', ' (PSGI HTTP_*, parsers' scalar ->header), so PSGI raw and chain Passthrough (native+PSGI) forwarded 'Bearer KEY, Bearer sk-own'. Fix (lib/Langertha/Knarr.pm): new _without_proxy_key(name, value) replaces _is_proxy_auth_header on every forwarding path (raw request builder, _parse_chat_request forward_headers): from Authorization/x-api-key every comma-separated element that is the key, bare or 'Bearer <key>', in either header, is removed; others kept joined with ', '; empty -> header dropped; no match -> value byte-identical. _check_auth accepts the key per element (Bearer in Authorization, bare in x-api-key) so auth and stripping agree. Docs: Knarr.pm auth_token POD, Config proxy_api_key POD, PSGI POD, README Proxy Authentication, CLAUDE.md. Test: t/91_proxy_key_merged_headers.t (raw/chain x native/PSGI, 7 header shapes + 401 without key) failed 54/76 before, passes after; full prove -l t/ green (56 files, 2834 tests). Also found (not fixed, out of scope): native raw passthrough uses $http_req->header(name => value), which REPLACES, so a non-auth header sent twice reaches the upstream only once (last value) -- push_header would keep the bytes 1:1; candidate card for this board.
+
+Committed as 705186a
