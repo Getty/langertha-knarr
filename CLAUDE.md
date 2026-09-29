@@ -48,8 +48,10 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 
 - **Raw passthrough** (unknown model, protocol has a `passthrough:` upstream) pipes
   all HTTP bytes 1:1 to the upstream with the client's own headers/key — preserves
-  tool_use, usage, cache_control. Traced, not request-logged. Only the header that
-  carried Knarr's own `proxy_api_key` is dropped (k44); Ollama `/api/generate` goes to
+  tool_use, usage, cache_control. Traced, not request-logged. Knarr's own
+  `proxy_api_key` is removed from `Authorization`/`x-api-key` element by element, a
+  header left empty is dropped (k44, k53; `Knarr::_without_proxy_key`, every forwarding
+  path); Ollama `/api/generate` goes to
   the upstream's `/api/generate` (k46).
 - `passthrough: true` = openai + anthropic only; ollama needs an explicit URL;
   A2A/ACP/AG-UI never pass through (k41).

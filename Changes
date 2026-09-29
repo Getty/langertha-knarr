@@ -273,12 +273,14 @@ Revision history for Langertha-Knarr
       scripts/check-binary-libs.sh smoke-test them.
 
     - Security fix: Knarr's own proxy key (proxy_api_key, KNARR_API_KEY)
-      no longer reaches a passthrough upstream. The header that carried it,
-      Authorization: Bearer or x-api-key, is dropped from the request to
-      the upstream, on the raw passthrough and through the Passthrough
-      handler, on the native server and under PSGI. Every other header is
-      forwarded as before, so a passthrough client sends its own provider
-      key in the other header.
+      no longer reaches a passthrough upstream. Knarr removes it from
+      Authorization and x-api-key wherever it appears, bare or as Bearer,
+      also when a client sends a header twice and the values arrive
+      merged, and drops a header that held nothing else. The client's own
+      provider key is forwarded alongside. This holds on the raw
+      passthrough and through the Passthrough handler, on the native
+      server and under PSGI. The proxy key is accepted as one of several
+      values of a header.
 
     - knarr start --from-env and knarr init now give the default engine
       the API key variable they found (api_key_env), so a default OpenAI

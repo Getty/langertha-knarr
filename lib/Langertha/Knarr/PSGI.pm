@@ -36,7 +36,7 @@ L<Langertha::Knarr/run> entry point if you need real-time streaming.
 Raw passthrough works as on the native server: with a
 C<raw_passthrough> handler and a C<router> set on the Knarr, a chat request for a
 model the router does not configure is sent to the upstream byte for byte
-with the client's headers (minus the one that carried the proxy key, see
+with the client's headers (minus the proxy key, see
 L<Langertha::Knarr/auth_token>), and the upstream's status, content type and body
 come back unchanged. A streamed passthrough answer is buffered like any
 other stream here.
