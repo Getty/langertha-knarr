@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-29T18:18:38Z
+claimed_by: knarr-worker-generate
+class: standard
+completed: 2026-09-29T18:18:38Z
+created: 2026-09-29T18:06:33Z
+id: 48
+priority: medium
+started: 2026-09-29T18:12:56Z
+status: done
+tags:
+- ollama
+- protocol
+- bug
+title: Ollama /api/generate auf dem gerouteten Pfad antwortet im /api/chat-Shape;
+  Handler::Passthrough schickt generate an /api/chat
+updated: 2026-09-29T18:18:44Z
+---
+
+Aus k46: Auf dem gerouteten Pfad antwortet /api/generate im /api/chat-Format (message statt response). Ausserdem schickt Handler::Passthrough in der Handler-Kette generate-Bodies an /api/chat (der raw passthrough ist seit k46 korrekt). Erwartet: /api/generate antwortet im generate-Shape (response, done, ... inkl. Streaming-NDJSON), und die Chain-Passthrough trifft /api/generate.
+
+2026-09-29 18:15 Cause: Request carried no route info; Protocol::Ollama always formatted the chat shape; Handler::Passthrough::_build_upstream_request called _upstream_url without the client path and parsed message.content. Fix: Ollama parser records extra->{path} (from $http_req->path; FakeReq gains path), Ollama formatters emit response for /api/generate, Passthrough passes extra->{path} and reads response. t/95_generate_routed_shape.t red on HEAD (18 fails), green now. Full suite pending (loadguard busy).
+
+2026-09-29 18:17 Done. Protocol::Ollama parse_chat_request records the client path as extra->{path} (native request ->path, PSGI FakeReq gains path); format_chat_response / format_stream_chunk / format_stream_done answer /api/generate on response (no message), same model/created_at/done/done_reason/usage counters as chat; /api/chat unchanged. Handler::Passthrough sends extra->{path} to _upstream_url (upstream /api/generate) and reads response for generate, sync and stream. Raw passthrough untouched. Errors already protocol-level ({"error":"..."}), route-independent. POD: Ollama, Request extra, FakeReq path, Passthrough upstreams. New t/95_generate_routed_shape.t (routed + chain passthrough, native + PSGI): 18 fails on HEAD, green now. prove 40/41 green; full prove -l t/ 54 files / 2633 tests PASS.
+
+Committed as 82ec9fd
