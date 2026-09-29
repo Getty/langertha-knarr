@@ -2,6 +2,12 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - The A2A agent card at /.well-known/agent.json now names the agent
+      "Langertha Knarr Agent" and reports Knarr's own version. a2a.name and
+      a2a.description in the config (KNARR_A2A_NAME, KNARR_A2A_DESCRIPTION)
+      set its name and description. Langertha::Knarr takes protocol_args to
+      pass such settings to its protocols.
+
     - /api/show "vision" and the manifest's image_input are now right for
       gateway and self-hosted models. Once the server listens (after
       auto-discovery), Knarr asks the provider's own model metadata,

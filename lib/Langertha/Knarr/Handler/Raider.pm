@@ -52,7 +52,7 @@ C<knarr-raider>.
 =cut
 
 # A coderef invoked as $raider_factory->($session, $request) to create a fresh
-# Raider for a new session. Receives Steerboard session + request for context.
+# Raider for a new session. Receives the Knarr session + request for context.
 has raider_factory => (
   is => 'ro',
   isa => 'CodeRef',

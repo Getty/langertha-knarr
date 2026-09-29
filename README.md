@@ -452,6 +452,16 @@ curl http://localhost:8080/ \
   -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"id":"t1","message":{"role":"user","parts":[{"type":"text","text":"Hello"}]}}}'
 ```
 
+The card names the agent `Langertha Knarr Agent`; set your own name and
+description in the config (or with `KNARR_A2A_NAME` /
+`KNARR_A2A_DESCRIPTION`):
+
+```yaml
+a2a:
+  name: Support Agent
+  description: Answers questions about our product
+```
+
 Only `type: "text"` parts are read. An A2A task names no model, so it is
 answered by the default engine with the model configured under `default:`
 (or the provider's default); without a default engine it gets a `404`.
@@ -726,6 +736,7 @@ there is one; the config value wins):
 | `probe_capabilities` | ask gateway / self-hosted engines which models see images (`KNARR_PROBE_CAPABILITIES`) | `1` |
 | `probe_timeout` | seconds per capability probe (`KNARR_PROBE_TIMEOUT`) | `10` |
 | `ollama_compat_version` | version at `GET /api/version`, `x.y.z` (`KNARR_OLLAMA_COMPAT_VERSION`) | `0.34.4` |
+| `a2a` | `name` and `description` of the A2A agent card (`KNARR_A2A_NAME`, `KNARR_A2A_DESCRIPTION`) | `Langertha Knarr Agent` |
 
 The full reference is the POD of `Langertha::Knarr::Config`
 (`perldoc Langertha::Knarr::Config`).
@@ -1027,6 +1038,7 @@ my $knarr = Langertha::Knarr->new(
   # auth_token            => $config->proxy_api_key,
   # public_url            => $config->public_url,
   # ollama_compat_version => $config->ollama_compat_version,
+  # protocol_args         => $config->protocol_args,   # A2A card name/description
 );
 $knarr->run;   # blocks
 ```

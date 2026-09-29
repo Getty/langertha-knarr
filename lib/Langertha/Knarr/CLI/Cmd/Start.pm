@@ -281,6 +281,7 @@ sub execute {
     ( defined $config->public_url ? ( public_url => $config->public_url ) : () ),
     ( defined $config->ollama_compat_version
       ? ( ollama_compat_version => $config->ollama_compat_version ) : () ),
+    protocol_args => $config->protocol_args,
   );
 
   _log("Starting server:");

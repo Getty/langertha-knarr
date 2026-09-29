@@ -114,6 +114,12 @@ passthrough:
 # Optional: Ollama version reported at GET /api/version (x.y.z only)
 # ollama_compat_version: 0.34.4
 
+# Optional: name and description of the A2A agent card at
+# /.well-known/agent.json (or KNARR_A2A_NAME / KNARR_A2A_DESCRIPTION)
+# a2a:
+#   name: Langertha Knarr Agent
+#   description: LLM agent served through Langertha Knarr
+
 # Optional: Langfuse tracing (or set env vars)
 # langfuse:
 #   url: http://localhost:3000

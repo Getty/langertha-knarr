@@ -163,6 +163,7 @@ upstream_stall_timeout: 120
 probe_capabilities: 1
 probe_timeout: 10
 ollama_compat_version: 0.34.4      # x.y.z only, >= 0.6.4 for VS Code Copilot
+a2a: { name: Langertha Knarr Agent, description: LLM agent served through Langertha Knarr }  # agent card
 ```
 
 ## Testing
@@ -198,4 +199,5 @@ knarr init -l 0.0.0.0:8080 -o knarr.yaml   # Listen address, output file
 - `KNARR_LOG_FILE`, `KNARR_LOG_DIR` (logging.file / logging.dir)
 - `KNARR_TRACE_NAME`, `LANGFUSE_TRACE_NAME`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_URL` / `LANGFUSE_BASE_URL`
 - `KNARR_UPSTREAM_TIMEOUT`, `KNARR_UPSTREAM_STALL_TIMEOUT`, `KNARR_PROBE_CAPABILITIES`, `KNARR_PROBE_TIMEOUT`, `KNARR_OLLAMA_COMPAT_VERSION`
+- `KNARR_A2A_NAME`, `KNARR_A2A_DESCRIPTION` (a2a.name / a2a.description)
 - Provider keys for `--from-env` / `knarr init`: `Config.pm` `@ENGINE_DEFS` (`LANGERTHA_*` > bare > `TEST_LANGERTHA_*`)

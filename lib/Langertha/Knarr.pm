@@ -170,6 +170,18 @@ Optional L<IO::Async::Loop> instance. Defaults to a fresh one.
 ArrayRef of protocol class basenames to load. Defaults to all six
 shipped protocols.
 
+=attr protocol_args
+
+Optional HashRef of constructor arguments per protocol, keyed by the name
+as it appears in L</protocols>. The A2A agent card name and description:
+
+    protocol_args => { A2A => {
+      agent_name        => 'Support Agent',
+      agent_description => 'Answers support questions',
+    } },
+
+C<knarr start> passes L<Langertha::Knarr::Config/protocol_args>.
+
 =attr auth_token
 
 Optional shared secret. When set, every incoming request must present
@@ -338,6 +350,12 @@ has protocols => (
   default => sub { [qw( OpenAI Anthropic Ollama A2A ACP AGUI )] },
 );
 
+has protocol_args => (
+  is => 'ro',
+  isa => 'HashRef[HashRef]',
+  default => sub { {} },
+);
+
 # Optional shared secret. When set, every incoming request must present it
 # either as 'Authorization: Bearer <key>' or 'x-api-key: <key>'. The agent
 # card and well-known discovery routes are exempt because they need to be
@@ -444,7 +462,7 @@ sub _build_protocol_objects {
   for my $name ( @{ $self->protocols } ) {
     my $class = $name =~ /::/ ? $name : "Langertha::Knarr::Protocol::$name";
     use_module($class);
-    push @objs, $class->new;
+    push @objs, $class->new( %{ $self->protocol_args->{$name} // {} } );
   }
   return \@objs;
 }

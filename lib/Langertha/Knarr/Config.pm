@@ -463,6 +463,62 @@ sub _build_ollama_compat_version {
   return $version;
 }
 
+has a2a_name => (
+  is      => 'lazy',
+  builder => '_build_a2a_name',
+);
+
+=attr a2a_name
+
+Optional name of the A2A agent card at C</.well-known/agent.json> (see
+L<Langertha::Knarr::Protocol::A2A/agent_name>). Resolved from C<a2a.name> in
+config or the C<KNARR_A2A_NAME> environment variable. When not set, the
+card says C<Langertha Knarr Agent>.
+
+=cut
+
+sub _build_a2a_name {
+  my ($self) = @_;
+  return $self->data->{a2a}{name} // _strip_quotes($ENV{KNARR_A2A_NAME}) // undef;
+}
+
+has a2a_description => (
+  is      => 'lazy',
+  builder => '_build_a2a_description',
+);
+
+=attr a2a_description
+
+Optional description of the A2A agent card (see
+L<Langertha::Knarr::Protocol::A2A/agent_description>). Resolved from
+C<a2a.description> in config or the C<KNARR_A2A_DESCRIPTION> environment
+variable. When not set, Knarr's default description applies.
+
+=cut
+
+sub _build_a2a_description {
+  my ($self) = @_;
+  return $self->data->{a2a}{description} // _strip_quotes($ENV{KNARR_A2A_DESCRIPTION}) // undef;
+}
+
+sub protocol_args {
+  my ($self) = @_;
+  return { A2A => {
+    ( defined $self->a2a_name ? ( agent_name => $self->a2a_name ) : () ),
+    ( defined $self->a2a_description ? ( agent_description => $self->a2a_description ) : () ),
+  } };
+}
+
+=method protocol_args
+
+    my $knarr = Langertha::Knarr->new( ..., protocol_args => $config->protocol_args );
+
+Returns the L<Langertha::Knarr/protocol_args> HashRef for the configured
+protocol settings: C<< { A2A => { agent_name => ..., agent_description => ... } } >>,
+with only the keys that are set (L</a2a_name>, L</a2a_description>).
+
+=cut
+
 has upstream_timeout => (
   is      => 'lazy',
   builder => '_build_upstream_timeout',
