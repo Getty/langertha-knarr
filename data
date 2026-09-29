@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T21:18:44Z
+claimed_by: knarr-worker-dup
+class: standard
+completed: 2026-09-29T21:18:44Z
+created: 2026-09-29T20:39:03Z
+id: 56
+priority: high
+started: 2026-09-29T20:43:55Z
+status: done
+tags:
+- passthrough
+- bug
+title: Raw passthrough (native) kollabiert doppelte Header auf den letzten Wert
+updated: 2026-09-29T21:18:51Z
+---
+
+Aus k53: Der native raw passthrough baut den Upstream-Request mit $http_req->header(name => value), das ersetzt statt anzuhaengen. Ein Nicht-Auth-Header, den der Client doppelt schickt, kommt beim Upstream nur einmal (letzter Wert) an -- verletzt 1:1. Fix: push_header (Reihenfolge erhalten), k53-Stripping bleibt. PSGI pruefen (dort mergt der Server bereits zu einem Wert -- dokumentieren, falls nicht aenderbar). Test mit Fake-Upstream, der Roh-Header aufzeichnet.
+
+2026-09-29 20:46 Reproduced (t/97_passthrough_duplicate_headers.t, key-free fake upstream). Request: native raw path gets duplicates as separate pairs from the server (HTTP::Headers scan) but _raw_passthrough_request sets them with ->header (replaces) -> upstream sees only the last. PSGI: server merges to one 'a, b' env value -> forwarded unchanged (unfixable, documented). Response: worse than duplicates -- the native raw path (buffered and stream) and PSGI return only status, Content-Type (+ Cache-Control on stream) and body; every other upstream response header (Set-Cookie, retry-after, request ids, ratelimit) is dropped. Fixing both directions per dispatcher.
+
+2026-09-29 21:17 Done. Request: _raw_passthrough_request push_header instead of header -> every client line reaches the upstream in order; _without_proxy_key still runs per line. PSGI: server merges repeats into one HTTP_* value, forwarded as that one line (documented in PSGI POD + README; not fixable in Knarr). Response: the native raw path (buffered + stream) and PSGI now pass the upstream's response headers back, repeats kept (new _raw_passthrough_response_headers, _send_simple optional header pairs, PSGI header list); skipped: connection-level, Transfer-Encoding, Content-Length, Content-Type (set separately), X-Original-Content-Encoding, and Content-Encoding when the bytes were decoded (Net::Async::HTTP decodes gzip/deflate even in on_header mode, always on buffered). Stream keeps Cache-Control: no-cache only if upstream sent none. Test t/98_passthrough_duplicate_headers.t (62 tests, key-free fake upstream): red before, green after. prove -lv t/40 t/41 green; prove -l t/ 3259 tests green (t/65 skipped, needs unreleased core). Files: lib/Langertha/Knarr.pm, lib/Langertha/Knarr/PSGI.pm, README.md, t/98_passthrough_duplicate_headers.t. Also found (not fixed): buffered raw answer in an encoding HTTP::Message cannot decode (e.g. br without IO::Uncompress::Brotli) -> decoded_content undef -> empty body; Handler::Passthrough (chain) forward_headers is a hash, so repeats stay merged there. Tree also holds another worker's Tracing.pm/t/79/t/99 changes -- not mine.
+
+2026-09-29 21:18 Committed as 07930ae
