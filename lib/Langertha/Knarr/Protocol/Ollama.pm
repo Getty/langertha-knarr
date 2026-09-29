@@ -1,5 +1,5 @@
 package Langertha::Knarr::Protocol::Ollama;
-# ABSTRACT: Ollama-compatible wire protocol (/api/chat, /api/tags) for Knarr
+# ABSTRACT: Ollama-compatible wire protocol (/api/chat, /api/generate, /api/tags, /api/version, /api/show) for Knarr
 
 =head1 DESCRIPTION
 

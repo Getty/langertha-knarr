@@ -13,7 +13,8 @@ auto-discovery (if enabled), and prints the full model list as a table or
 JSON. Each row shows the model ID, engine class, backend model name, and
 whether it was explicitly configured or auto-discovered.
 
-See L<knarr> for option details and L<Langertha::Knarr> for full documentation.
+See L<knarr> for option details and L<Langertha::Knarr::Config> for the
+configuration file format.
 
 =seealso
 

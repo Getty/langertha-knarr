@@ -8,8 +8,13 @@ use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr container [op
 =head1 DESCRIPTION
 
 Deprecated alias for C<knarr start --from-env>. Kept for backwards
-compatibility with existing Docker images. All options are forwarded to
-L<Langertha::Knarr::CLI::Cmd::Start>.
+compatibility with existing Docker images. It takes no options of its own
+(C<-p> and the other C<start> options are refused; the global C<-c>/C<-v>
+before the subcommand still apply) and starts like
+C<knarr start --from-env> without C<-p>: on the config's listen addresses,
+which default to loopback (C<127.0.0.1:8080>, C<127.0.0.1:11434>). Use
+C<knarr start --from-env -p 8080 -p 11434> instead, as the Docker image
+does.
 
 =cut
 

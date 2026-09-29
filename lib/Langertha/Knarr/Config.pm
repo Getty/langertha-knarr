@@ -27,7 +27,10 @@ Loads and validates Knarr configuration from a YAML file or from environment
 variables. All string values in the YAML file support C<${ENV_VAR}>
 interpolation.
 
-See L<Langertha::Knarr> for the full configuration file format reference.
+The attributes below are the configuration file reference: each one
+names its YAML key and, where there is one, its environment variable. The
+README has an annotated example, and C<share/example-config.yaml> in the
+distribution is a commented starting point.
 
 =cut
 
@@ -235,8 +238,11 @@ has listen => (
 
 =attr listen
 
-ArrayRef of C<host:port> strings to listen on. Defaults to
-C<['127.0.0.1:8080', '127.0.0.1:11434']>.
+ArrayRef of C<host:port> strings to listen on (C<listen:>, a list or a
+single string). Defaults to C<['127.0.0.1:8080', '127.0.0.1:11434']>, so
+a config without C<listen:> only answers on loopback. C<knarr start -p>
+replaces it with the given ports on C<-H> (default C<0.0.0.0>); the Docker
+image starts that way.
 
 =cut
 
@@ -310,7 +316,9 @@ protocol's error shape.
 
 A C<model> in this section is what the default engine uses for a request
 that names no model (A2A always, ACP without C<agent_name>); a model the
-client names replaces it.
+client names replaces it. The section takes the same keys as a
+L</models> entry, C<api_key_env> or C<api_key> included; without either
+the engine reads only its own C<LANGERTHA_*_API_KEY> variable.
 
 =cut
 
@@ -507,7 +515,7 @@ has probe_capabilities => (
 
 Boolean, default C<1>. When true, L<Langertha::Knarr/start> asks every routed
 engine that can read its provider's model metadata (OpenRouter, Mistral,
-LM Studio, Ollama, llama.cpp; Langertha core's C<probe_model_capabilities_f>)
+LM Studio, T-Systems, Ollama, llama.cpp; Langertha core's C<probe_model_capabilities_f>)
 which capabilities its model has, once at startup, after auto-discovery. What
 it learns (today: whether the model sees images) then shows as C<vision> in
 C<POST /api/show> and as C<image_input> in the provider manifest. Engines
@@ -563,9 +571,12 @@ has auto_discover => (
 
 =attr auto_discover
 
-Boolean. When true, L<Langertha::Knarr::Router> queries each configured engine
-for its model list at startup, making all discovered models available without
-explicit config entries. Defaults to C<0>.
+Boolean. When true, L<Langertha::Knarr::Router> asks each configured
+endpoint (engine, URL and API key variable) for its model list the first time
+a model is resolved, making all discovered models available without
+explicit config entries. A discovered model is routed through its engine,
+so it no longer reaches the L</passthrough>. Defaults to C<0>; L</from_env>
+and the C<knarr init> output turn it on.
 
 =cut
 
@@ -586,10 +597,18 @@ has passthrough => (
 
 =attr passthrough
 
-HashRef of format name → upstream base URL. C<passthrough: true> in YAML
-enables all known formats with their default upstream URLs
-(C<https://api.openai.com> and C<https://api.anthropic.com>). Per-format
-URLs can be customised or set to C<false> to disable selectively.
+HashRef of format name (C<openai>, C<anthropic>, C<ollama>) → upstream
+base URL. Empty, and passthrough off, unless the config has a
+C<passthrough:> key; L</from_env> turns it on. C<passthrough: true> in YAML
+enables C<openai> and C<anthropic> with their default upstream URLs
+(C<https://api.openai.com> and C<https://api.anthropic.com>); C<ollama>
+has no default and needs its URL. Per-format URLs can be customised or set
+to C<false> to disable selectively.
+
+A request for a model that is neither configured nor auto-discovered goes
+to the upstream of its protocol byte for byte, with the client's own
+headers and key. A protocol without an upstream sends such a request to
+the L</default_engine> instead.
 
 =cut
 
@@ -858,7 +877,7 @@ sub _strip_quotes {
 
 =over
 
-=item * L<Langertha::Knarr> — Main documentation and config format reference
+=item * L<Langertha::Knarr> — Main documentation
 
 =item * L<Langertha::Knarr::Router> — Uses config to resolve models to engines
 

@@ -39,10 +39,15 @@ The Perl API behind it:
 
     my $knarr = Langertha::Knarr->new(
         handler => Langertha::Knarr::Handler::Router->new(router => $router),
+        router  => $router,
         loop    => $loop,
         listen  => $config->listen,
     );
     $knarr->run;   # blocks; OpenWebUI etc. can now connect
+
+C<knarr start> (see L<knarr>) builds exactly this from a config file, plus
+the raw passthrough, the tracing and request-log decorators, the proxy key
+and the other settings of L<Langertha::Knarr::Config>.
 
 =head1 DESCRIPTION
 
@@ -52,11 +57,27 @@ agent, or any custom L<Langertha::Knarr::Handler> — over the standard
 LLM HTTP wire protocols spoken by OpenWebUI, the OpenAI / Anthropic /
 Ollama SDKs, and the agent ecosystems around A2A, ACP, and AG-UI.
 
-By default a single running Knarr answers OpenAI
-C</v1/chat/completions>, Anthropic C</v1/messages>, Ollama
-C</api/chat>, A2A's C</.well-known/agent.json> plus JSON-RPC C</>,
-ACP's C</runs>, and AG-UI's C</awp> simultaneously on every listening
-port. The same handler implementation drives all of them.
+By default a single running Knarr answers all of these simultaneously on
+every listening port, driven by the same handler implementation:
+
+=over
+
+=item * OpenAI: C<POST /v1/chat/completions>, C<GET /v1/models>
+
+=item * Anthropic: C<POST /v1/messages>
+
+=item * Ollama: C<POST /api/chat>, C<POST /api/generate>, C<GET /api/tags>,
+C<GET /api/version>, C<POST /api/show>
+
+=item * A2A: C<GET /.well-known/agent.json> and JSON-RPC C<POST />
+
+=item * ACP: C<GET /agents>, C<POST /runs>
+
+=item * AG-UI: C<POST /awp>
+
+=item * Knarr's own C<GET /.well-known/langertha.json> (see L</MANIFEST>)
+
+=back
 
 Knarr is built on L<IO::Async> and L<Net::Async::HTTP::Server>
 with native L<Future::AsyncAwait> integration into Langertha engines,
@@ -196,6 +217,24 @@ any other protocol (Ollama without an C<ollama> upstream, A2A, ACP, AG-UI)
 goes through the handler, where L<Langertha::Knarr::Handler::Router> hands
 it to the default engine, or answers C<404> in the protocol's error shape
 when there is none.
+
+=attr router
+
+Optional L<Langertha::Knarr::Router>, usually the one the
+L<Langertha::Knarr::Handler::Router> handler wraps. Knarr itself uses it
+to decide which requests go to the L</raw_passthrough> (models it does not
+configure), to answer C<POST /api/show> from the routed engine's
+capabilities (without a router it falls back to the handler's
+C<list_models> and claims no C<vision>), and to start the capability probe
+in L</start>.
+
+=attr tracing
+
+Optional L<Langertha::Knarr::Tracing>. Only the L</raw_passthrough> uses
+it: a request that bypasses the handler chain gets a lightweight Langfuse
+trace from here. Requests through the handler chain are traced by the
+L<Langertha::Knarr::Handler::Tracing> decorator instead. Raw passthrough
+requests are not written to the request log.
 
 =method start
 

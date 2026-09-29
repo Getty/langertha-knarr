@@ -18,7 +18,8 @@ AG-UI. One server, six protocols, any backend.
 An LLM proxy that routes requests from any client to any backend — with
 automatic [Langfuse](https://langfuse.com) tracing for every call.
 
-Set your API key, start the container, done. All requests are traced.
+Set your API key, start the container, done. Add Langfuse keys and every
+request is traced.
 
 Release notes for every version live in the [Changes](Changes) file.
 
@@ -34,30 +35,44 @@ Now point Claude Code at it:
 ANTHROPIC_BASE_URL=http://localhost:8080 claude
 ```
 
-That's it. Claude Code sends requests to Knarr, Knarr forwards them to
-Anthropic using your API key (**passthrough mode**). Add Langfuse keys and
-every request gets traced automatically.
+That's it. Claude Code sends its requests to Knarr. Knarr found
+`ANTHROPIC_API_KEY`, set up an Anthropic engine and asks Anthropic for its
+model list, so the models Claude Code asks for are answered through that
+engine with this key. A model name Knarr does not know goes straight to
+`api.anthropic.com`, byte for byte, with Claude Code's own credentials
+(**passthrough**). Start the container without any API key and every
+request passes through. Add Langfuse keys and every request gets traced
+automatically.
 
 ### How it works
 
-Knarr starts in **mixed mode** by default: requests with a model name
-that's explicitly configured in `knarr.yaml` go through a Langertha
-engine (with full tracing, request logging, and value-object metrics);
-unknown model names tunnel straight through to the upstream API the
-client thinks it's talking to, using the client's own API key. No key
-duplication, no configuration required for the simple cases.
+The Docker image runs in **mixed mode**: requests with a model name that
+is configured (or auto-discovered from a provider whose key is set) go
+through a Langertha engine, with tracing, request logging and
+value-object metrics; unknown model names tunnel straight through to the
+upstream API the client thinks it's talking to, using the client's own
+API key. No key duplication, no configuration required for the simple
+cases.
+
+Passthrough exists for the OpenAI and Anthropic protocols (and for Ollama
+when you configure an upstream for it). An unknown model in any other
+protocol goes to the **default engine**, and a request nothing can serve
+gets a `404` in the client protocol's own error shape. With a config file,
+passthrough is off until you add a `passthrough:` section (see
+[Passthrough Mode](#passthrough-mode)).
 
 ```
-Claude Code                                    Anthropic API
-    │                                               ▲
-    │  ANTHROPIC_BASE_URL=http://localhost:8080     │
-    ▼                                               │
-  Knarr ──── Handler::Router ─┐                     │
-    │           │             └── Handler::Passthrough ──►
-    │           └── matches gpt-4o → Langertha::Engine::OpenAI
+Claude Code / OpenAI SDK / Open WebUI / A2A, ACP, AG-UI agents
     │
-    └── Tracing decorator → Langfuse
-    └── RequestLog decorator → JSONL
+    ▼
+  Knarr ─┬─ unknown model, passthrough upstream for the protocol
+         │     └── raw bytes 1:1 ──► api.anthropic.com / api.openai.com
+         │                           (Langfuse trace)
+         │
+         └─ everything else ──► RequestLog ──► Tracing ──► Handler::Router
+                                (JSONL)        (Langfuse)       │
+                        configured / discovered model ──► Langertha engine
+                        unknown model ──► default engine (else 404)
 ```
 
 For explicit routing (send "gpt-4o" requests to OpenAI, "cheap" to
@@ -77,14 +92,15 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"gpt-5.6-terra","messages":[{"role":"user","content":"Hello"}]}'
 
 # Ollama clients (Open WebUI, etc.) — point at port 11434 in container mode
-OLLAMA_HOST=http://localhost:11434 open-webui
+OLLAMA_BASE_URL=http://localhost:11434 open-webui serve
 
 # A2A discovery
 curl http://localhost:8080/.well-known/agent.json
 ```
 
-In **container mode** (the default for the Docker image), Knarr binds
-two listening sockets simultaneously, both serving every protocol:
+In **container mode** (the default for the Docker image, which runs
+`knarr start --from-env -p 8080 -p 11434`), Knarr binds two listening
+sockets on `0.0.0.0`, both serving every protocol:
 
 - **Port 8080** — primary, OpenAI / Anthropic / A2A / ACP / AG-UI clients
 - **Port 11434** — alias for Ollama clients that hardcode that port
@@ -92,6 +108,13 @@ two listening sockets simultaneously, both serving every protocol:
 Both ports run the same handler chain — the second port is a
 convenience alias so existing Ollama clients work without
 reconfiguration.
+
+Whenever `knarr start` runs without `-p` — a local `knarr start`, or a
+Docker command that replaces the image's default command — Knarr listens
+on the config's `listen:` addresses, which default to `127.0.0.1:8080` and
+`127.0.0.1:11434`: loopback only. Give `-p` (binds `0.0.0.0`, or the host
+from `-H`) or `listen:` entries with `0.0.0.0` to be reachable from
+elsewhere, see [Local + Cloud hybrid](#local--cloud-hybrid).
 
 ## Windows
 
@@ -162,9 +185,15 @@ This starts:
 | PostgreSQL | — | Langfuse storage |
 
 The `docker-compose.yml` automatically loads `.env` and connects Knarr to
-the Langfuse instance. Open http://localhost:3000 for the dashboard — every
-LLM call through Knarr is traced with model, input, output, latency, and
-token usage.
+the Langfuse instance. It runs Langfuse v2 (`langfuse/langfuse:2`), which
+needs only PostgreSQL; Langfuse v3 would also need ClickHouse, Redis and
+S3-compatible storage.
+
+The local Langfuse starts empty: open http://localhost:3000, sign up,
+create a project, put its `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+into `.env`, and restart Knarr (`docker compose up -d knarr`). From then
+on every LLM call through Knarr is traced with model, input, output,
+latency, and token usage.
 
 ### Minimal Docker Compose (without Langfuse)
 
@@ -200,9 +229,19 @@ docker run --env-file .env -p 8080:8080 -p 11434:11434 raudssus/langertha-knarr
 [knarr]
 [knarr] Auto-discover: enabled (will query provider model lists)
 [knarr] Default engine: OpenAI
+[knarr] Passthrough: anthropic -> https://api.anthropic.com, openai -> https://api.openai.com
 [knarr] Langfuse: disabled (set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY to enable)
 [knarr] Proxy auth: open (set KNARR_API_KEY to require authentication)
+[knarr] Logging: disabled (set KNARR_LOG_FILE or KNARR_LOG_DIR to enable)
+[knarr]
+[knarr] Starting server:
+[knarr]   http://0.0.0.0:8080
+[knarr]   http://0.0.0.0:11434
 ```
+
+The default engine is OpenAI when an OpenAI key is set; without one there
+is none, and a request only a default engine could answer (an A2A task, an
+Ollama request for an unknown model) gets a `404`.
 
 Each provider gets a default model, read from the Langertha engine class
 itself — so the list below tracks the framework and cannot drift. The
@@ -238,8 +277,12 @@ them. Hetzner is detected only via `LANGERTHA_HETZNER_API_KEY`: the bare
 `HETZNER_API_KEY` name is in wide use for the Hetzner Cloud infrastructure
 API and would false-positive into an unusable model entry.
 
-With auto-discover enabled (default), Knarr queries each provider's model
-list — so you can use any model they offer, not just the defaults.
+With auto-discover enabled (always under `--from-env` and in `knarr init`
+output; off by default in a hand-written config), Knarr queries each
+provider's model list the first time a model is looked up — so you can use
+any model they offer, not just the defaults. Discovered models are routed
+through their engine with the key from the environment, so they no longer
+pass through.
 
 ## Langfuse Tracing
 
@@ -262,10 +305,11 @@ That's it. Every proxy request creates:
 
 All traces share one name, resolved in this priority order:
 
-1. `langfuse.trace_name` in the YAML config
-2. `LANGFUSE_TRACE_NAME` environment variable
-3. `KNARR_TRACE_NAME` environment variable (or `knarr start -n <name>`)
-4. default `knarr-proxy`
+1. `knarr start -n <name>` (it sets `langfuse.trace_name`)
+2. `langfuse.trace_name` in the YAML config
+3. `LANGFUSE_TRACE_NAME` environment variable
+4. `KNARR_TRACE_NAME` environment variable
+5. default `knarr-proxy`
 
 ### Latency in traces
 
@@ -308,9 +352,13 @@ KNARR_API_KEY=my-secret-proxy-key
 ```
 
 Clients must send `Authorization: Bearer my-secret-proxy-key` or
-`x-api-key: my-secret-proxy-key`. The A2A discovery endpoint
-(`/.well-known/agent.json`) stays anonymous so agent clients can
-introspect.
+`x-api-key: my-secret-proxy-key` on every route — model listings,
+`/api/show`, `/api/version` and the provider manifest included. Only the
+A2A discovery endpoint (`/.well-known/agent.json`) stays anonymous so agent
+clients can introspect. In a config file the key is `proxy_api_key:`.
+
+Passthrough requests forward every client header to the upstream
+unchanged, the one carrying the proxy key included.
 
 ## API Formats
 
@@ -342,22 +390,34 @@ curl http://localhost:8080/v1/messages \
 curl http://localhost:8080/api/chat \
   -d '{"model":"gpt-5.6-terra","messages":[{"role":"user","content":"Hello"}]}'
 
+curl http://localhost:8080/api/generate \
+  -d '{"model":"gpt-5.6-terra","prompt":"Hello"}'
+
 curl http://localhost:8080/api/tags
 
 curl http://localhost:8080/api/show -d '{"model":"gpt-5.6-terra"}'
+
+curl http://localhost:8080/api/version
 ```
+
+`GET /api/version` answers Ollama's `{"version":"0.34.4"}`: the Ollama
+version Knarr's endpoints are compatible with, not Knarr's own. Change it
+with `ollama_compat_version` (or `KNARR_OLLAMA_COMPAT_VERSION`); it must be
+three dot-separated numbers, and at least `0.6.4` for VS Code Copilot.
 
 `POST /api/show` (VS Code Copilot needs it) answers for every model
 `/api/tags` lists: `capabilities` holds `completion`, plus `tools` when the
 routed engine takes tools, plus `vision` when the routed engine claims
 `image_input` for that model (needs a Langertha core with that flag); never
 `thinking`. For gateway and self-hosted models (OpenRouter, Mistral,
-LM Studio, Ollama, llama.cpp) Knarr asks the provider's own model metadata
-once after startup whether the model sees images (needs a Langertha core with
-`probe_model_capabilities_f`; `probe_capabilities: 0` turns it off). A gateway
-whose metadata is one catalogue (OpenRouter, Mistral, LM Studio) is asked once per
-endpoint, however many models were discovered on it. A context length
-appears in `model_info` only when the engine knows one.
+LM Studio, T-Systems, Ollama, llama.cpp) Knarr asks the provider's own model
+metadata once after startup whether the model sees images (needs a Langertha
+core with `probe_model_capabilities_f`; `probe_capabilities: 0` turns it off,
+`probe_timeout` limits each probe, default 10 seconds). A gateway whose
+metadata is one catalogue (OpenRouter, Mistral, LM Studio, T-Systems) is asked
+once per endpoint, however many models were discovered on it. A context length
+appears in `model_info` only when the engine knows one (a model's
+`context_size` config key sets it for Ollama and LM Studio native).
 
 In container mode Knarr binds an extra `:11434` socket as well, so
 existing Ollama clients work without reconfiguration.
@@ -375,8 +435,12 @@ curl http://localhost:8080/.well-known/agent.json
 # Sync task
 curl http://localhost:8080/ \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"id":"t1","message":{"role":"user","parts":[{"text":"Hello"}]}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tasks/send","params":{"id":"t1","message":{"role":"user","parts":[{"type":"text","text":"Hello"}]}}}'
 ```
+
+Only `type: "text"` parts are read. An A2A task names no model, so it is
+answered by the default engine with the model configured under `default:`
+(or the provider's default); without a default engine it gets a `404`.
 
 A2A is also a *backend*: `Handler::A2AClient` consumes a remote A2A agent,
 so an OpenAI-fronted Knarr can expose a remote agent to OpenAI clients.
@@ -384,14 +448,15 @@ so an OpenAI-fronted Knarr can expose a remote agent to OpenAI clients.
 ### ACP (BeeAI / Linux Foundation)
 
 `POST /runs` with `mode: "sync"` or `mode: "stream"`; agent listing at
-`GET /agents`:
+`GET /agents` (the model list, one agent per model). `agent_name` picks the
+model; without it the default engine answers:
 
 ```bash
 curl http://localhost:8080/agents
 
 curl http://localhost:8080/runs \
   -H "Content-Type: application/json" \
-  -d '{"mode":"sync","input":"Hello"}'
+  -d '{"agent_name":"gpt-5.6-terra","mode":"sync","input":[{"parts":[{"content_type":"text/plain","content":"Hello"}]}]}'
 ```
 
 Like A2A, ACP works as a backend too: `Handler::ACPClient` wraps a remote
@@ -404,8 +469,11 @@ ACP agent.
 ```bash
 curl http://localhost:8080/awp \
   -H "Content-Type: application/json" \
-  -d '{"conversation_id":"c1","message":{"role":"user","content":[{"type":"text","text":"Hello"}]}}'
+  -d '{"threadId":"t1","runId":"r1","model":"gpt-5.6-terra","messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+The answer is always the AG-UI event stream. Without `model` the default
+engine answers.
 
 All six formats support streaming — SSE for OpenAI / Anthropic / A2A /
 ACP / AG-UI, NDJSON for Ollama.
@@ -425,9 +493,50 @@ serialised to the client's protocol format:
 | Anthropic      | `content[]` with `type: "tool_use"` blocks, `stop_reason: "tool_use"` |
 | Ollama         | `message.tool_calls[]` |
 
-For **passthrough models** (unknown model names), the raw request bytes are
-forwarded 1:1 to the upstream API, so whatever tool-call format the client
-sent arrives at the provider unchanged.
+For **passthrough models** (unknown model names in a protocol with a
+passthrough upstream), the raw request bytes are forwarded 1:1 to the
+upstream API, so whatever tool-call format the client sent arrives at the
+provider unchanged.
+
+Routed streams deliver tool calls too: whole, when the stream closes,
+before the protocol's end marker.
+
+### Reasoning, images and other request fields
+
+On the routed path Knarr carries more than messages and tools from the
+client's body to the engine. Each generation control is forwarded only
+when the target engine advertises it (images always are), and Langertha
+writes it in that engine's own wire format:
+
+| Field | OpenAI | Anthropic | Ollama |
+|-------|--------|-----------|--------|
+| Reasoning effort | `reasoning_effort` | `thinking` (`disabled`: none; `adaptive` or `enabled` without budget: medium; `budget_tokens`: nearest level for the model), `output_config.effort` | `think` (`false`: none, `true`: medium, a level string as sent), `reasoning_effort` |
+| Structured output | `response_format` | — | `format` |
+| Temperature | `temperature` | `temperature` | `options.temperature` |
+| Answer length | `max_tokens` | `max_tokens` | — |
+| Seed | `seed` | — | `options.seed` |
+| Parallel tool calls | `parallel_tool_calls` | — | — |
+| Prompt cache key | `prompt_cache_key` | — | — |
+| Images | `image_url` parts (data: URLs or links) | `image` blocks (base64 or url) | a message's `images`, `images` on `/api/generate` |
+
+Reasoning levels are `none minimal low medium high xhigh max`; an explicit
+effort field wins over one derived from `thinking` / `think`. Mapping
+`budget_tokens` needs a Langertha with `Langertha::Reasoning::BudgetPolicy`.
+Images become Langertha image objects that the routed engine receives in
+its own format; Knarr does not fetch image links. On raw passthrough every
+field reaches the upstream exactly as sent.
+
+### Provider manifest
+
+`GET /.well-known/langertha.json` serves a Langertha provider manifest, so
+`raider --provider HOST` can configure itself: the OpenAI, Anthropic and
+Ollama endpoints under Knarr's public URL, every configured and
+auto-discovered model with its capabilities, and `api_key` auth when a
+proxy key is set (the route then needs the key). Upstream URLs, keys and
+passthrough targets are never published. The public URL is `public_url:`
+(or `KNARR_PUBLIC_URL`), else taken from the request's `Host` header. It
+needs a Langertha with `Langertha::Manifest`; with an older one the route
+answers `404`.
 
 ## Use Cases
 
@@ -440,7 +549,8 @@ docker run --env-file .env -p 8080:8080 raudssus/langertha-knarr
 ANTHROPIC_BASE_URL=http://localhost:8080 claude
 ```
 
-Every Claude Code request gets traced in Langfuse.
+With Langfuse keys in `.env`, every Claude Code request gets traced in
+Langfuse.
 
 ### Ollama clients with cloud models
 
@@ -456,10 +566,13 @@ docker run --env-file .env -p 11434:11434 raudssus/langertha-knarr
 
 ### Local + Cloud hybrid
 
-Mount a config file for custom routing:
+Mount a config file for custom routing, with Ollama running on the
+Docker host:
 
 ```yaml
 # knarr.yaml
+listen:
+  - "0.0.0.0:8080"
 models:
   local:
     engine: OllamaOpenAI
@@ -467,21 +580,33 @@ models:
     model: llama3.3
   gpt-4o:
     engine: OpenAI
+    api_key_env: OPENAI_API_KEY
 default:
   engine: OllamaOpenAI
   url: http://host.docker.internal:11434/v1
+  model: llama3.3
 ```
 
 ```bash
 docker run --env-file .env \
+  --add-host=host.docker.internal:host-gateway \
   -v ./knarr.yaml:/etc/knarr/config.yaml \
-  -p 8080:8080 -p 11434:11434 \
+  -p 8080:8080 \
   raudssus/langertha-knarr start -c /etc/knarr/config.yaml
 ```
 
+Arguments after the image name replace its default command, so the
+container listens on the config's `listen:` addresses. Without a
+`listen:` with `0.0.0.0` (or `-p 8080` on the `start` command) it would
+listen on its own loopback only and the port mapping would never reach it.
+Port 11434 stays unmapped here because the host's Ollama already holds it;
+`--add-host` makes `host.docker.internal` resolve on Linux (Docker Desktop
+has it built in).
+
 ## Using a Config File
 
-For more control than auto-detection, create a `knarr.yaml`:
+For more control than auto-detection, create a `knarr.yaml` (a commented
+version ships as `share/example-config.yaml`; `knarr check` validates it):
 
 ```yaml
 listen:
@@ -490,7 +615,9 @@ listen:
 
 models:
   # No `model:` key → the engine's default model is used
-  # (OpenAI defaults to gpt-5.6-terra, see the table above)
+  # (OpenAI defaults to gpt-5.6-terra, see the table above).
+  # No api_key / api_key_env → the engine reads its own
+  # LANGERTHA_OPENAI_API_KEY (not the bare OPENAI_API_KEY)
   gpt-4o:
     engine: OpenAI
 
@@ -512,18 +639,21 @@ models:
     response_size: 4096
     system_prompt: "You are a terse assistant. Answer in one sentence."
 
-  # Local engines are reached by URL, no API key needed
+  # Local engines are reached by URL, no API key needed. Knarr listens
+  # on 11434 itself here, so this Ollama runs on another port
+  # (OLLAMA_HOST=127.0.0.1:11435 ollama serve) or another host
   local-llama:
     engine: OllamaOpenAI
-    url: http://localhost:11434/v1
+    url: http://localhost:11435/v1
     model: llama3.3
+    user_agent_timeout: 600   # slow local model: 10 minutes
 
   deepseek:
     engine: DeepSeek
     model: deepseek-v4-flash
 
   # api_key_env: read the key from a named environment variable
-  # (instead of the engine's default LANGERTHA_* / bare-name lookup)
+  # (instead of the engine's own LANGERTHA_* variable)
   mistral:
     engine: Mistral
     model: mistral-small-latest
@@ -531,13 +661,14 @@ models:
 
 default:
   engine: OpenAI
+  api_key_env: OPENAI_API_KEY
 
 auto_discover: true
 
 # Passthrough: requests go directly to upstream APIs
 # The client's own API key is used — no duplication needed
-# Models with explicit config above are routed via Langertha,
-# everything else passes through transparently
+# Models with explicit config above (and auto-discovered ones) are
+# routed via Langertha, everything else passes through transparently
 passthrough:
   anthropic: https://api.anthropic.com
   openai: https://api.openai.com
@@ -561,6 +692,29 @@ passthrough:
 Config values support `${ENV_VAR}` interpolation — variables are resolved
 at startup.
 
+The top-level keys (each with its environment variable fallback where
+there is one; the config value wins):
+
+| Key | Meaning | Default |
+|-----|---------|---------|
+| `listen` | `host:port` list | `127.0.0.1:8080`, `127.0.0.1:11434` |
+| `models` | model name → engine config, see below | — |
+| `default` | engine for unknown models in a protocol without passthrough upstream and for requests without a model; same keys as a model entry | none (→ `404`) |
+| `auto_discover` | route every model the configured endpoints list | `false` |
+| `passthrough` | `true` or per-protocol upstream URLs (`openai`, `anthropic`, `ollama`) | off |
+| `proxy_api_key` | key clients must send (`KNARR_API_KEY`) | open |
+| `public_url` | base URL in the provider manifest (`KNARR_PUBLIC_URL`) | from the request |
+| `langfuse` | `url`, `public_key`, `secret_key`, `trace_name` (`LANGFUSE_*`) | off |
+| `logging` | `file` (JSONL) and/or `dir` (`KNARR_LOG_FILE`, `KNARR_LOG_DIR`) | off |
+| `upstream_timeout` | seconds for a non-streaming upstream request; routed engines' `user_agent_timeout` (`KNARR_UPSTREAM_TIMEOUT`) | `300` |
+| `upstream_stall_timeout` | seconds a passthrough stream may go without data (`KNARR_UPSTREAM_STALL_TIMEOUT`) | `120` |
+| `probe_capabilities` | ask gateway / self-hosted engines which models see images (`KNARR_PROBE_CAPABILITIES`) | `1` |
+| `probe_timeout` | seconds per capability probe (`KNARR_PROBE_TIMEOUT`) | `10` |
+| `ollama_compat_version` | version at `GET /api/version`, `x.y.z` (`KNARR_OLLAMA_COMPAT_VERSION`) | `0.34.4` |
+
+The full reference is the POD of `Langertha::Knarr::Config`
+(`perldoc Langertha::Knarr::Config`).
+
 `models.<name>.engine` resolves in this order:
 
 - `Langertha::Engine::<EngineName>`
@@ -580,29 +734,45 @@ Every `models.<name>` entry accepts these keys:
 | `temperature` | Sampling temperature applied to every request |
 | `response_size` | Max tokens applied to every request |
 | `context_size` | Context window in tokens; only engines that take one (`Ollama`, `LMStudio` native) — sent upstream (Ollama `num_ctx`) and reported by `/api/show`; other engines ignore it with a warning at startup; not inherited by auto-discovered models |
+| `user_agent_timeout` | Seconds the engine waits for its upstream; defaults to `upstream_timeout`, `0` disables it |
 
 ### Passthrough Mode
 
-Passthrough is the default behavior: requests for unconfigured models go
-directly to the upstream API using the client's own API key and headers.
-All HTTP bytes — including SSE chunks, tool_use blocks, usage data, and
-cache_control — are piped 1:1 to the client. No key duplication, no model
-configuration needed. Knarr just sits in the middle and traces.
+With passthrough on, requests for unconfigured models go directly to the
+upstream API using the client's own API key and headers. All HTTP bytes —
+including SSE chunks, tool_use blocks, usage data, and cache_control — are
+piped 1:1 to the client. No key duplication, no model configuration
+needed. Knarr just sits in the middle and traces (passthrough requests get
+a Langfuse trace, but no request-log entry).
 
-If you also configure explicit model routing (the `models:` section), those
-specific models are handled by Langertha engines. Everything else still
-passes through as raw bytes.
+If you also configure explicit model routing (the `models:` section, or
+`auto_discover`), those models are handled by Langertha engines. Everything
+else still passes through as raw bytes — for the protocols that have an
+upstream. An unknown model in a protocol without one (Ollama without an
+`ollama:` entry, and A2A, ACP and AG-UI always) goes to the default engine,
+or gets a `404` in the protocol's error shape when there is none.
 
-**Enabled by default** with `--from-env`. In a config file:
+**On by default** with `--from-env` (the Docker image). In a config file it
+is off until you add it:
 
 ```yaml
-# Enable with default upstream URLs
+# Enable OpenAI and Anthropic with their default upstream URLs
 passthrough: true
 
-# Or per format with custom upstreams
+# Or per format with custom upstreams (ollama has no default URL)
 passthrough:
   anthropic: https://api.anthropic.com
   openai: https://my-openai-mirror.internal
+  ollama: http://gpu-box:11434
+```
+
+Claude Code example — no Knarr API key needed, your existing key works.
+Without any provider key in the container nothing is routed, so every
+request passes through:
+
+```bash
+docker run -p 8080:8080 raudssus/langertha-knarr
+ANTHROPIC_BASE_URL=http://localhost:8080 claude
 ```
 
 ### Upstream Timeouts
@@ -627,43 +797,46 @@ or the Passthrough handler that runs out is answered the same way, 504 or
 the error frame; this needs a Langertha whose async requests report their
 timeouts. Any other failure there stays a `500`. Langfuse posts give up after 5 seconds and are only logged.
 
-Claude Code example — no Knarr API key needed, your existing key works:
-
-```bash
-docker run -p 8080:8080 raudssus/langertha-knarr
-ANTHROPIC_BASE_URL=http://localhost:8080 claude
-```
-
 ### Generating a Config
 
 Knarr can generate a config from your environment:
 
 ```bash
-# Via Docker — pass your env vars through
-docker run --rm --env-file .env raudssus/langertha-knarr init > knarr.yaml
+# Via Docker — pass your env vars through; -l makes the config listen
+# on all interfaces, as a container needs
+docker run --rm --env-file .env raudssus/langertha-knarr \
+  init -l 0.0.0.0:8080 -l 0.0.0.0:11434 > knarr.yaml
 
 # Or pass all API keys from your current shell
 docker run --rm \
   $(env | grep -E '_(API_KEY|API_TOKEN)=|^LANGFUSE_' | sed 's/^/-e /') \
-  raudssus/langertha-knarr init > knarr.yaml
+  raudssus/langertha-knarr init -l 0.0.0.0:8080 -l 0.0.0.0:11434 > knarr.yaml
 ```
 
-Then mount it:
+The generated config enables `auto_discover`, sets OpenAI as default
+engine when an OpenAI key was found, and has no `passthrough:` section —
+add one if you want it. Then mount it:
 
 ```bash
 docker run --env-file .env \
   -v ./knarr.yaml:/etc/knarr/config.yaml \
   -p 8080:8080 -p 11434:11434 \
-  raudssus/langertha-knarr start -c /etc/knarr/config.yaml
+  raudssus/langertha-knarr start -c /etc/knarr/config.yaml -p 8080 -p 11434
 ```
+
+The `-p` flags after `start` bind `0.0.0.0` whatever `listen:` says; they
+are needed whenever the config listens on `127.0.0.1` (the `knarr init`
+default without `-l`).
 
 ## All Environment Variables
 
 ### API Keys
 
-Every provider is detected from its bare vendor variable; the
-`LANGERTHA_`-prefixed variant (e.g. `LANGERTHA_OPENAI_API_KEY`) takes
-priority, and the `TEST_LANGERTHA_*` variant is the last resort:
+`--from-env` and `knarr init` detect every provider from its bare vendor
+variable; the `LANGERTHA_`-prefixed variant (e.g.
+`LANGERTHA_OPENAI_API_KEY`) takes priority, and the `TEST_LANGERTHA_*`
+variant is the last resort (`knarr init` only; `--from-env` ignores
+`TEST_*`):
 
 | Variable | Provider |
 |----------|----------|
@@ -710,6 +883,7 @@ priority, and the `TEST_LANGERTHA_*` variant is the last resort:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KNARR_API_KEY` | Require client authentication | — (open) |
+| `KNARR_PUBLIC_URL` | Public base URL published in `/.well-known/langertha.json` | from the request |
 | `KNARR_DEBUG` | Enable verbose logging (`1` = on) | — (off) |
 | `KNARR_UPSTREAM_TIMEOUT` | Seconds an upstream may take for a non-streaming request; also the routed engines' `user_agent_timeout` (`0` disables) | `300` |
 | `KNARR_UPSTREAM_STALL_TIMEOUT` | Seconds a passthrough stream may go without data (`0` disables) | `120` |
@@ -722,23 +896,44 @@ priority, and the `TEST_LANGERTHA_*` variant is the last resort:
 ```
 knarr                                      Show help
 knarr start                                Start with config file (./knarr.yaml)
-knarr start --from-env                     Auto-detect config from ENV (Docker default)
-knarr start --from-env -p 8080 -p 11434   ENV config, explicit ports
-knarr start -p 9090                        Custom port
+knarr start --from-env                     Use ./knarr.yaml if present, else auto-detect config from ENV
+knarr start --from-env -p 8080 -p 11434   ENV config, explicit ports (Docker default)
+knarr start -p 9090                        Listen on 0.0.0.0:9090 only
+knarr start -H 127.0.0.1 -p 9090           Listen on 127.0.0.1:9090 only
 knarr start -c prod.yaml                   Custom config
 knarr start -v                             Verbose logging
 knarr start -n my-proxy                    Custom Langfuse trace name
-knarr start --log_file /var/log/knarr.jsonl   JSONL request log
-knarr start --log_dir /var/log/knarr/reqs     Per-request JSON logs
+knarr start --log-file /var/log/knarr.jsonl   JSONL request log
+knarr start --log-dir /var/log/knarr/reqs     Per-request JSON logs
 knarr init                                 Generate config from environment
 knarr init -e .env                         Include .env file in scan
-knarr models                               List configured models
-knarr models --format json
+knarr init -l 0.0.0.0:8080 -o knarr.yaml   Listen address(es), write to a file
+knarr models                               List configured and discovered models
+knarr models -f json                       Same as JSON
 knarr check                                Validate config file
 ```
 
-The `-p` / `--port` flag is repeatable — each occurrence adds a listen port.
-Default host is `0.0.0.0`. Set `KNARR_DEBUG=1` or use `-v` for verbose logging.
+- `-c` / `--config` and `-v` / `--verbose` work before the subcommand
+  (`knarr -c prod.yaml start`) and after `start`, `check` and `models`
+  (`knarr start -c prod.yaml -v`). Set `KNARR_DEBUG=1` for verbose logging
+  too.
+- Long options work with dashes or underscores (`--log-file`,
+  `--log_file`, `--from-env`, `--trace-name`), in any position.
+- `-p` / `--port` is repeatable; each occurrence adds a listen port on the
+  host from `-H` / `--host` (default `0.0.0.0`). Given at least once, the
+  ports replace the config's `listen:`. Without `-p` Knarr listens on
+  `listen:`, which defaults to `127.0.0.1:8080` and `127.0.0.1:11434` —
+  also under `--from-env`. `-H` without `-p` has no effect.
+- `init` always scans `.env` and `.env.local` in the current directory and
+  `~/.env`, plus every `-e` file; its config listens on `127.0.0.1:8080`
+  and `127.0.0.1:11434` unless `-l` says otherwise.
+- `-w` / `--workers` is accepted but currently has no effect: Knarr runs
+  as a single process.
+- `knarr container` is a deprecated alias of `knarr start --from-env`. It
+  takes no options and so listens on loopback only; use
+  `knarr start --from-env -p 8080 -p 11434`.
+
+<!-- Binary (no Perl needed): this section is added by k39. -->
 
 ## Installing as a Perl Module
 
@@ -761,7 +956,8 @@ knarr start
 Knarr is built around a `handler` and one or more wire protocols.
 You construct a handler (typically `Handler::Router` driven by your
 existing `knarr.yaml`), optionally wrap it in tracing/logging decorators,
-and pass it to a `Langertha::Knarr` instance:
+and pass it to a `Langertha::Knarr` instance. `knarr start` does exactly
+this from a config file:
 
 ```perl
 use IO::Async::Loop;
@@ -778,8 +974,13 @@ my $handler = Langertha::Knarr::Handler::Router->new(router => $router);
 
 my $knarr = Langertha::Knarr->new(
   handler => $handler,
+  router  => $router,           # for /api/show and the capability probe
   loop    => $loop,
   listen  => $config->listen,   # arrayref of "host:port" strings
+  # optional, as knarr start passes them from the config:
+  # auth_token            => $config->proxy_api_key,
+  # public_url            => $config->public_url,
+  # ollama_compat_version => $config->ollama_compat_version,
 );
 $knarr->run;   # blocks
 ```
@@ -808,27 +1009,46 @@ $handler = Langertha::Knarr::Handler::RequestLog->new(
 ) if $rlog->_enabled;
 ```
 
-`knarr start` applies both wrappers automatically when their respective
-config sections are present.
+`knarr start` applies each wrapper whenever it has something to do:
+tracing when Langfuse keys are set (config or environment), request
+logging when a log file or directory is set (config, environment or
+command line).
 
-#### Adding passthrough fallback
+#### Adding passthrough
 
 To preserve the "configured models go through Langertha, everything else
-tunnels straight to the upstream API" behaviour, give the router a
-`Handler::Passthrough` fallback:
+tunnels straight to the upstream API" behaviour, hand one
+`Handler::Passthrough` to both the router handler and the server:
 
 ```perl
 use Langertha::Knarr::Handler::Passthrough;
 
 my $passthrough = Langertha::Knarr::Handler::Passthrough->new(
-  upstreams => $config->passthrough,   # { openai => 'https://api.openai.com', ... }
-  loop      => $loop,
+  upstreams     => $config->passthrough,   # { openai => 'https://api.openai.com', ... }
+  loop          => $loop,
+  timeout       => $config->upstream_timeout,
+  stall_timeout => $config->upstream_stall_timeout,
 );
 my $handler = Langertha::Knarr::Handler::Router->new(
   router      => $router,
   passthrough => $passthrough,
 );
+my $knarr = Langertha::Knarr->new(
+  handler         => $handler,
+  router          => $router,
+  raw_passthrough => $passthrough,   # byte-for-byte tunnel
+  tracing         => $tracing,       # optional: traces the raw tunnel
+  loop            => $loop,
+  listen          => $config->listen,
+);
 ```
+
+`raw_passthrough` together with `router` is what pipes the bytes 1:1:
+Knarr sends an unknown model straight to the upstream, before the handler
+chain. As the router handler's `passthrough` alone, the handler forwards
+the request but the answer is re-framed through the protocol formatter
+(text, tool calls and finish reason survive; usage, cache fields and
+other provider metadata do not).
 
 #### A fake handler for tests (`Handler::Code`)
 
@@ -839,18 +1059,39 @@ without any real backend — the `*_live.t` tests do exactly this:
 use Langertha::Knarr::Handler::Code;
 
 my $handler = Langertha::Knarr::Handler::Code->new(
-  chat => sub {
+  code => sub {
     my ($session, $request) = @_;
     return "Echo: " . $request->messages->[-1]{content};
   },
-  stream => sub {
+  # optional: returns a generator that yields one chunk per call, undef at the end
+  stream_code => sub {
     my ($session, $request) = @_;
-    return Langertha::Knarr::Stream->from_list(
-      ["Hello", " ", "world", "!"],
-    );
+    my @chunks = ("Hello", " ", "world", "!");
+    return sub { @chunks ? shift @chunks : undef };
   },
 );
 ```
+
+Without `stream_code`, a streaming request gets the `code` answer as one
+chunk.
+
+#### PSGI
+
+`Langertha::Knarr::PSGI` runs the same Knarr under any Plack server, with
+the same routes, authentication and (with `raw_passthrough` set) raw
+passthrough. Streams are buffered:
+the client gets the whole answer at once.
+
+```perl
+# app.psgi
+use Langertha::Knarr;
+use Langertha::Knarr::PSGI;
+my $knarr = Langertha::Knarr->new( handler => $handler, router => $router );
+Langertha::Knarr::PSGI->new( knarr => $knarr )->to_app;
+```
+
+Under PSGI the startup capability probe does not run by itself; call
+`$router->probe_capabilities_f` if you want it.
 
 ### Using the Config and Router Independently
 
@@ -865,6 +1106,7 @@ my $router = Langertha::Knarr::Router->new(config => $config);
 my ($engine, $model) = $router->resolve('gpt-4o-mini');
 # $engine is a Langertha::Engine::OpenAI (or whatever the config maps to)
 # $model is the resolved model name
+# Order: configured models, auto-discovered models, the default engine
 
 my $response = $engine->simple_chat(
   { role => 'user', content => 'Hello!' },
@@ -873,7 +1115,7 @@ my $response = $engine->simple_chat(
 
 ## Built With
 
-- [Langertha](https://metacpan.org/pod/Langertha) — Perl LLM framework with 37 engine backends
+- [Langertha](https://metacpan.org/pod/Langertha) — Perl LLM framework with engines for all major providers and self-hosted servers
 - [IO::Async](https://metacpan.org/pod/IO::Async) + [Net::Async::HTTP::Server](https://metacpan.org/pod/Net::Async::HTTP::Server) — Async event loop and HTTP server
 - [Future::AsyncAwait](https://metacpan.org/pod/Future::AsyncAwait) — Native async/await for Perl
 - [Moose](https://metacpan.org/pod/Moose) — Postmodern object system

@@ -252,6 +252,12 @@ Revision history for Langertha-Knarr
       'default' that a real upstream rejects. A model the client names
       still reaches the default engine as asked.
 
+    - The README, POD and example configs now match the code: listen and
+      -p/-H behaviour, passthrough, routing of unknown models per protocol,
+      the A2A, ACP and AG-UI examples, the config key and environment
+      variable reference. docker-compose now pins Langfuse v2
+      (langfuse/langfuse:2), which runs on Postgres alone.
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

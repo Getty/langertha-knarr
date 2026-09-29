@@ -13,7 +13,8 @@ L<Langertha::Knarr::Config/validate>, and prints a status summary including
 listen addresses, model count, auto-discover state, proxy auth state, and
 Langfuse tracing state. Exits with a non-zero code on invalid config.
 
-See L<knarr> for option details and L<Langertha::Knarr> for full documentation.
+See L<knarr> for option details and L<Langertha::Knarr::Config> for the
+configuration file format.
 
 =seealso
 

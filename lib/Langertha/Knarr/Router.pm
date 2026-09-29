@@ -514,7 +514,7 @@ sub is_passthrough_model {
 
 =over
 
-=item * L<Langertha::Knarr> — Main documentation and routing priority description
+=item * L<Langertha::Knarr> — Main documentation; the routing order is described under L</resolve> above
 
 =item * L<Langertha::Knarr::Config> — Provides model and engine configuration
 

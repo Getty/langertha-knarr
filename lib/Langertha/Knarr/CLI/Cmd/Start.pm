@@ -16,8 +16,14 @@ and starts the server.
 With C<--from-env>, the config is built automatically from environment
 variables when no config file is found — this is how the Docker image starts.
 
-See L<knarr> for the full option reference and L<Langertha::Knarr> for the
-configuration file format.
+The listen addresses come from C<-p> when given (each port on C<-H>,
+default C<0.0.0.0>), otherwise from the config's C<listen:>, which defaults
+to C<127.0.0.1:8080> and C<127.0.0.1:11434>. C<-H> alone changes nothing.
+C<-w>/C<--workers> is accepted but currently has no effect: Knarr runs as
+one process.
+
+See L<knarr> for the full option reference and L<Langertha::Knarr::Config>
+for the configuration file format.
 
 =seealso
 

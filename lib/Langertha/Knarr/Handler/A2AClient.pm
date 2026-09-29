@@ -1,5 +1,5 @@
 package Langertha::Knarr::Handler::A2AClient;
-# ABSTRACT: Steerboard handler that consumes a remote A2A (Agent2Agent) agent
+# ABSTRACT: Knarr handler that consumes a remote A2A (Agent2Agent) agent
 our $VERSION = '1.102';
 use Moose;
 use Future::AsyncAwait;

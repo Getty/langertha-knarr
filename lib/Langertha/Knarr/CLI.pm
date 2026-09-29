@@ -45,7 +45,10 @@ option config => (
 =opt --config
 
 Path to the YAML configuration file. Short form: C<-c>. Defaults to
-C<./knarr.yaml>. Applies to all subcommands.
+C<./knarr.yaml>. Accepted before the subcommand (C<knarr -c prod.yaml
+start>) and after C<start>, C<check> and C<models> (C<knarr start -c
+prod.yaml>, see L<Langertha::Knarr::CLI::Role::GlobalOptions>); a value
+after the subcommand wins.
 
 =cut
 
@@ -59,8 +62,9 @@ option verbose => (
 
 =opt --verbose
 
-Enable verbose logging to stderr. Short form: C<-v>. Applies to all
-subcommands.
+Enable verbose logging to stderr. Short form: C<-v>. Also enabled by
+C<KNARR_DEBUG=1>. Accepted before the subcommand and after C<start>,
+C<check> and C<models>, like L</--config>.
 
 =cut
 
