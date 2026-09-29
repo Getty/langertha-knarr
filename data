@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-29T20:43:33Z
+claimed_by: knarr-worker-pt
+class: standard
+completed: 2026-09-29T20:43:27Z
+created: 2026-09-29T18:18:10Z
+id: 49
+priority: low
+started: 2026-09-29T20:24:32Z
+status: done
+tags:
+- ollama
+- passthrough
+title: 'Ollama-Parser setzt extra->{forward_headers} nicht: Chain-Passthrough zu Ollama-Upstream
+  ohne Client-Header'
+updated: 2026-09-29T20:43:33Z
+---
+
+Aus k48: Anders als OpenAI/Anthropic setzt Protocol::Ollama kein extra->{forward_headers}. Ein Handler::Passthrough in der Handler-Kette zu einem Ollama-Upstream forwardet daher keine Client-Header (z.B. Authorization) -- relevant fuer authentifizierte Remote-Ollamas. Raw passthrough ist nicht betroffen. Beim Fix k44 beachten (proxy key nie forwarden).
+
+2026-09-29 20:38 Done. Protocol::Ollama::parse_chat_request now sets extra->{forward_headers} = { authorization => ... } (when the request object has ->header), like OpenAI/Anthropic; Knarr::_parse_chat_request strips the proxy key from it (k53 _without_proxy_key), so a chain Handler::Passthrough reaches an authenticated remote Ollama with the client's own Authorization and never with Knarr's key. Ollama stays out of the k52 provider-key requirement (keyless upstreams). POD: Protocol::Ollama DESCRIPTION, Handler::Passthrough DESCRIPTION (which headers each parser forwards). Test: t/91_ollama_forward_headers.t -- parser unit check + chain Passthrough native/PSGI x /api/chat,/api/generate x sync/stream x 4 header shapes (open, key in x-api-key, key only, key+own duplicated); 26/163 failed against HEAD's Ollama.pm, all pass after. Full suite + 40/41 streaming green.
+
+Committed as d7d4b01
