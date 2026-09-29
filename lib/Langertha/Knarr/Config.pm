@@ -196,7 +196,9 @@ Class method. Builds a config object purely from environment variables
 (zero-config Docker mode). Calls L</scan_env> to detect which API keys are
 set, assigns each detected engine its L</default_model_for> model, enables
 C<auto_discover> and C<passthrough>, and sets OpenAI as the default engine
-when C<OPENAI_API_KEY> is present.
+when an OpenAI key is present. Every generated entry, the default engine
+included, names the variable its key was found in as C<api_key_env>, so
+C<OPENAI_API_KEY> works as well as C<LANGERTHA_OPENAI_API_KEY>.
 
 Options are passed through to L</scan_env> (e.g. C<include_test>).
 
@@ -223,9 +225,11 @@ sub from_env {
     passthrough   => 1,
   );
 
-  # Set default engine if OpenAI found
+  # Set default engine if OpenAI found, reading its key from the variable
+  # that was found: the engine by itself reads only LANGERTHA_OPENAI_API_KEY
+  # (k45)
   if ($found->{OpenAI}) {
-    $data{default} = { engine => 'OpenAI' };
+    $data{default} = { engine => 'OpenAI', api_key_env => $found->{OpenAI}{api_key_env} };
   }
 
   return $class->new(data => \%data);
@@ -843,6 +847,7 @@ sub generate_config {
   if ($found->{OpenAI}) {
     push @lines, "default:";
     push @lines, "  engine: OpenAI";
+    push @lines, "  api_key_env: $found->{OpenAI}{api_key_env}" if $found->{OpenAI}{api_key_env};
   } else {
     push @lines, "# default:";
     push @lines, "#   engine: OpenAI";

@@ -274,6 +274,11 @@ Revision history for Langertha-Knarr
       forwarded as before, so a passthrough client sends its own provider
       key in the other header.
 
+    - knarr start --from-env and knarr init now give the default engine
+      the API key variable they found (api_key_env), so a default OpenAI
+      engine works with a plain OPENAI_API_KEY instead of failing for want
+      of LANGERTHA_OPENAI_API_KEY.
+
 
 1.101     2026-08-15 00:13:51Z
 

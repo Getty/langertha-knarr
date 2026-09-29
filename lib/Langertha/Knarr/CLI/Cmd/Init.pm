@@ -18,8 +18,9 @@ generates a complete YAML configuration and writes it to stdout or a file.
 
 The generated config listens on C<127.0.0.1:8080> and C<127.0.0.1:11434>
 unless C<-l> says otherwise, enables C<auto_discover>, sets OpenAI as the
-default engine when an OpenAI key was found, and has no C<passthrough:>
-section.
+default engine when an OpenAI key was found, names the variable each key
+was found in as C<api_key_env> (the default engine included), and has no
+C<passthrough:> section.
 
 See L<knarr> for full option details, L<Langertha::Knarr::Config/scan_env>
 for the env scanning logic, and L<Langertha::Knarr::Config> for the config

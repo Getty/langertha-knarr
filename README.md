@@ -239,8 +239,9 @@ docker run --env-file .env -p 8080:8080 -p 11434:11434 raudssus/langertha-knarr
 [knarr]   http://0.0.0.0:11434
 ```
 
-The default engine is OpenAI when an OpenAI key is set; without one there
-is none, and a request only a default engine could answer (an A2A task, an
+The default engine is OpenAI when an OpenAI key is set, with its key read
+from the variable it was found in (`api_key_env`, like every detected
+provider); without one there is none, and a request only a default engine could answer (an A2A task, an
 Ollama request for an unknown model) gets a `404`.
 
 Each provider gets a default model, read from the Langertha engine class
@@ -818,7 +819,9 @@ docker run --rm \
 ```
 
 The generated config enables `auto_discover`, sets OpenAI as default
-engine when an OpenAI key was found, and has no `passthrough:` section —
+engine when an OpenAI key was found, names the variable each key was found
+in as `api_key_env` (the default engine included), and has no
+`passthrough:` section —
 add one if you want it. Then mount it:
 
 ```bash
