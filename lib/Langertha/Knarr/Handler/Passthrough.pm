@@ -144,27 +144,57 @@ sub serves_protocol {
   return $self->upstreams->{$protocol_name} && $DEFAULT_PATH{$protocol_name} ? 1 : 0;
 }
 
-# Whether $url lives on this protocol's upstream: same scheme, host and
-# port. Paths differ between an engine's base URL (https://api.openai.com/v1)
-# and the passthrough base (https://api.openai.com), so they are not
-# compared (k47).
+# Whether $url lives on this protocol's upstream (k47).
 sub is_upstream_for {
   my ($self, $protocol_name, $url) = @_;
   return 0 unless defined $protocol_name && defined $url;
   my $base = $self->upstreams->{$protocol_name} or return 0;
-  my ($upstream, $other) = map { URI->new($_)->canonical } $base, $url;
-  return 0 unless $upstream->can('host') && $other->can('host');
-  return $upstream->scheme eq $other->scheme && $upstream->host eq $other->host
-    && $upstream->port == $other->port ? 1 : 0;
+  return $self->same_upstream( $base, $url );
 }
 
 =method is_upstream_for
 
     my $same = $passthrough->is_upstream_for( 'anthropic', $engine->url );
 
-True when C<$url> is on the upstream configured for the protocol: same
-scheme, host and port. L<Langertha::Knarr> uses it to send a model
-discovered from that very upstream to the raw passthrough.
+True when C<$url> is the upstream configured for the protocol, as
+L</same_upstream> compares them. L<Langertha::Knarr> uses it to send a
+model discovered from that very upstream to the raw passthrough.
+
+=cut
+
+# Same scheme, host, port and path (k54): a gateway serves several
+# providers under paths of one host. An engine's base URL carries the API
+# version the passthrough base leaves out (https://api.openai.com/v1 vs
+# https://api.openai.com), so a trailing /v1 is not compared. URI's
+# canonical form takes care of host case and default ports.
+sub same_upstream {
+  my ($self, $base, $url) = @_;
+  return 0 unless defined $base && defined $url;
+  my ($upstream, $other) = map { URI->new($_)->canonical } $base, $url;
+  return 0 unless $upstream->can('host') && $other->can('host');
+  return $upstream->scheme eq $other->scheme && $upstream->host eq $other->host
+    && $upstream->port == $other->port
+    && $self->_upstream_path($upstream) eq $self->_upstream_path($other) ? 1 : 0;
+}
+
+sub _upstream_path {
+  my ($self, $uri) = @_;
+  ( my $path = $uri->path ) =~ s{/+\z}{};
+  $path =~ s{/v1\z}{};
+  return $path;
+}
+
+=method same_upstream
+
+    my $same = Langertha::Knarr::Handler::Passthrough->same_upstream(
+      'https://api.openai.com', 'https://api.openai.com/v1' );   # 1
+
+True when both URLs name the same upstream: same scheme, host, port and
+path, host case and default ports normalised, and a trailing C</v1> (the
+API version an engine's base URL carries) ignored. A gateway serving
+several providers under paths of one host
+(C<https://gateway.example/gw/openai>, C<.../gw/groq>) is several upstreams.
+Needs no instance; L<Langertha::Knarr::Router> calls it on the class.
 
 =cut
 
