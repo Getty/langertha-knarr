@@ -4,8 +4,9 @@ our $VERSION = '1.102';
 use Moo;
 use Time::HiRes qw( gettimeofday );
 use Carp qw( croak );
-use Scalar::Util qw( blessed );
+use Scalar::Util qw( blessed looks_like_number );
 use JSON::MaybeXS ();
+use Langertha::Usage;
 use MIME::Base64 qw( encode_base64 );
 use Log::Any qw( $log );
 use Langertha::Knarr::Image;
@@ -244,17 +245,33 @@ sub _rate_limit_hash {
   return %out ? \%out : undef;
 }
 
-# Flatten a Langertha::Usage into its canonical token counts, for the same
-# reason _rate_limit_hash exists: Langertha's value objects carry no TO_JSON,
-# so the object itself would blow up L</flush>'s encode. A plain hashref (the
-# shape end_trace's own SYNOPSIS documents) passes through untouched; an
-# object we cannot flatten is dropped rather than poisoning the batch.
+# Token counts in the keys Langfuse stores: { input, output, total }.
+# Langertha::Usage's canonical input_tokens / output_tokens / total_tokens
+# are keys Langfuse's ingestion silently drops, leaving the generation at
+# 0 / 0 / 0 (k57). Takes a Langertha::Usage, a hashref already in Langfuse's
+# keys (the shape end_trace's SYNOPSIS documents), or a provider's own usage
+# hash (OpenAI, Anthropic, Ollama), which Langertha::Usage reads. Anything
+# else, or an empty hash, is no usage at all -- never a zeroed one.
 sub _usage_hash {
   my ($u) = @_;
   return undef unless defined $u;
-  return $u->to_hash if blessed($u) && $u->can('to_hash');
-  return $u if ref($u) eq 'HASH';
-  return undef;
+  if ( ref $u eq 'HASH' ) {
+    return undef unless %$u;
+    return _langfuse_counts( @{$u}{qw( input output total )} )
+      if grep { defined $u->{$_} } qw( input output total );
+    $u = Langertha::Usage->from_hash($u);
+  }
+  return undef unless blessed($u) && $u->can('input_tokens');
+  return _langfuse_counts( $u->input_tokens, $u->output_tokens, $u->total_tokens );
+}
+
+# Langfuse validates the counts as integers: a count that arrived as a
+# string would be encoded as a JSON string and the whole event rejected.
+sub _langfuse_counts {
+  my ( $input, $output, $total ) = @_;
+  $_ = looks_like_number($_) ? int($_) : 0 for $input, $output;
+  $total = looks_like_number($total) ? int($total) : $input + $output;
+  return { input => $input, output => $output, total => $total };
 }
 
 # Flatten the response's tool calls into plain hashes for the trace metadata.
@@ -385,9 +402,17 @@ place it survives.
 Flattened to its quota scalars; the raw header hash is not recorded.
 
 =item * C<usage> — a L<Langertha::Usage> (the shape every routed response
-carries) or a plain hashref. Objects are flattened with C<to_hash> to
-C<input_tokens> / C<output_tokens> / C<total_tokens>; hashrefs are recorded
-verbatim.
+carries), a hashref in Langfuse's own keys (C<input> / C<output> / C<total>),
+or a provider's usage hash (OpenAI C<prompt_tokens>, Anthropic
+C<input_tokens>, Ollama C<prompt_eval_count>, ...), read through
+L<Langertha::Usage/from_hash>. Whatever the input, the generation gets the
+counts in the only keys Langfuse stores: C<usage> as C<< { input, output,
+total, unit => 'TOKENS' } >> for Langfuse v2 and C<usageDetails> as
+C<< { input, output, total } >> for v3, which lets it override C<usage>;
+v2 drops the key it does not know. A missing C<total> is
+C<input + output>. Without usage, or with an empty hash, neither key is
+sent, so Langfuse never records a zeroed usage. The raw passthrough path
+parses no response, so its generations carry no usage.
 
 =item * C<tool_calls> — the response's L<Langertha::ToolCall> list. The trace
 is the detailed view, so it records the B<full> tool calls — C<id>, C<name>,
@@ -458,7 +483,10 @@ sub end_trace {
         endTime => $end_time,
         defined $completion_start ? (completionStartTime => $completion_start) : (),
         $opts{model} ? (model => $opts{model}) : (),
-        $usage       ? (usage => $usage)       : (),
+        # Langfuse v2 reads usage and drops usageDetails; v3 reads both,
+        # usageDetails overriding usage.
+        $usage       ? (usage        => { %$usage, unit => 'TOKENS' },
+                        usageDetails => $usage) : (),
         %metadata    ? (metadata => \%metadata) : (),
       },
     };

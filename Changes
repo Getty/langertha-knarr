@@ -349,6 +349,13 @@ Revision history for Langertha-Knarr
     - Listen sockets queue up to SOMAXCONN pending connections instead of
       IO::Async's default of 3.
 
+    - Token usage now reaches Langfuse: generations carry the counts as
+      usage { input, output, total, unit } for Langfuse v2 and
+      usageDetails for v3, instead of the input_tokens / output_tokens /
+      total_tokens keys Langfuse dropped, which left every generation at
+      0 / 0 / 0. A provider's own usage hash is mapped the same way, and
+      a request without usage sends none rather than zeros.
+
 
 1.101     2026-08-15 00:13:51Z
 
