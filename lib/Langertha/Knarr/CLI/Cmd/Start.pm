@@ -2,6 +2,7 @@ package Langertha::Knarr::CLI::Cmd::Start;
 our $VERSION = '1.102';
 # ABSTRACT: Start the Knarr proxy server
 use Moo;
+with 'Langertha::Knarr::CLI::Role::GlobalOptions';
 use MooX::Cmd;
 use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr start [options]';
 use Log::Any qw( $log );
@@ -84,14 +85,13 @@ option log_dir => (
 
 sub execute {
   my ($self, $args, $chain) = @_;
-  my $main = $chain->[0];
 
-  my $verbose = $main->verbose;
+  my $verbose = $self->verbose_enabled($chain);
   Log::Any::Adapter->set('Stderr', log_level => $verbose ? 'trace' : 'warning');
 
   require Langertha::Knarr::Config;
 
-  my $config_file = $main->config;
+  my $config_file = $self->config_file($chain);
   my $config;
 
   if (-f $config_file) {

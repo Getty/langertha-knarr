@@ -228,6 +228,13 @@ Revision history for Langertha-Knarr
       The manifest's anthropic and ollama endpoints now claim
       reasoning_effort.
 
+    - knarr start, check and models accept -c/--config and -v/--verbose
+      after the subcommand too (knarr start -c prod.yaml -v), as
+      documented; a value given after the subcommand wins.
+
+    - Dashed long options work in every position: knarr start --from-env
+      --log-file x.jsonl no longer fails with "Unknown option: log-file".
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

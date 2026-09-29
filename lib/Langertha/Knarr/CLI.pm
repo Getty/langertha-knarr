@@ -64,6 +64,49 @@ subcommands.
 
 =cut
 
+# MooX::Options maps a dashed long option (--log-file) to its underscore
+# attribute (log_file), but its argv rewrite takes the token after a
+# boolean flag as that flag's value and passes it through unmapped — so
+# `--from-env --log-file X` reached Getopt::Long as `--log-file` and died
+# with "Unknown option". Map every long option name up front; arguments
+# not starting with `--` and everything after a bare `--` are left alone.
+around new_with_cmd => sub {
+  my ( $orig, $class, @args ) = @_;
+  local @ARGV = $class->normalize_argv(@ARGV);
+  return $class->$orig(@args);
+};
+
+sub normalize_argv {
+  my ( $class, @argv ) = @_;
+  my @out;
+  while (@argv) {
+    my $arg = shift @argv;
+    if ( $arg eq '--' ) {
+      push @out, $arg, @argv;
+      last;
+    }
+    if ( my ( $neg, $name, $value ) = $arg =~ /\A--(no-)?([A-Za-z][A-Za-z0-9_-]*)(=.*)?\z/s ) {
+      $name =~ tr/-/_/;
+      $arg = '--'.( $neg // '' ).$name.( $value // '' );
+    }
+    push @out, $arg;
+  }
+  return @out;
+}
+
+=method normalize_argv
+
+    my @argv = Langertha::Knarr::CLI->normalize_argv(@ARGV);
+
+Rewrites long option names from their dashed to their underscore spelling
+(C<--log-file=x> becomes C<--log_file=x>, C<--no-verbose> keeps its C<no->
+prefix). Arguments that do not start with C<--> (short options and option
+values) and everything after a bare C<--> are left untouched.
+C<new_with_cmd> applies it to C<@ARGV> before parsing, so every documented
+dashed option works in any position.
+
+=cut
+
 sub execute {
   my ($self) = @_;
   print _banner();

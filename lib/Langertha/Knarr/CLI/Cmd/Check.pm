@@ -2,6 +2,7 @@ package Langertha::Knarr::CLI::Cmd::Check;
 our $VERSION = '1.102';
 # ABSTRACT: Validate Knarr configuration file
 use Moo;
+with 'Langertha::Knarr::CLI::Role::GlobalOptions';
 use MooX::Cmd;
 use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr check [options]';
 
@@ -28,8 +29,7 @@ See L<knarr> for option details and L<Langertha::Knarr> for full documentation.
 
 sub execute {
   my ($self, $args, $chain) = @_;
-  my $main = $chain->[0];
-  my $config_file = $main->config;
+  my $config_file = $self->config_file($chain);
 
   unless (-f $config_file) {
     print STDERR "Config file not found: $config_file\n";
