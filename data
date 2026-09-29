@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-29T21:21:31Z
+claimed_by: knarr-worker-usage
+class: standard
+completed: 2026-09-29T21:21:31Z
+created: 2026-09-29T21:11:28Z
+id: 57
+priority: high
+started: 2026-09-29T21:11:37Z
+status: done
+tags:
+- tracing
+- langfuse
+- bug
+title: 'Langfuse: Token-Usage kommt als 0/0/0 an (falsche Usage-Keys)'
+updated: 2026-09-29T21:21:36Z
+---
+
+Verifiziert gegen echtes Langfuse 2.95.11 (docker-compose): Generation zeigt usage {input:0,output:0,total:0}, obwohl Upstream 3/4/7 lieferte. Ursache: Tracing.pm _usage_hash schickt Langertha::Usage->to_hash mit input_tokens/output_tokens/total_tokens; Langfuse ingestion ignoriert diese Keys. Direkter POST an /api/public/ingestion bestaetigt: {input,output,total} wird gespeichert. Fix: in _usage_hash auf {input, output, total} (und ggf. unit: TOKENS) mappen; pruefen ob Langfuse v3 dasselbe Format (usage bzw. usageDetails) nimmt und ggf. beides senden. Test: Tracing-Batch-Payload pruefen (Fake-Ingestion-Endpoint).
+
+2026-09-29 21:14 Cause confirmed: Tracing::_usage_hash sent Langertha::Usage->to_hash (input_tokens/output_tokens/total_tokens). Langfuse schema (v2.95.11 + main): usage={input,output,total,unit}, v3 adds usageDetails (record<string,int>) merged over legacy usage, v2 zod strips unknown keys. Fix: send usage {input,output,total,unit:TOKENS} + usageDetails {input,output,total}. Raw passthrough calls end_trace without usage (bytes never parsed) -> no usage keys at all; provider-shaped hashes (OpenAI/Anthropic/Ollama) now map via Langertha::Usage->from_hash so a future passthrough usage extraction maps the same.
+
+2026-09-29 21:17 Done: Tracing.pm _usage_hash now maps Langertha::Usage, Langfuse-keyed hashes and provider usage hashes (OpenAI/Anthropic/Ollama, via Langertha::Usage->from_hash) to {input,output,total} as ints; generation-update sends usage {input,output,total,unit:TOKENS} (v2) + usageDetails {input,output,total} (v3, overrides usage; v2 zod strips it). No/empty usage -> neither key (never 0/0/0). Raw passthrough: end_trace gets no usage (bytes never parsed) -> generation has no usage keys; guarded by test. New t/99_langfuse_usage_keys.t (fake Net::Async::HTTP::Server ingestion endpoint, key-free): 8/9 subtests red against HEAD Tracing.pm, all green now. t/79 expectations updated. prove -l t/: 62 files, 3268 tests PASS (65_manifest skipped: installed core lacks Manifest::Builder, pre-existing). Follow-ups for dispatcher (not in scope): (1) raw passthrough usage could be read from a copy of the upstream body/SSE tail in Knarr.pm/PSGI.pm without touching the bytes, then passed to end_trace; (2) Langfuse docs mark /api/public/ingestion deprecated (sunset on Cloud at v4 cutover, off on self-hosted v4 events_only) in favour of OTEL /api/public/otel/v1/traces - worth a card.
+
+2026-09-29 21:21 Committed as 584de4c
