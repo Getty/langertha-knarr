@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-09-29T17:17:21Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-09-29T17:17:21Z
+created: 2026-09-15T20:02:44Z
+id: 13
+priority: low
+started: 2026-09-29T16:44:29Z
+status: done
+tags:
+- request
+- reasoning
+- followup
+- drift
+- needs:langertha#173
+title: Reasoning-Inbound-Mapping fuer Anthropic/Ollama (verlustbehaftet, zurueckgestellt)
+updated: 2026-09-29T17:17:29Z
+---
+
+Follow-up aus k4. Beim Zuschnitt von k4 bewusst NICHT umgesetzt (Maintainer-Entscheidung: als eigenes Ticket festhalten), weil es Felder erfinden bzw. eine Croak-Mine treffen wuerde:
+
+- Anthropic-Wire traegt thinking.budget_tokens. Der kanonische Langertha-Control dafuer ist thinking_budget -- der ist Gemini-2.5-only und CROAKT beim Bauen auf Anthropic-Engines, hat zudem keine Capability zum Gaten. Ein Mapping budget_tokens -> reasoning_effort-Enum waere verlustbehaftet (kontinuierliches Budget auf 3-4 Enum-Stufen).
+- Ollama-Wire traegt think (Boolean bzw. Level). Boolean -> reasoning_effort-Enum erfindet eine Stufe.
+
+Heute abgedeckt: reasoning_effort parst vom einzigen Wire, der den Enum nativ traegt (OpenAI top-level, commit 0ebbe19), capability-gegated, forwardet korrekt auf Anthropic-Engines und dropt fuer natives Ollama.
+
+Erst sinnvoll umzusetzen, wenn (a) Langertha einen sauberen, nicht-croakenden per-Engine-Einstieg fuer Reasoning-Budget/Level mit Capability liefert, oder (b) der Maintainer eine explizite, dokumentiert verlustbehaftete Mapping-Policy festlegt (budget_tokens/think -> reasoning_effort-Enum). Bis dahin bewusst offen, kein Feld erfinden.
+
+Verwandt: k4 (erledigt).
+
+Entblockt durch langertha#173 (Reasoning-Profil als echter Datentyp). Sobald das Profil steht, wird k13 der duenne Consumer: Inbound budget_tokens/think -> normalisiertes Level per Profil-Query, statt hier eine eigene verlustbehaftete Mapping-Policy zu erfinden. Maintainer-Richtung 2026-09-16: gute Defaults + exakt ueberschreibbare Parameter, Boolean -> Default-Level (Mitte).
+
+2026-09-29 16:54 Mapping decisions: new Moose class Langertha::Knarr::Reasoning, one instance per Anthropic/Ollama protocol (attr 'reasoning', overridable). Anthropic: disabled->none; adaptive / enabled-without-budget -> default_level (BudgetPolicy default_bool_level = medium, 'medium' on old core); enabled+budget_tokens -> BudgetPolicy->level_for over Profile->for_model(request model): range form when the profile has both bounds (Gemini 2.5), else explicit with fallback anchors {low 2048, medium 8192, high 24576} (BudgetPolicy's own synopsis anchors; Claude profiles carry no bounds, so range would croak). Overrides: default_level, budget_points (explicit), fallback_budget_points (subclass). Ollama: JSON bool true->default_level, false->none, level string of the normalized vocabulary kept, anything else unmapped. Explicit wins: top-level reasoning_effort, and output_config.effort on the Anthropic face. Old core (0.503): budget_tokens unmapped (no croak), bool/level strings still map. Manifest: anthropic + ollama endpoints now claim reasoning_effort (t/65 adjusted).
+
+2026-09-29 16:54 Also found: YAML config has no path to protocol construction (Knarr.pm builds protocols with ->new), so the overrides are constructor/subclass-only for now; config plumbing (e.g. reasoning: {default_level, budget_points}) would be a follow-up card. CLAUDE.md module list lacks Langertha::Knarr::Reasoning (doc edit for the orchestrator).
+
+2026-09-29 16:55 Done: lib/Langertha/Knarr/Reasoning.pm (new), Protocol/Anthropic.pm + Protocol/Ollama.pm parse thinking/think into reasoning_effort, Request.pm POD, t/29_reasoning_inbound.t (new), t/65_manifest.t. prove -l t/ PASS (46 files, 2186 tests; BudgetPolicy subtests skip) and prove -l -I ~/dev/langertha/lib t/ PASS (46 files, 2599 tests). Capability gate in chat_f_args untouched; passthrough untouched. Not committed; no Changes edit.
+
+Committed 5a52059. Cross-board need langertha#173 verified done on the langertha board.
