@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-29T17:43:25Z
+claimed_by: knarr-worker-docs
+class: standard
+completed: 2026-09-29T17:43:25Z
+created: 2026-09-29T17:28:02Z
+id: 43
+priority: medium
+started: 2026-09-29T17:28:08Z
+status: done
+tags:
+- docs
+title: 'Doku-Durchgang: README, CLAUDE.md, POD, example-config, compose auf Code-Stand'
+updated: 2026-09-29T17:43:25Z
+---
+
+Doku-Audit vom 2026-09-29 (Liste im Worker-Briefing) abarbeiten, nach den Fixes k13/k40/k41/k42. README.md, CLAUDE.md, bin/knarr POD, lib POD, share/example-config.yaml, docker-compose.yml (Langfuse v3 braucht ClickHouse/Redis/S3 -> auf v2 pinnen), .env.example. Binary-Abschnitt aus k39 einbauen, sobald da.
+
+2026-09-29 17:41 Code drift found while documenting (not fixed, docs-only card): (1) --from-env and knarr init set default: {engine: OpenAI} without api_key_env, but Langertha::Engine::OpenAI reads only LANGERTHA_OPENAI_API_KEY -> with the documented OPENAI_API_KEY every default-engine request fails at request time (verified: resolve ok, ->api_key croaks). Same class for any default/model entry without api_key_env. (2) knarr container ignores options (-p refused) and binds 127.0.0.1 -> useless as Docker alias. (3) start option doc strings (--help) still say -p default 8080 11434, -H default 0.0.0.0, -w worker processes. (4) Raw passthrough of Ollama /api/generate posts the generate body to upstream /api/chat (Passthrough %DEFAULT_PATH has one path per protocol). (5) Raw passthrough forwards every client header, so the proxy_api_key header reaches api.openai.com/api.anthropic.com. (6) --from-env + auto_discover routes the provider's discovered models (e.g. Claude Code's) through the engine, not raw passthrough - README used to promise passthrough; now documented as is, confirm intended. (7) A2A agent card still says 'Langertha Steerboard Agent' (Protocol/A2A.pm runtime), plus Steerboard in code comments A2A.pm:94, Handler/Raider.pm:55. (8) PSGI.pm holds a second package Langertha::Knarr::PSGI::FakeReq (dzil MetaProvides warning, one-package-per-file rule).
+
+2026-09-29 17:41 Done: README, CLAUDE.md, bin/knarr POD, POD in Knarr.pm/Config.pm/Router.pm/CLI.pm/CLI::Cmd::*/Protocol::Ollama/Handler::A2AClient+ACPClient (POD/ABSTRACT only), share/example-config.yaml, docker-compose.yml (langfuse/langfuse:2 + db healthcheck; env matches v2 required set DATABASE_URL/NEXTAUTH_SECRET/NEXTAUTH_URL/SALT), .env.example brought to code state after k13/k40/k41/k42. Listen/-p/-H/-w, passthrough-off-by-default, auto_discover default, A2A/ACP/AG-UI request shapes, Handler::Code, raw_passthrough wiring, reasoning/images/controls table, manifest, /api/version, /api/generate, PSGI, config key tables, self-loop fixes, Docker mounted-config examples (listen 0.0.0.0 or -p). Binary section spot left as HTML comment before 'Installing as a Perl Module'. Verified: dzil build + podchecker on woven touched files clean; knarr check on every documented config (example-config, README config, hybrid, CLAUDE.md); CLI examples run offline (start -c ... -v, -p/-H, --log-file, init -l -o, models -f json, container); docker compose config -q; prove -l t/ PASS (49 files, 2393 tests). No Changes edit, no commit.
+
+2026-09-29 17:43 Committed as d9480fa
