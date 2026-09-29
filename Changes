@@ -258,6 +258,15 @@ Revision history for Langertha-Knarr
       variable reference. docker-compose now pins Langfuse v2
       (langfuse/langfuse:2), which runs on Postgres alone.
 
+    - Prebuilt single-file knarr binaries for Linux (x86_64 and aarch64)
+      are attached to each GitHub release as knarr-VERSION-linux-ARCH, each
+      also as a .tar.gz, with one checksums file for all of them. No Perl
+      is needed on the target, only libssl and libcrypto (and
+      ca-certificates for HTTPS upstreams). scripts/build-binary.sh builds
+      them with PAR::Packer; scripts/verify-binary.sh and
+      scripts/check-binary-libs.sh smoke-test them.
+
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

@@ -933,7 +933,32 @@ knarr check                                Validate config file
   takes no options and so listens on loopback only; use
   `knarr start --from-env -p 8080 -p 11434`.
 
-<!-- Binary (no Perl needed): this section is added by k39. -->
+## Binary (no Perl needed)
+
+Prebuilt Linux binaries are attached to each
+[GitHub release](https://github.com/Getty/langertha-knarr/releases):
+`knarr-<version>-linux-x86_64` and `knarr-<version>-linux-aarch64`, each as
+a raw executable and as a `.tar.gz` (binary, LICENSE and an example config);
+a single `knarr-<version>-checksums.txt` covers them all. Download, verify
+with `sha256sum -c --ignore-missing knarr-<version>-checksums.txt` (the flag
+skips the assets you did not download), `chmod +x`, and run — no Perl, CPAN
+or Docker needed:
+
+```bash
+chmod +x knarr-<version>-linux-x86_64
+./knarr-<version>-linux-x86_64 init > knarr.yaml
+./knarr-<version>-linux-x86_64 start
+```
+
+The target needs the system libraries `libssl` and `libcrypto` (OpenSSL 3,
+package `libssl3` on Debian/Ubuntu — present on any normal Linux), plus a CA
+bundle (`ca-certificates`) for HTTPS upstreams. The binary is ~14 MB and
+bundles its own Perl with every Langertha engine; third-party
+`LangerthaX::*` engines and plugins are not included. On first run it
+unpacks itself into a cache (`$TMPDIR/par-<user>/`, or `PAR_GLOBAL_TEMP` if
+set), which takes a few seconds once; after that it starts a little slower
+than the CPAN install (~0.5 s vs ~0.25 s) — it is for distribution
+convenience, not speed.
 
 ## Installing as a Perl Module
 
