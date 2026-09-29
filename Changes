@@ -298,18 +298,22 @@ Revision history for Langertha-Knarr
     - With auto_discover and passthrough both on (--from-env, the Docker
       image), a model known only from auto-discovery now passes through
       byte for byte when the passthrough upstream of the client's protocol
-      is the provider that listed it, host and path alike: a gateway
+      is the provider that listed it, host and path alike (a gateway
       serving several providers under paths of one host is several
-      upstreams. Claude Code's requests to Anthropic keep cache_control,
-      usage and tool_use details untouched and use Claude Code's own
-      credentials. A model discovered from another provider, a model
+      upstreams), and the client sends its own provider key:
+      Authorization for OpenAI, x-api-key or Authorization for Anthropic,
+      the proxy key not counting. Claude Code's requests to Anthropic
+      keep cache_control, usage and tool_use details untouched and use
+      Claude Code's own credentials. Without a provider key of its own, a
+      client gets a discovered model through the engine that listed it,
+      with that engine's key, also under --from-env and in the Docker
+      image; so do a model discovered from another provider, a model
       configured under models:, and a request in a protocol without a
-      passthrough upstream are still routed through their engine.
-      Discovery still fills /v1/models, /api/tags, the manifest and the
-      capability probe. A model several endpoints list belongs to one
-      of them, the same on every run: the passthrough upstream first,
-      else the first by model config name; the others are logged at
-      debug level.
+      passthrough upstream. Discovery still fills /v1/models, /api/tags,
+      the manifest and the capability probe. A model several endpoints
+      list belongs to one of them, the same on every run: the
+      passthrough upstream first, else the first by model config name;
+      the others are logged at debug level.
 
     - Ollama's /api/generate answers in Ollama's generate shape on the
       routed path as well: the text on response, streaming and

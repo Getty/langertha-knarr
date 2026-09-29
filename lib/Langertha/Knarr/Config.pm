@@ -638,10 +638,14 @@ a model is resolved, making all discovered models available without
 explicit config entries and listing them (C</v1/models>, C</api/tags>, the
 manifest). A discovered model is routed through its engine, except when the
 L</passthrough> upstream of the client's protocol is the endpoint that
-listed it (same scheme, host and port): then it passes through byte for
-byte like an unknown model, with the client's own key. A model under
-L</models> is always routed. Defaults to C<0>; L</from_env>
-and the C<knarr init> output turn it on.
+listed it (same scheme, host, port and path, an engine's trailing C</v1>
+aside, so a gateway's C</openai> and C</groq> paths are two upstreams) and
+the request carries the client's own provider key (C<Authorization> for
+OpenAI, C<x-api-key> or C<Authorization> for Anthropic, not counting the
+L</proxy_api_key>; Ollama needs none): then it passes through byte for byte
+like an unknown model, with that key. Without one it is routed through its
+engine, with the engine's key. A model under L</models> is always routed.
+Defaults to C<0>; L</from_env> and the C<knarr init> output turn it on.
 
 =cut
 

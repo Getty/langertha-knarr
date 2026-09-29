@@ -54,7 +54,9 @@ and value-object metrics; every other model name tunnels straight through
 to the upstream API the client thinks it's talking to, using the client's
 own API key. That includes the models auto-discovered from that very
 upstream (Anthropic's models on the Anthropic protocol, OpenAI's on the
-OpenAI protocol). A model discovered from another provider (a Groq model
+OpenAI protocol) when the client sends its own provider key; a client
+without one gets them through the engine, with the key from the
+environment. A model discovered from another provider (a Groq model
 asked for over the OpenAI protocol) goes through its engine. No key
 duplication, no configuration required for the simple cases.
 
@@ -69,8 +71,8 @@ passthrough is off until you add a `passthrough:` section (see
 Claude Code / OpenAI SDK / Open WebUI / A2A, ACP, AG-UI agents
     │
     ▼
-  Knarr ─┬─ unknown model, or one discovered from that upstream,
-         │  passthrough upstream for the protocol
+  Knarr ─┬─ unknown model, or one discovered from that upstream
+         │  with the client's own key, passthrough upstream for the protocol
          │     └── raw bytes 1:1 ──► api.anthropic.com / api.openai.com
          │                           (Langfuse trace)
          │
@@ -288,11 +290,14 @@ output; off by default in a hand-written config), Knarr queries each
 provider's model list the first time a model is looked up — so you can use
 any model they offer, not just the defaults. The discovered models show
 up in the model lists. A discovered model whose provider is also the
-passthrough upstream of the client's protocol still passes through, with
-the client's own key; the others (another provider's, or any over a
-protocol without a passthrough upstream) are routed through their engine
-with the key from the environment. To route a model through Knarr's key
-even where it could pass through, configure it under `models:`.
+passthrough upstream of the client's protocol still passes through when
+the client sends its own provider key (`Authorization` for OpenAI,
+`x-api-key` or `Authorization` for Anthropic — the proxy key does not
+count); without one, and for the others (another provider's, or any over
+a protocol without a passthrough upstream), it is routed through its
+engine with the key from the environment. So a client that has no
+provider key of its own — only the proxy key, or nothing on an open
+proxy — can use every discovered model, `--from-env` included.
 
 ## Langfuse Tracing
 
@@ -728,7 +733,7 @@ there is one; the config value wins):
 | `listen` | `host:port` list | `127.0.0.1:8080`, `127.0.0.1:11434` |
 | `models` | model name → engine config, see below | — |
 | `default` | engine for unknown models in a protocol without passthrough upstream and for requests without a model; same keys as a model entry | none (→ `404`) |
-| `auto_discover` | list every model the configured endpoints list; routed unless the client protocol's passthrough upstream is the endpoint that listed it | `false` |
+| `auto_discover` | list every model the configured endpoints list; routed unless the client protocol's passthrough upstream is the endpoint that listed it and the client sends its own provider key | `false` |
 | `passthrough` | `true` or per-protocol upstream URLs (`openai`, `anthropic`, `ollama`) | off |
 | `proxy_api_key` | key clients must send (`KNARR_API_KEY`) | open |
 | `public_url` | base URL in the provider manifest (`KNARR_PUBLIC_URL`) | from the request |
@@ -779,7 +784,8 @@ those models are handled by Langertha engines, and so are
 `auto_discover`ed models from a provider other than the protocol's
 upstream. Everything else still passes through as raw bytes — for the
 protocols that have an upstream — including discovered models of that
-upstream itself. An unknown model in a protocol without one (Ollama without an
+upstream itself when the client sends its own provider key (without one,
+they go through their engine). An unknown model in a protocol without one (Ollama without an
 `ollama:` entry, and A2A, ACP and AG-UI always) goes to the default engine,
 or gets a `404` in the protocol's error shape when there is none.
 

@@ -585,7 +585,8 @@ For a model known only through auto-discovery (not in
 L<Langertha::Knarr::Config/models>), the base URL of the engine that listed
 it; C<undef> for a configured or unknown model, or when the engine has no
 C<url>. L<Langertha::Knarr> sends such a model to the raw passthrough when
-it was listed by the passthrough upstream of the client's protocol (k47).
+it was listed by the passthrough upstream of the client's protocol and the
+client sends its own provider key.
 
 =cut
 

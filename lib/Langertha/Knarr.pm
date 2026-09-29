@@ -239,7 +239,8 @@ Optional L<Langertha::Knarr::Handler::Passthrough>. Together with a
 L</router>, a chat request for a model the router does not configure -- or
 knows only from auto-discovery on that same upstream
 (L<Langertha::Knarr::Router/discovered_url>,
-L<Langertha::Knarr::Handler::Passthrough/is_upstream_for>) -- is
+L<Langertha::Knarr::Handler::Passthrough/is_upstream_for>), when the
+request carries the client's own provider key -- is
 piped byte for byte to the upstream for the client's protocol (an Ollama
 C</api/generate> to the upstream's C</api/generate>, any other Ollama chat
 to C</api/chat>), bypassing the handler chain -- but only when that
@@ -250,12 +251,20 @@ goes through the handler, where L<Langertha::Knarr::Handler::Router> hands
 it to the default engine, or answers C<404> in the protocol's error shape
 when there is none.
 
+The provider key is looked for once the proxy key is taken out (see
+L</auth_token>): C<Authorization> for OpenAI, C<x-api-key> or
+C<Authorization> for Anthropic; Ollama needs none. A discovered model
+requested without one goes through the handler instead, to the engine
+that listed it, with that engine's key -- the upstream would only answer
+C<401>. A model nobody configured or discovered passes through either way.
+
 =attr router
 
 Optional L<Langertha::Knarr::Router>, usually the one the
 L<Langertha::Knarr::Handler::Router> handler wraps. Knarr itself uses it
 to decide which requests go to the L</raw_passthrough> (models it does not
-configure, and models it only discovered on that upstream), to answer
+configure, and models it only discovered on that upstream when the client
+sends its own key), to answer
 C<POST /api/show> from the routed engine's
 capabilities (without a router it falls back to the handler's
 C<list_models> and claims no C<vision>), and to start the capability probe
@@ -926,8 +935,29 @@ sub _is_raw_passthrough {
   # there byte for byte too; discovery then only feeds the model lists
   # (k47). One listed by another provider stays with its engine.
   my $url = $router->can('discovered_url') ? $router->discovered_url( $sb_req->model ) : undef;
-  return defined $url && $pt->can('is_upstream_for')
-    && $pt->is_upstream_for( $sb_req->protocol, $url ) ? 1 : 0;
+  return 0 unless defined $url && $pt->can('is_upstream_for')
+    && $pt->is_upstream_for( $sb_req->protocol, $url );
+  # ...but only with the client's own provider key: without one the upstream
+  # would answer 401, while the engine that listed the model holds Knarr's
+  # key (k52).
+  return $self->_carries_provider_key($sb_req);
+}
+
+# The headers a protocol's upstream takes its key from. A protocol not listed
+# (Ollama) needs none.
+my %PROVIDER_KEY_HEADERS = (
+  openai    => [ 'authorization' ],
+  anthropic => [ 'x-api-key', 'authorization' ],
+);
+
+# True when the request carries a provider key for its protocol's upstream,
+# after Knarr's proxy key was taken out: the parser's forward_headers, as
+# _parse_chat_request left them (k52).
+sub _carries_provider_key {
+  my ($self, $sb_req) = @_;
+  my $names = $PROVIDER_KEY_HEADERS{ $sb_req->protocol // '' } or return 1;
+  my $fwd = ( $sb_req->extra && $sb_req->extra->{forward_headers} ) || {};
+  return ( grep { defined $fwd->{$_} && length $fwd->{$_} } @$names ) ? 1 : 0;
 }
 
 # $headers: the client's request headers as [ name, value ] pairs; $path:

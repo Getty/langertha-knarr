@@ -82,8 +82,8 @@ default:
 
 # Auto-discover models from configured engines, for the model lists. A
 # discovered model still passes through when the passthrough upstream of
-# the client's protocol is the endpoint that listed it; otherwise it is
-# routed through its engine.
+# the client's protocol is the endpoint that listed it and the client sends
+# its own provider key; otherwise it is routed through its engine.
 auto_discover: true
 
 # Passthrough (off without this key): an unknown model is forwarded byte for
