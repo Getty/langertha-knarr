@@ -37,8 +37,9 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
                                                │
                          ┌─────────────────────┴───────────────┐
                          │                                     │
-        model configured/discovered,            model unknown AND passthrough
-        or no upstream for the protocol         upstream for this protocol
+        model configured (or discovered         model unknown, or discovered
+        elsewhere), or no upstream for          from that upstream, AND a
+        the protocol                            passthrough upstream for it
                          │                                     │
   [RequestLog] → [Tracing] → Handler::Router          Raw HTTP 1:1 (Knarr.pm)
                          │                                     │
@@ -52,7 +53,10 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
   the upstream's `/api/generate` (k46).
 - `passthrough: true` = openai + anthropic only; ollama needs an explicit URL;
   A2A/ACP/AG-UI never pass through (k41).
-- `auto_discover` makes the provider's listed models *configured* → routed, not passed through.
+- `auto_discover` feeds the model lists; a model known only from it goes raw passthrough
+  when the client protocol's upstream is the endpoint that listed it (same scheme/host/port,
+  `Router::discovered_url` + `Passthrough::is_upstream_for`), else it is routed (k47).
+  Models under `models:` are always routed.
 - No model in the request (A2A always, ACP w/o `agent_name`) → default engine with its
   own `model:` (k42). Nothing can serve → 404 in the protocol's error shape.
 - Request fields on the routed path: tools/tool_choice, response_format, temperature,

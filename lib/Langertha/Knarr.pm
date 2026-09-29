@@ -217,7 +217,10 @@ provider manifest. When unset, the base URL is taken from the request
 =attr raw_passthrough
 
 Optional L<Langertha::Knarr::Handler::Passthrough>. Together with a
-L</router>, a chat request for a model the router does not configure is
+L</router>, a chat request for a model the router does not configure -- or
+knows only from auto-discovery on that same upstream
+(L<Langertha::Knarr::Router/discovered_url>,
+L<Langertha::Knarr::Handler::Passthrough/is_upstream_for>) -- is
 piped byte for byte to the upstream for the client's protocol (an Ollama
 C</api/generate> to the upstream's C</api/generate>, any other Ollama chat
 to C</api/chat>), bypassing the handler chain -- but only when that
@@ -233,7 +236,8 @@ when there is none.
 Optional L<Langertha::Knarr::Router>, usually the one the
 L<Langertha::Knarr::Handler::Router> handler wraps. Knarr itself uses it
 to decide which requests go to the L</raw_passthrough> (models it does not
-configure), to answer C<POST /api/show> from the routed engine's
+configure, and models it only discovered on that upstream), to answer
+C<POST /api/show> from the routed engine's
 capabilities (without a router it falls back to the handler's
 C<list_models> and claims no C<vision>), and to start the capability probe
 in L</start>.
@@ -862,12 +866,18 @@ sub _handle_raw_passthrough {
 sub _is_raw_passthrough {
   my ($self, $sb_req) = @_;
   my $pt = $self->raw_passthrough;
+  my $router = $self->router;
   # Only for a protocol the passthrough has an upstream for: a request in
   # any other protocol goes through the handler chain, to the default
   # engine or to a 404 in the protocol's error shape (k41).
-  return $pt && $self->router
-    && $pt->serves_protocol( $sb_req->protocol )
-    && $self->router->is_passthrough_model( $sb_req->model ) ? 1 : 0;
+  return 0 unless $pt && $router && $pt->serves_protocol( $sb_req->protocol );
+  return 1 if $router->is_passthrough_model( $sb_req->model );
+  # A model only auto-discovery knows, listed by this very upstream, goes
+  # there byte for byte too; discovery then only feeds the model lists
+  # (k47). One listed by another provider stays with its engine.
+  my $url = $router->can('discovered_url') ? $router->discovered_url( $sb_req->model ) : undef;
+  return defined $url && $pt->can('is_upstream_for')
+    && $pt->is_upstream_for( $sb_req->protocol, $url ) ? 1 : 0;
 }
 
 # $headers: the client's request headers as [ name, value ] pairs; $path:

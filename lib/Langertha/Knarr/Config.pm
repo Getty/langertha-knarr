@@ -579,8 +579,12 @@ has auto_discover => (
 Boolean. When true, L<Langertha::Knarr::Router> asks each configured
 endpoint (engine, URL and API key variable) for its model list the first time
 a model is resolved, making all discovered models available without
-explicit config entries. A discovered model is routed through its engine,
-so it no longer reaches the L</passthrough>. Defaults to C<0>; L</from_env>
+explicit config entries and listing them (C</v1/models>, C</api/tags>, the
+manifest). A discovered model is routed through its engine, except when the
+L</passthrough> upstream of the client's protocol is the endpoint that
+listed it (same scheme, host and port): then it passes through byte for
+byte like an unknown model, with the client's own key. A model under
+L</models> is always routed. Defaults to C<0>; L</from_env>
 and the C<knarr init> output turn it on.
 
 =cut
@@ -610,7 +614,8 @@ enables C<openai> and C<anthropic> with their default upstream URLs
 has no default and needs its URL. Per-format URLs can be customised or set
 to C<false> to disable selectively.
 
-A request for a model that is neither configured nor auto-discovered goes
+A request for a model that is neither configured nor auto-discovered (or
+auto-discovered from that very upstream, see L</auto_discover>) goes
 to the upstream of its protocol byte for byte, with the client's own
 headers and key. A protocol without an upstream sends such a request to
 the L</default_engine> instead.

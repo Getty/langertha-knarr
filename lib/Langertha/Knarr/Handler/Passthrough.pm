@@ -5,6 +5,7 @@ use Moose;
 use Future;
 use Future::AsyncAwait;
 use HTTP::Request;
+use URI;
 use JSON::MaybeXS;
 use Langertha::Knarr::Stream;
 use Langertha::Knarr::Response;
@@ -141,6 +142,30 @@ sub serves_protocol {
   return 0 unless defined $protocol_name;
   return $self->upstreams->{$protocol_name} && $DEFAULT_PATH{$protocol_name} ? 1 : 0;
 }
+
+# Whether $url lives on this protocol's upstream: same scheme, host and
+# port. Paths differ between an engine's base URL (https://api.openai.com/v1)
+# and the passthrough base (https://api.openai.com), so they are not
+# compared (k47).
+sub is_upstream_for {
+  my ($self, $protocol_name, $url) = @_;
+  return 0 unless defined $protocol_name && defined $url;
+  my $base = $self->upstreams->{$protocol_name} or return 0;
+  my ($upstream, $other) = map { URI->new($_)->canonical } $base, $url;
+  return 0 unless $upstream->can('host') && $other->can('host');
+  return $upstream->scheme eq $other->scheme && $upstream->host eq $other->host
+    && $upstream->port == $other->port ? 1 : 0;
+}
+
+=method is_upstream_for
+
+    my $same = $passthrough->is_upstream_for( 'anthropic', $engine->url );
+
+True when C<$url> is on the upstream configured for the protocol: same
+scheme, host and port. L<Langertha::Knarr> uses it to send a model
+discovered from that very upstream to the raw passthrough.
+
+=cut
 
 =method serves_protocol
 

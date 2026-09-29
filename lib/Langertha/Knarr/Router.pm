@@ -303,6 +303,10 @@ sub _discover_models {
             %inherited,
             model      => $id,
             discovered => 1,
+            # Where the model was listed: its passthrough upstream may
+            # serve it as is (k47).
+            ( $engine->can('url') && defined $engine->url
+              ? ( discovered_url => $engine->url ) : () ),
           };
           $log->debugf("Discovered model: %s (via %s)", $id, $engine_class);
         }
@@ -509,6 +513,36 @@ sub is_passthrough_model {
   my @r = eval { $self->resolve($model, skip_default => 1) };
   return @r ? 0 : 1;
 }
+
+=method is_passthrough_model
+
+    next if $router->is_passthrough_model($model);
+
+True when the router cannot resolve C<$model> without the default engine:
+neither configured nor auto-discovered.
+
+=cut
+
+sub discovered_url {
+  my ($self, $model) = @_;
+  return unless defined $model && length $model;
+  return if $self->config->models->{$model};
+  $self->_discover_models unless $self->_discovery_done;
+  my $def = $self->_discovered_models->{$model} or return;
+  return $def->{discovered_url};
+}
+
+=method discovered_url
+
+    my $url = $router->discovered_url($model);
+
+For a model known only through auto-discovery (not in
+L<Langertha::Knarr::Config/models>), the base URL of the engine that listed
+it; C<undef> for a configured or unknown model, or when the engine has no
+C<url>. L<Langertha::Knarr> sends such a model to the raw passthrough when
+it was listed by the passthrough upstream of the client's protocol (k47).
+
+=cut
 
 =seealso
 

@@ -19,6 +19,7 @@ requires 'Module::Runtime';
 requires 'Log::Any';
 requires 'Time::HiRes';
 requires 'Try::Tiny';
+requires 'URI';
 requires 'MIME::Base64';
 
 recommends 'Plack';

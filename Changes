@@ -287,6 +287,17 @@ Revision history for Langertha-Knarr
       behave. The PSGI request wrapper is now a module of its own,
       Langertha::Knarr::PSGI::FakeReq.
 
+    - With auto_discover and passthrough both on (--from-env, the Docker
+      image), a model known only from auto-discovery now passes through
+      byte for byte when the passthrough upstream of the client's protocol
+      is the provider that listed it. Claude Code's requests to Anthropic
+      keep cache_control, usage and tool_use details untouched and use
+      Claude Code's own credentials. A model discovered from another
+      provider, a model configured under models:, and a request in a
+      protocol without a passthrough upstream are still routed through
+      their engine. Discovery still fills /v1/models, /api/tags, the
+      manifest and the capability probe.
+
 
 1.101     2026-08-15 00:13:51Z
 
