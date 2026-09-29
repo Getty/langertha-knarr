@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-29T18:12:11Z
+claimed_by: knarr-worker-fix2
+class: standard
+completed: 2026-09-29T18:12:06Z
+created: 2026-09-29T17:42:08Z
+id: 45
+priority: high
+started: 2026-09-29T17:43:45Z
+status: done
+tags:
+- config
+- bug
+title: Default-Engine aus --from-env/init findet ihren API-Key nicht (api_key_env
+  fehlt)
+updated: 2026-09-29T18:12:11Z
+---
+
+Aus k43: --from-env und knarr init schreiben default: {engine: OpenAI} ohne api_key_env. Langertha::Engine::OpenAI liest nur LANGERTHA_OPENAI_API_KEY; mit dem dokumentierten OPENAI_API_KEY croakt ->api_key bei jedem Default-Engine-Request. Fix: generierte Config setzt api_key_env auf die tatsaechlich gefundene Env-Var (analog fuer andere Engines pruefen). Test.
+
+2026-09-29 17:50 Done. Cause: Config::from_env and generate_config wrote default: {engine: OpenAI} without api_key_env (models: entries already had it), so the default engine read only LANGERTHA_OPENAI_API_KEY and croaked with OPENAI_API_KEY. Fix: both set api_key_env to the variable scan_env found (Config.pm). Only OpenAI is ever made default, other engines' entries already carried api_key_env. Test t/92_default_engine_key_env.t (each of the three OpenAI vars: default names it, Router builds the default engine with that key, for from_env and generated YAML) — red before (croak), green after; t/10-config.t green. Docs: README (default engine / generated config), Config from_env POD, Init POD.
+
+2026-09-29 18:12 Committed as b0c8c71
