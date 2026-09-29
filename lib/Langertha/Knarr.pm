@@ -176,6 +176,14 @@ Optional shared secret. When set, every incoming request must present
 it as C<Authorization: Bearer> or C<x-api-key>. Discovery routes
 (C</.well-known/agent.json>) stay anonymous.
 
+The key never leaves Knarr: the header that carried it is dropped from a
+request to a passthrough upstream (the L</raw_passthrough> and a
+L<Langertha::Knarr::Handler::Passthrough> in the handler chain alike).
+Every other header is forwarded, so a passthrough client sends its own
+provider key in the other header -- the proxy key in C<x-api-key> and the
+OpenAI key as C<Authorization: Bearer>, or the proxy key as
+C<Authorization: Bearer> and the Anthropic key in C<x-api-key>.
+
 =attr ollama_compat_version
 
 The Ollama version reported at C<GET /api/version> as
@@ -538,14 +546,39 @@ sub _check_auth {
   return 1 unless defined $self->auth_token && length $self->auth_token;
   # Discovery endpoints stay anonymous so clients can introspect.
   return 1 if $action eq 'a2a_card';
-  my $expected = $self->auth_token;
-  my $auth = scalar( $req->header('Authorization') ) // '';
-  if ( $auth =~ /^Bearer\s+(.+)$/i && $1 eq $expected ) {
-    return 1;
+  for my $name ( 'Authorization', 'x-api-key' ) {
+    return 1 if $self->_is_proxy_auth_header( $name, scalar $req->header($name) );
   }
-  my $api_key = scalar( $req->header('x-api-key') ) // '';
-  return 1 if $api_key eq $expected && length $api_key;
   return 0;
+}
+
+# True when this header carries Knarr's own key (auth_token), the way
+# _check_auth accepts it: 'Authorization: Bearer <key>' or 'x-api-key: <key>'.
+# Such a header is Knarr's and never leaves the proxy (k44); the client's own
+# provider key travels in the other one and is forwarded.
+sub _is_proxy_auth_header {
+  my ($self, $name, $value) = @_;
+  my $expected = $self->auth_token;
+  return 0 unless defined $expected && length $expected && defined $value;
+  $name = lc $name;
+  return $value =~ /^Bearer\s+(.+)$/i && $1 eq $expected ? 1 : 0 if $name eq 'authorization';
+  return $value eq $expected ? 1 : 0 if $name eq 'x-api-key';
+  return 0;
+}
+
+# The protocol's parse, minus the headers that carried Knarr's key: a
+# passthrough handler in the chain forwards the parser's forward_headers to
+# the upstream (k44). Shared by the native server and the PSGI adapter.
+sub _parse_chat_request {
+  my ($self, $proto, $req, $body_ref) = @_;
+  my $sb_req = $proto->parse_chat_request( $req, $body_ref );
+  my $fwd = $sb_req->extra && $sb_req->extra->{forward_headers};
+  if ( ref $fwd eq 'HASH' ) {
+    for my $name ( keys %$fwd ) {
+      delete $fwd->{$name} if $self->_is_proxy_auth_header( $name, $fwd->{$name} );
+    }
+  }
+  return $sb_req;
 }
 
 # The one 401 answer, shared by the native server and the PSGI adapter (k25).
@@ -594,7 +627,7 @@ sub _dispatch {
 sub _action_chat {
   my ($self, $proto, $req) = @_;
   my $body = $req->body;
-  my $sb_req = $proto->parse_chat_request( $req, \$body );
+  my $sb_req = $self->_parse_chat_request( $proto, $req, \$body );
 
   # Raw passthrough: pipe bytes 1:1 to upstream, skip handler chain
   if ( $self->_is_raw_passthrough($sb_req) ) {
@@ -846,10 +879,12 @@ sub _raw_passthrough_request {
   my $http_req = HTTP::Request->new(POST => $url);
 
   # Forward all client headers except hop-by-hop / connection-specific
+  # ones and the one that carried Knarr's own key (k44)
   my %skip = map { lc($_) => 1 } qw( host content-length connection transfer-encoding );
   for my $pair (@$headers) {
     my ($name, $value) = @$pair;
     next if $skip{lc($name)};
+    next if $self->_is_proxy_auth_header( $name, $value );
     $http_req->header($name => $value);
   }
   $http_req->content($body);

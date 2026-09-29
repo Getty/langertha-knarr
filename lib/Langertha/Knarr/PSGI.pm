@@ -35,7 +35,8 @@ L<Langertha::Knarr/run> entry point if you need real-time streaming.
 Raw passthrough works as on the native server: with a
 C<raw_passthrough> handler and a C<router> set on the Knarr, a chat request for a
 model the router does not configure is sent to the upstream byte for byte
-with the client's headers, and the upstream's status, content type and body
+with the client's headers (minus the one that carried the proxy key, see
+L<Langertha::Knarr/auth_token>), and the upstream's status, content type and body
 come back unchanged. A streamed passthrough answer is buffered like any
 other stream here.
 
@@ -144,7 +145,7 @@ sub _handle_psgi {
   }
 
   my $body = $self->_read_body($env);
-  my $sb_req = $proto->parse_chat_request( $fake_http, \$body );
+  my $sb_req = $sb->_parse_chat_request( $proto, $fake_http, \$body );
 
   # Raw passthrough, decided and prepared by the same Knarr code as on the
   # native server (k26): the client's bytes go 1:1 to the upstream and its

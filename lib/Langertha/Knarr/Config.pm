@@ -390,7 +390,8 @@ has proxy_api_key => (
 
 Optional shared secret that clients must present in the C<Authorization: Bearer>
 or C<x-api-key> header. Falls back to the C<KNARR_API_KEY> environment variable.
-When not set, the proxy is open (no auth required).
+When not set, the proxy is open (no auth required). The header that carried it
+is never forwarded to a passthrough upstream; see L<Langertha::Knarr/auth_token>.
 
 =cut
 

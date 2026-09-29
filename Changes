@@ -266,6 +266,14 @@ Revision history for Langertha-Knarr
       them with PAR::Packer; scripts/verify-binary.sh and
       scripts/check-binary-libs.sh smoke-test them.
 
+    - Security fix: Knarr's own proxy key (proxy_api_key, KNARR_API_KEY)
+      no longer reaches a passthrough upstream. The header that carried it,
+      Authorization: Bearer or x-api-key, is dropped from the request to
+      the upstream, on the raw passthrough and through the Passthrough
+      handler, on the native server and under PSGI. Every other header is
+      forwarded as before, so a passthrough client sends its own provider
+      key in the other header.
+
 
 1.101     2026-08-15 00:13:51Z
 

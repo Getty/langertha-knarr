@@ -357,8 +357,12 @@ Clients must send `Authorization: Bearer my-secret-proxy-key` or
 A2A discovery endpoint (`/.well-known/agent.json`) stays anonymous so agent
 clients can introspect. In a config file the key is `proxy_api_key:`.
 
-Passthrough requests forward every client header to the upstream
-unchanged, the one carrying the proxy key included.
+The proxy key never leaves Knarr: a passthrough request reaches the
+upstream without the header that carried it. Every other header goes
+through unchanged, so a passthrough client sends its own provider key in
+the other one — with the proxy key in `x-api-key`, the OpenAI key (or
+Claude Code's login) as `Authorization: Bearer`; with the proxy key as
+`Authorization: Bearer`, the Anthropic key in `x-api-key`.
 
 ## API Formats
 
