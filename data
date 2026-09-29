@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-29T17:27:07Z
+claimed_by: knarr-worker-a2a
+class: standard
+completed: 2026-09-29T17:27:07Z
+created: 2026-09-29T17:15:48Z
+id: 42
+priority: medium
+started: 2026-09-29T17:15:56Z
+status: done
+tags:
+- routing
+- a2a
+- bug
+title: 'A2A/ACP ohne Modell: Default-Engine bekommt Modellnamen ''default'' statt
+  ihres konfigurierten model:'
+updated: 2026-09-29T17:27:14Z
+---
+
+Fund aus k41: A2A-Requests tragen kein Modell, also wird die default engine mit model name "default" aufgerufen. Der Router ueberschreibt das eigene model: der default engine mit dem angefragten Namen -> ein echter OpenAI-Upstream lehnt das vermutlich ab. Bestand schon vor k41, mit und ohne Passthrough. Erwartet: fehlt das Modell im Request (bzw. ist es der Platzhalter), nimmt die default engine ihr konfiguriertes model:. Erst reproduzieren (Handler::Code-Fake, der den Modellnamen prueft), dann fixen.
+
+2026-09-29 17:17 Cause: Handler::Router::_resolve substitutes 'default' for a missing request model; Router::resolve's default-engine fallback then sets model => $model_name, overriding default:'s own model:. Model-less requests: A2A always (parse sets no model), ACP without agent_name, AG-UI without model, OpenAI/Anthropic/Ollama body without model. Plan: Router::resolve accepts no model name when a default engine exists and uses its configured model (else provider default, alias_only); Handler::Router stops inventing 'default'. A named model still overrides default:'s model (t/20-router.t 'model name passed through').
+
+2026-09-29 17:25 Done: a request without a model no longer reaches the default engine as model 'default'. Router::resolve accepts no model name: with a default engine it answers as configured (default:'s model:, else provider default via alias_only), without one croaks 'No model specified'; skip_default + no name returns (). A named model still overrides default:'s model: (t/20-router.t 'model name passed through', unchanged). Handler::Router::_resolve no longer invents the 'default' placeholder; model_not_found message reads 'The request names no model...' when none. POD: Router resolve, Handler::Router DESCRIPTION, Config default_engine. Verified: new t/90_default_engine_model.t (35 tests: Router unit + A2A/ACP/AG-UI/OpenAI model-less via real protocol parsers, sync + stream, default with/without model:, with a passthrough not serving the protocol) red before (engine got 'sent as default') and green after; full prove -l t/ green (49 files, 2393 tests; t/65 skipped as before: unreleased core Manifest::Builder). Not committed.
+
+2026-09-29 17:27 Committed 92427e6
