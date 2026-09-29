@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-29T17:26:53Z
+claimed_by: knarr-worker-bugs
+class: standard
+completed: 2026-09-29T17:26:53Z
+created: 2026-09-29T16:51:30Z
+id: 41
+priority: high
+started: 2026-09-29T16:51:44Z
+status: done
+tags:
+- routing
+- passthrough
+- bug
+title: Raw passthrough ueberspringt default engine auch fuer Protokolle ohne Upstream
+  (Ollama/A2A/ACP/AG-UI sterben)
+updated: 2026-09-29T17:27:00Z
+---
+
+Aus Doku-Audit: Mit raw_passthrough gesetzt geht jedes unkonfigurierte Modell an raw passthrough egal welches Protokoll (Knarr.pm:757; Router.pm:496 skip_default => 1). Ollama/A2A/ACP/AG-UI-Requests landen in Handler/Passthrough.pm _upstream_url ohne Upstream und sterben (Passthrough.pm:116). Unter --from-env mit OPENAI_API_KEY wird default: OpenAI dadurch nie benutzt. Config.pm POD (262-264) verspricht: default_engine greift wenn nicht explizit konfiguriert UND keine passthrough-URL passt. Erwartet: raw passthrough nur wenn fuer das Client-Protokoll ein Upstream existiert, sonst default engine; ohne beides sauberer Fehler im Protokoll-Shape statt die. Erst reproduzieren (Test), dann fixen. Passthrough-Bytes-Pfad selbst nicht anfassen.
+
+2026-09-29 17:01 Reproduced in t/89_passthrough_protocol_fallback.t (native + PSGI, key-free local upstream, Tracing decorator in chain): Ollama/Anthropic-without-upstream/A2A/ACP/AG-UI unknown models died in Passthrough::_upstream_url -> 500. Fix: Handler::Passthrough->serves_protocol; Knarr::_is_raw_passthrough requires it; Handler::Router::_resolve only skips the default engine when the passthrough serves the request protocol, else default engine, else Future::Exception category model_not_found -> Knarr answers 404 in protocol error shape (_handler_failure_answer/_stream_failure_frame, renamed from _handler_timeout_answer/_stream_timeout_frame; PSGI shares it). Streaming: an already-failed handle_stream_f is answered before the 200 header. Byte-piping path untouched.
+
+2026-09-29 17:15 Done: raw passthrough only when Handler::Passthrough->serves_protocol(protocol) (new); Handler::Router skips the default engine only when its passthrough serves the request protocol, else default engine, else fails Future::Exception category model_not_found -> Knarr (native + PSGI) answers 404 in the protocol error shape (_handler_failure_answer/_stream_failure_frame replace _handler_timeout_answer/_stream_timeout_frame); a stream whose handle_stream_f already failed is answered before the 200 header. Passthrough byte path untouched. Verified: t/89_passthrough_protocol_fallback.t (104 tests: openai/anthropic/ollama/a2a/acp/agui, sync+stream, native+PSGI, 3 wirings; red before, green after), streaming tests 40/41/87 green, full prove -l t/ green. Drift (not fixed): A2A carries no model, so the default engine gets model 'default' (Router::resolve overrides the default: model with the requested name) -> real OpenAI would 404; pre-existing, also without passthrough. Not committed.
+
+2026-09-29 17:27 Committed e843875
