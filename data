@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-29T18:12:20Z
+claimed_by: knarr-worker-fix2
+class: standard
+completed: 2026-09-29T18:12:15Z
+created: 2026-09-29T17:42:13Z
+id: 46
+priority: medium
+started: 2026-09-29T17:43:49Z
+status: done
+tags:
+- cli
+- passthrough
+- cleanup
+title: 'Kleinkram aus k43: start --help Texte, container-Alias, /api/generate passthrough-Pfad,
+  PSGI FakeReq Paket'
+updated: 2026-09-29T18:12:20Z
+---
+
+Aus k43: (a) knarr start --help Optionstexte falsch: -p default 8080 11434, -H default 0.0.0.0, -w worker processes (-w wirkt nicht; -H/-p nur zusammen). (b) knarr container (deprecated Docker-Alias) nimmt keine Optionen (-p abgelehnt) und bindet 127.0.0.1 -- als Docker-Alias unbrauchbar. (c) Raw passthrough von Ollama /api/generate schickt den generate-Body an upstream /api/chat (ein Pfad pro Protokoll). (d) PSGI.pm enthaelt zweites Paket Langertha::Knarr::PSGI::FakeReq (MetaProvides-Warnung, one-package-per-file).
+
+2026-09-29 17:50 Done. (a) Start.pm -p/-H/-w doc strings now say: -p replaces listen: (default the config listen:), -H no effect without -p, -w without effect. (b) knarr container = the image's own command: start --from-env on 0.0.0.0:8080 + 0.0.0.0:11434 (new start_command method), still no options of its own; docs README/CLAUDE.md/bin/knarr/Container POD. (c) Handler::Passthrough::_upstream_url takes the client path; Ollama /api/generate goes to upstream /api/generate on the raw passthrough (native + PSGI), bytes unchanged. (d) FakeReq moved to lib/Langertha/Knarr/PSGI/FakeReq.pm with own VERSION/ABSTRACT, added to 00-load. Tests: t/93_generate_passthrough_path.t, t/75_cli_options.t (container + start --help) — red on HEAD, green now; streaming 40/41 green. Also found (not fixed, out of scope): on the routed path /api/generate is answered in /api/chat shape (message, not response), and Handler::Passthrough in the chain also sends a generate body to /api/chat and parses message.content.
+
+2026-09-29 18:12 Committed as 2f1d9e7
