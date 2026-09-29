@@ -169,14 +169,15 @@ sub _handle_psgi {
   my $handler = $sb->handler;
 
   # An upstream timeout in the handler chain answers 504 in the protocol's
-  # error shape, as the native server does (k36). A buffered stream has sent
-  # nothing yet, so it gets the same answer, like the raw passthrough under
-  # this adapter. Any other failure dies as before.
+  # error shape, as the native server does (k36), a model nothing serves
+  # 404 (k41). A buffered stream has sent nothing yet, so it gets the same
+  # answer, like the raw passthrough under this adapter. Any other failure
+  # dies as before.
   my @answer;
-  my $timed_out = sub {
+  my $answered = sub {
     my ($e) = @_;
     return 0 unless ref $e && eval { $e->isa('Future::Exception') };
-    @answer = $sb->_handler_timeout_answer( $proto, $e->message, $e->category );
+    @answer = $sb->_handler_failure_answer( $proto, $e->message, $e->category );
     return scalar @answer;
   };
   # A read the upstream has not fed yet is a plain pending Future (the
@@ -203,7 +204,7 @@ sub _handle_psgi {
       $out;
     };
     if ( my $e = $@ ) {
-      return [ $answer[0], [ 'Content-Type' => $answer[1] ], [ $answer[2] ] ] if $timed_out->($e);
+      return [ $answer[0], [ 'Content-Type' => $answer[1] ], [ $answer[2] ] ] if $answered->($e);
       die $e;
     }
     return [ 200, [ 'Content-Type' => $proto->stream_content_type ], [ $out ] ];
@@ -211,7 +212,7 @@ sub _handle_psgi {
 
   my $response = eval { $get->( $handler->handle_chat_f( $session, $sb_req ) ) };
   if ( my $e = $@ ) {
-    return [ $answer[0], [ 'Content-Type' => $answer[1] ], [ $answer[2] ] ] if $timed_out->($e);
+    return [ $answer[0], [ 'Content-Type' => $answer[1] ], [ $answer[2] ] ] if $answered->($e);
     die $e;
   }
   my ($status, $headers, $obody) = $proto->format_chat_response( $response, $sb_req );

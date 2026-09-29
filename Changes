@@ -235,6 +235,16 @@ Revision history for Langertha-Knarr
     - Dashed long options work in every position: knarr start --from-env
       --log-file x.jsonl no longer fails with "Unknown option: log-file".
 
+    - Raw passthrough only takes a request when an upstream exists for the
+      client's protocol. An unconfigured model in any other protocol
+      (Ollama without an ollama upstream, A2A, ACP, AG-UI) goes to the
+      default engine, so default: under --from-env works again.
+
+    - A model nothing can serve (not configured, no passthrough for the
+      protocol, no default engine) is answered with 404 in the client
+      protocol's error shape instead of a 500 carrying a Perl error;
+      streaming requests get the 404 before the stream starts.
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

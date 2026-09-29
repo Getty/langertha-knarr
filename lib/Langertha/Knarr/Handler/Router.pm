@@ -4,6 +4,7 @@ our $VERSION = '1.102';
 use Moose;
 use Future;
 use Future::AsyncAwait;
+use Future::Exception;
 use Langertha::Knarr::Stream;
 use Langertha::Knarr::Response;
 
@@ -31,9 +32,10 @@ with 'Langertha::Knarr::Handler';
 Resolves incoming model names against a L<Langertha::Knarr::Router>
 (which knows your C<knarr.yaml>) and dispatches to the matched
 L<Langertha::Engine>. When a passthrough fallback handler is supplied,
-unknown model names tunnel through to it instead of failing — this
-preserves the classic Knarr behaviour where configured models go via
-Langertha and everything else passes straight to the upstream API.
+unknown model names in a protocol it serves tunnel through to it instead
+of falling back to the default engine — this preserves the classic Knarr
+behaviour where configured models go via Langertha and everything else
+passes straight to the upstream API.
 
 Non-streaming answers are labeled with the configured model. For a model
 config without a C<model> key the provider's default answers, so the
@@ -51,7 +53,15 @@ Required. A L<Langertha::Knarr::Router> instance.
 =attr passthrough
 
 Optional. Any L<Langertha::Knarr::Handler> consumer used as a fallback
-when the router can't resolve a model.
+when the router can't resolve a model. A handler with a C<serves_protocol>
+method (L<Langertha::Knarr::Handler::Passthrough>) only gets requests in the
+protocols it can forward; an unknown model in any other protocol goes to the
+default engine instead.
+
+When the router can't resolve a model, no passthrough serves the request's
+protocol and there is no default engine, the handler fails with the
+category C<model_not_found>; L<Langertha::Knarr> answers that with a C<404>
+in the client protocol's error shape.
 
 =cut
 
@@ -71,24 +81,41 @@ has passthrough => (
   default => sub { undef },
 );
 
+# The engine for a request, or () when it goes to the passthrough. Unknown
+# models go to the passthrough only when it can forward the client's
+# protocol; otherwise to the default engine (k41). With neither, the
+# failure carries the category 'model_not_found', which Knarr answers as a
+# 404 in the client protocol's error shape.
 sub _resolve {
-  my ($self, $model) = @_;
-  $model //= 'default';
-  if ($self->passthrough) {
+  my ($self, $request) = @_;
+  my $model  = $request->model // 'default';
+  my $router = $self->router;
+  if ( $self->_passthrough_serves( $request->protocol ) ) {
     # With passthrough: try without default engine first so unknown models
     # go to passthrough instead of being routed to the default engine.
-    my @r = eval { $self->router->resolve($model, skip_default => 1) };
+    my @r = eval { $router->resolve($model, skip_default => 1) };
     return @r if @r;
     return ();  # not found or error → passthrough
   }
-  my @r = eval { $self->router->resolve($model) };
-  return @r unless $@;
-  die $@;
+  my @r = $router->resolve($model, skip_default => 1);
+  return @r if @r;
+  return $router->resolve($model) if $router->config->default_engine;
+  die Future::Exception->new(
+    ( defined $model && length $model ? "Model '$model' is not configured" : 'The request names no model' )
+    . ' and there is no default engine'
+    . ( $self->passthrough ? ' (no passthrough upstream for '.$request->protocol.')' : '' ),
+    'model_not_found' );
+}
+
+sub _passthrough_serves {
+  my ($self, $protocol) = @_;
+  my $pt = $self->passthrough or return 0;
+  return $pt->can('serves_protocol') ? $pt->serves_protocol($protocol) : 1;
 }
 
 async sub handle_chat_f {
   my ($self, $session, $request) = @_;
-  my ($engine, $canonical_model, $alias_only) = $self->_resolve( $request->model );
+  my ($engine, $canonical_model, $alias_only) = $self->_resolve($request);
   unless ( $engine ) {
     return Langertha::Knarr::Response->coerce(
       await $self->passthrough->handle_chat_f( $session, $request )
@@ -108,7 +135,7 @@ async sub handle_chat_f {
 
 async sub handle_stream_f {
   my ($self, $session, $request) = @_;
-  my ($engine) = $self->_resolve( $request->model );
+  my ($engine) = $self->_resolve($request);
 
   unless ( $engine ) {
     return await $self->passthrough->handle_stream_f( $session, $request );

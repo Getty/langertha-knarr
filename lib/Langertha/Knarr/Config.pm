@@ -302,7 +302,11 @@ has default_engine => (
 
 HashRef from the C<default:> config section, or C<undef> if not set. At
 minimum contains C<engine>. Used as the fallback when a model name is not
-explicitly configured and no passthrough URL matches.
+explicitly configured and no passthrough URL matches -- that is, no
+L</passthrough> upstream exists for the protocol the client speaks (Ollama
+without an C<ollama> entry, and A2A, ACP and AG-UI always). Without a
+default engine such a request is answered with C<404> in the client
+protocol's error shape.
 
 =cut
 

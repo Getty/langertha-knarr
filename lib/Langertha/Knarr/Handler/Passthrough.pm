@@ -121,6 +121,26 @@ sub _upstream_url {
   return "$base$path";
 }
 
+# Whether a request in this protocol has anywhere to go: an upstream URL
+# and a known chat path -- exactly what _upstream_url needs (k41).
+sub serves_protocol {
+  my ($self, $protocol_name) = @_;
+  return 0 unless defined $protocol_name;
+  return $self->upstreams->{$protocol_name} && $DEFAULT_PATH{$protocol_name} ? 1 : 0;
+}
+
+=method serves_protocol
+
+    next unless $passthrough->serves_protocol( $request->protocol );
+
+True when this handler can forward a request of the given protocol: an
+upstream is configured for it and the protocol has a known chat path
+(C<openai>, C<anthropic>, C<ollama>). L<Langertha::Knarr> and
+L<Langertha::Knarr::Handler::Router> only send a request to the passthrough
+when this is true; any other request goes to the default engine instead.
+
+=cut
+
 sub _build_upstream_request {
   my ($self, $request, $force_stream) = @_;
   my $body = { %{ $request->raw || {} } };

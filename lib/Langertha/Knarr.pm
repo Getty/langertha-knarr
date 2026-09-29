@@ -185,6 +185,18 @@ Optional public base URL (e.g. C<https://knarr.example>) used in the
 provider manifest. When unset, the base URL is taken from the request
 (C<Host>, and C<X-Forwarded-Proto> when it is C<http> or C<https>).
 
+=attr raw_passthrough
+
+Optional L<Langertha::Knarr::Handler::Passthrough>. Together with a
+L</router>, a chat request for a model the router does not configure is
+piped byte for byte to the upstream for the client's protocol, bypassing
+the handler chain -- but only when that protocol has an upstream
+(L<Langertha::Knarr::Handler::Passthrough/serves_protocol>). A request in
+any other protocol (Ollama without an C<ollama> upstream, A2A, ACP, AG-UI)
+goes through the handler, where L<Langertha::Knarr::Handler::Router> hands
+it to the default engine, or answers C<404> in the protocol's error shape
+when there is none.
+
 =method start
 
     $knarr->start;
@@ -573,7 +585,7 @@ sub _action_chat {
   $f->on_fail( sub {
     my ($err, $category) = @_;
     $log->errorf("Chat handler error: %s", $err);
-    if ( my @answer = $self->_handler_timeout_answer( $proto, $err, $category ) ) {
+    if ( my @answer = $self->_handler_failure_answer( $proto, $err, $category ) ) {
       return $self->_send_simple( $req, @answer );
     }
     $self->_send_simple( $req, 500, 'application/json',
@@ -584,6 +596,16 @@ sub _action_chat {
 
 sub _handle_stream {
   my ($self, $proto, $req, $sb_req, $session, $handler) = @_;
+
+  # A handler that refuses the request outright (no route for the model,
+  # k41) has failed before any stream exists: answer it like a
+  # non-streaming request, before the stream's 200 goes out.
+  my $f = $handler->handle_stream_f( $session, $sb_req );
+  if ( $f->is_failed ) {
+    if ( my @answer = $self->_handler_failure_answer( $proto, $f->failure ) ) {
+      return $self->_send_simple( $req, @answer );
+    }
+  }
 
   my $header = HTTP::Response->new( 200 );
   $header->protocol('HTTP/1.1');
@@ -598,7 +620,6 @@ sub _handle_stream {
     $req->write_chunk( $bytes );
   };
 
-  my $f = $handler->handle_stream_f( $session, $sb_req );
   $f->on_done( sub {
     my ($stream) = @_;
     $write->( $proto->format_stream_open($sb_req) );
@@ -626,7 +647,7 @@ sub _handle_stream {
         my ($err, $category) = @_;
         $log->errorf("Stream chunk error: %s", $err);
         undef $pump;
-        return if $self->_stream_timeout_frame( $proto, $req, $err, $category );
+        return if $self->_stream_failure_frame( $proto, $req, $err, $category );
         $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
         $write->( $proto->format_stream_close($sb_req) );
         $req->write_chunk_eof;
@@ -639,32 +660,44 @@ sub _handle_stream {
   $f->on_fail( sub {
     my ($err, $category) = @_;
     $log->errorf("Stream handler error: %s", $err);
-    return if $self->_stream_timeout_frame( $proto, $req, $err, $category );
+    return if $self->_stream_failure_frame( $proto, $req, $err, $category );
     $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
     $req->write_chunk_eof;
   });
   $f->retain;
 }
 
-# A handler failure carrying a Net::Async::HTTP timeout category (the second
-# failure value: core's k278 engine timeouts, the UpstreamHTTP role's) is an
-# upstream that did not answer in time: 504 in the client protocol's error
-# shape, as on the raw passthrough (k35). Empty for any other failure, and
-# for a core that sets no category (k36).
-sub _handler_timeout_answer {
+# The status a handler failure answers with, from its category (the second
+# failure value). A Net::Async::HTTP timeout category (core's k278 engine
+# timeouts, the UpstreamHTTP role's) is an upstream that did not answer in
+# time: 504, as on the raw passthrough (k35, k36). 'model_not_found' is
+# Handler::Router finding nothing to serve the model -- not configured, no
+# passthrough for the protocol, no default engine: 404 (k41). Undef for any
+# other failure, and for a core that sets no category.
+sub _handler_failure_status {
+  my ($self, $category) = @_;
+  return 504 if Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
+  return 404 if defined $category && $category eq 'model_not_found';
+  return;
+}
+
+# That status in the client protocol's error shape. Empty for a failure
+# without one.
+sub _handler_failure_answer {
   my ($self, $proto, $err, $category) = @_;
-  return unless Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
-  my ($status, $headers, $body) = $proto->format_error_response( 504, _error_text($err) );
+  my $code = $self->_handler_failure_status($category) or return;
+  my ($status, $headers, $body) = $proto->format_error_response( $code, _error_text($err) );
   return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
 # The same for a stream whose headers are out: the protocol's error frame,
-# then the end of the stream. False (nothing written) when the failure is no
-# timeout or the protocol has no error frame, so the caller answers as before.
-sub _stream_timeout_frame {
+# then the end of the stream. False (nothing written) when the failure has
+# no status or the protocol has no error frame, so the caller answers as
+# before.
+sub _stream_failure_frame {
   my ($self, $proto, $req, $err, $category) = @_;
-  return 0 unless Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
-  my $frame = $proto->format_stream_error( 504, _error_text($err) );
+  my $code = $self->_handler_failure_status($category) or return 0;
+  my $frame = $proto->format_stream_error( $code, _error_text($err) );
   return 0 unless length $frame;
   return 1 if $req->is_closed;
   $req->write_chunk($frame);
@@ -754,7 +787,12 @@ sub _handle_raw_passthrough {
 # native server streams chunks as they arrive, PSGI buffers.
 sub _is_raw_passthrough {
   my ($self, $sb_req) = @_;
-  return $self->raw_passthrough && $self->router
+  my $pt = $self->raw_passthrough;
+  # Only for a protocol the passthrough has an upstream for: a request in
+  # any other protocol goes through the handler chain, to the default
+  # engine or to a 404 in the protocol's error shape (k41).
+  return $pt && $self->router
+    && $pt->serves_protocol( $sb_req->protocol )
     && $self->router->is_passthrough_model( $sb_req->model ) ? 1 : 0;
 }
 
