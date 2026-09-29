@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-09-29T21:21:17Z
+claimed_by: knarr-worker-prefork
+class: standard
+completed: 2026-09-29T21:21:17Z
+created: 2026-09-29T20:15:27Z
+id: 51
+priority: medium
+started: 2026-09-29T20:24:56Z
+status: done
+tags:
+- cli
+- server
+- feature
+title: knarr start -w/--workers echt implementieren (Prefork, mehrere Worker-Prozesse)
+updated: 2026-09-29T21:21:21Z
+---
+
+Maintainer-Entscheidung 2026-09-29: -w/--workers (heute ohne Wirkung) echt implementieren. Mehrere Worker-Prozesse bedienen dieselben Listen-Sockets (Prefork: Parent bindet, forkt N Kinder mit je eigenem IO::Async-Loop; Parent ueberwacht, restartet gestorbene Kinder, reicht SIGTERM/SIGINT weiter). Default 1 = heutiges Verhalten (kein Fork). Beachten: auto_discover + capability probe nur einmal (Parent vor dem Fork oder ein Kind) statt N-mal; Langfuse-Tracing/RequestLog pro Prozess (JSONL-Appends atomar?); Sessions (Raider) sind pro Prozess -- dokumentieren; PSGI unberuehrt. Live-Test: Server mit -w 2 starten, Requests beantworten, beide PIDs antworten, sauberes Shutdown. Doku (--help, bin/knarr POD, README CLI, CLAUDE.md).
+
+2026-09-29 20:25 Started in worktree .claude/worktrees/agent-a3b29d318477b80b4 (branch worktree-agent-a3b29d318477b80b4, fast-forwarded to b9d54c8). Reading Knarr.pm server lifecycle + Start cmd.
+
+2026-09-29 20:31 Design: parent binds (today's listen code, split out of start), removes the servers from its loop, runs discovery (router->list_models) + the capability probe to completion (->get, bounded by probe_timeout) BEFORE forking so workers inherit results; then drops pooled Net::Async::HTTP connections (loop->remove/add closes the pool) so no worker shares a keep-alive socket with another; forks N via plain fork + loop->post_fork (NOT loop->fork: it undefs ONE_TRUE_LOOP and engines/tracing lazily build their client on IO::Async::Loop->new); plain-perl waitpid supervisor with TERM/INT forwarding and restart backoff 1..30s for workers dying <5s after start. Workers _exit. RequestLog JSONL -> single syswrite under flock on O_APPEND.
+
+2026-09-29 20:36 Implemented (Knarr.pm workers attr + run/_run_workers/_prepare_workers/_drop_upstream_connections/_fork_worker; start split into _listen + probe; Start.pm passes -w; RequestLog single syswrite). New t/97_workers_live.t green standalone (6 subtests: validation, -w1 no fork, -w2 two pids/restart/SIGTERM, probe+discovery once in supervisor before fork, pooled upstream conn dropped, CLI knarr start -w 2 via /proc). Docs updated (bin/knarr, README, CLAUDE.md, Start POD, --help test). Waiting on loadguard for mutation check + full suite.
+
+2026-09-29 20:49 Drift found, not fixed (for the dispatcher): 1) logging.dir per-request files are named ms-timestamp_format_model.json, so two workers finishing the same model in the same millisecond overwrite each other; 2) listen sockets use the IO::Async default backlog of 3 (no queuesize passed), tight for a server, and with more than one worker connections wait in it during the pre-fork probe; 3) no env or config knob for workers (KNARR_WORKERS or workers in knarr.yaml), so the Docker CMD cannot use it without overriding the command.
+
+2026-09-29 20:49 Done, uncommitted in worktree .claude/worktrees/agent-a3b29d318477b80b4 (branch worktree-agent-a3b29d318477b80b4, based on b9d54c8). Prefork: Knarr workers attr (default 1 means today's path unchanged), run forks N>1 after binding, discovery and the capability probe once in the supervisor; pooled Net::Async::HTTP connections are dropped before forking; workers post_fork and re-add the listeners; supervisor restarts dead workers (backoff 1 to 30s under 5s uptime), forwards TERM/INT, exits 0. RequestLog JSONL uses a single syswrite. Docs: Knarr POD, Start POD and --help, bin/knarr, README, CLAUDE.md. Verified: t/97_workers_live.t (6 subtests incl. CLI knarr start -w 2) and a mutation check (not awaiting the probe fails it); full prove -l t/ 56 files 2680 tests PASS.
+
+2026-09-29 21:01 Follow-ups done, card stays in review, still uncommitted. 1) logging.dir files are now timestamp_pid-seq_format_model.json (per-process counter); t/74 covers four same-ms requests across two processes. 2) All listen sockets ask for a SOMAXCONN backlog (128 fallback), -w 1 too; t/98_listen_backlog.t checks the requested queuesize and the kernel backlog via ss. 3) Config workers: plus KNARR_WORKERS (works under --from-env), -w wins; validate reports bad values; knarr start rejects bad -w / workers: / KNARR_WORKERS before the banner with exit 1; the container alias no longer pins workers=1 so KNARR_WORKERS applies there too. Docs: Config POD, README config+env tables+CLI, CLAUDE.md, example-config.yaml, .env.example, bin/knarr. Full prove -l t/: 57 files, 2709 tests PASS.
+
+2026-09-29 21:21 Committed as 2d11eea (worktree commit c4b7748, cherry-picked to main, Changes added)
