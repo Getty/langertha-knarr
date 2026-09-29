@@ -5,6 +5,7 @@ use Moose;
 use Future;
 use JSON::MaybeXS;
 use Langertha::Knarr::Request;
+use Langertha::Knarr::PSGI::FakeReq;
 
 =head1 SYNOPSIS
 
@@ -153,7 +154,7 @@ sub _handle_psgi {
   # stream under this adapter.
   if ( $sb->_is_raw_passthrough($sb_req) ) {
     my ($http_req, $trace) = $sb->_raw_passthrough_request(
-      $sb_req, [ $fake_http->headers ], $body );
+      $sb_req, [ $fake_http->headers ], $body, $path );
     # The failure as the future carries it, as the native on_fail sees it.
     # A buffered stream still gets the stall timeout, not the total one: a
     # long steady stream is legitimate (k35).
@@ -220,32 +221,5 @@ sub _handle_psgi {
   return [ $status, [ %$headers ], [ $obody ] ];
 }
 
-package Langertha::Knarr::PSGI::FakeReq;
-sub new {
-  my ($class, $env) = @_;
-  return bless { env => $env }, $class;
-}
-sub header {
-  my ($self, $name) = @_;
-  ( my $key = uc $name ) =~ tr/-/_/;
-  return $self->{env}{"HTTP_$key"};
-}
-# The request headers as [ name, value ] pairs, like
-# Net::Async::HTTP::Server::Request->headers. PSGI keeps only the CGI form
-# of a header name, so it comes back lower-cased with dashes (x-api-key).
-sub headers {
-  my ($self) = @_;
-  my $env = $self->{env};
-  my @pairs;
-  for my $key ( sort keys %$env ) {
-    my $name = $key =~ /\AHTTP_(.+)\z/ ? $1
-      : $key =~ /\A(CONTENT_TYPE)\z/ ? $1 : next;
-    ( $name = lc $name ) =~ tr/_/-/;
-    push @pairs, [ $name, $env->{$key} ];
-  }
-  return @pairs;
-}
-
-package Langertha::Knarr::PSGI;
 __PACKAGE__->meta->make_immutable;
 1;

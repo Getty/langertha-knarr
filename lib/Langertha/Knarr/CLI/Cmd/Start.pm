@@ -41,7 +41,7 @@ option port => (
   is      => 'ro',
   format  => 'i@',
   short   => 'p',
-  doc     => 'Port(s) to listen on, repeatable (default: 8080 11434)',
+  doc     => 'Port(s) to listen on, on the -H host; repeatable, replaces the config listen: (default: the config listen:, which defaults to 127.0.0.1:8080 and 127.0.0.1:11434)',
   default => sub { [] },
 );
 
@@ -49,7 +49,7 @@ option host => (
   is      => 'ro',
   format  => 's',
   short   => 'H',
-  doc     => 'Host to bind to (default: 0.0.0.0)',
+  doc     => 'Host the -p ports bind to, no effect without -p (default: 0.0.0.0)',
   default => '0.0.0.0',
 );
 
@@ -57,7 +57,7 @@ option workers => (
   is      => 'ro',
   format  => 'i',
   short   => 'w',
-  doc     => 'Number of worker processes (default: 1)',
+  doc     => 'Accepted, but without effect: Knarr runs as one process',
   default => 1,
 );
 

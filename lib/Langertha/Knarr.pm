@@ -218,8 +218,10 @@ provider manifest. When unset, the base URL is taken from the request
 
 Optional L<Langertha::Knarr::Handler::Passthrough>. Together with a
 L</router>, a chat request for a model the router does not configure is
-piped byte for byte to the upstream for the client's protocol, bypassing
-the handler chain -- but only when that protocol has an upstream
+piped byte for byte to the upstream for the client's protocol (an Ollama
+C</api/generate> to the upstream's C</api/generate>, any other Ollama chat
+to C</api/chat>), bypassing the handler chain -- but only when that
+protocol has an upstream
 (L<Langertha::Knarr::Handler::Passthrough/serves_protocol>). A request in
 any other protocol (Ollama without an C<ollama> upstream, A2A, ACP, AG-UI)
 goes through the handler, where L<Langertha::Knarr::Handler::Router> hands
@@ -780,7 +782,7 @@ sub _stream_failure_frame {
 sub _handle_raw_passthrough {
   my ($self, $proto, $req, $sb_req) = @_;
   my ($http_req, $trace) = $self->_raw_passthrough_request(
-    $sb_req, [ $req->headers ], $req->body );
+    $sb_req, [ $req->headers ], $req->body, $req->path );
   my $pt = $self->raw_passthrough;
   my $model = $sb_req->model // 'unknown';
 
@@ -868,14 +870,15 @@ sub _is_raw_passthrough {
     && $self->router->is_passthrough_model( $sb_req->model ) ? 1 : 0;
 }
 
-# $headers: the client's request headers as [ name, value ] pairs.
+# $headers: the client's request headers as [ name, value ] pairs; $path:
+# the path the client asked for (Ollama /api/chat or /api/generate, k46).
 sub _raw_passthrough_request {
-  my ($self, $sb_req, $headers, $body) = @_;
+  my ($self, $sb_req, $headers, $body, $path) = @_;
   my $model = $sb_req->model // 'unknown';
   my $protocol = $sb_req->protocol;
 
   # Build upstream URL from passthrough config
-  my $url = $self->raw_passthrough->_upstream_url($protocol);
+  my $url = $self->raw_passthrough->_upstream_url( $protocol, $path );
   my $http_req = HTTP::Request->new(POST => $url);
 
   # Forward all client headers except hop-by-hop / connection-specific

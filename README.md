@@ -936,9 +936,11 @@ knarr check                                Validate config file
   and `127.0.0.1:11434` unless `-l` says otherwise.
 - `-w` / `--workers` is accepted but currently has no effect: Knarr runs
   as a single process.
-- `knarr container` is a deprecated alias of `knarr start --from-env`. It
-  takes no options and so listens on loopback only; use
-  `knarr start --from-env -p 8080 -p 11434`.
+- `knarr container` is a deprecated alias of the Docker image's own
+  command, `knarr start --from-env -p 8080 -p 11434`: it always listens on
+  `0.0.0.0:8080` and `0.0.0.0:11434` and takes no options of its own (the
+  global `-c`/`-v` before it still apply). For other ports use
+  `knarr start --from-env -p ...`.
 
 ## Binary (no Perl needed)
 

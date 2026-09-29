@@ -32,6 +32,7 @@ my @modules = qw(
   Langertha::Knarr::Protocol::ACP
   Langertha::Knarr::Protocol::AGUI
   Langertha::Knarr::PSGI
+  Langertha::Knarr::PSGI::FakeReq
   Langertha::Knarr::CLI
   Langertha::Knarr::CLI::Cmd::Start
   Langertha::Knarr::CLI::Cmd::Models

@@ -48,7 +48,8 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Raw passthrough** (unknown model, protocol has a `passthrough:` upstream) pipes
   all HTTP bytes 1:1 to the upstream with the client's own headers/key — preserves
   tool_use, usage, cache_control. Traced, not request-logged. Only the header that
-  carried Knarr's own `proxy_api_key` is dropped (k44).
+  carried Knarr's own `proxy_api_key` is dropped (k44); Ollama `/api/generate` goes to
+  the upstream's `/api/generate` (k46).
 - `passthrough: true` = openai + anthropic only; ollama needs an explicit URL;
   A2A/ACP/AG-UI never pass through (k41).
 - `auto_discover` makes the provider's listed models *configured* → routed, not passed through.
@@ -97,7 +98,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Langertha::Knarr::CLI::Cmd::Models** — `knarr models`
 - **Langertha::Knarr::CLI::Cmd::Check** — `knarr check`
 - **Langertha::Knarr::CLI::Cmd::Init** — `knarr init` (env scanning, config generation)
-- **Langertha::Knarr::CLI::Cmd::Container** — deprecated alias of `start --from-env` (no options → loopback)
+- **Langertha::Knarr::CLI::Cmd::Container** — deprecated alias of `start --from-env -p 8080 -p 11434` (no options of its own, always `0.0.0.0`)
 - **Langertha::Knarr::CLI::Role::GlobalOptions** — `-c`/`-v` accepted after `start`/`check`/`models` too
 
 ### Streaming Formats

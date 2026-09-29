@@ -18,6 +18,7 @@ use Langertha::Knarr::CLI::Cmd::Start;
 use Langertha::Knarr::CLI::Cmd::Check;
 use Langertha::Knarr::CLI::Cmd::Models;
 use Langertha::Knarr::CLI::Cmd::Init;
+use Langertha::Knarr::CLI::Cmd::Container;
 no warnings 'redefine';
 for my $cmd (qw( Start Check Models Init )) {
   no strict 'refs';
@@ -28,7 +29,7 @@ for my $cmd (qw( Start Check Models Init )) {
       ? $self->config_file($chain) : $chain->[0]->config;
     $seen{verbose} = ( $self->can('verbose_enabled')
       ? $self->verbose_enabled($chain) : $chain->[0]->verbose ) ? 1 : 0;
-    for my $opt (qw( from_env log_file log_dir trace_name port format env_file output )) {
+    for my $opt (qw( from_env log_file log_dir trace_name port host format env_file output )) {
       $seen{$opt} = $self->$opt if $self->can($opt);
     }
     print encode_json( \%seen );
@@ -117,6 +118,30 @@ run_ok( [ 'init', '--env-file', '/nonexistent/.env', '-o', 'out.yaml' ],
 run_ok( [ 'start', '-n', 'my-trace-name', '-c', 'my-config.yaml' ],
   hash { field trace_name => 'my-trace-name'; field config => 'my-config.yaml'; etc },
   'dashes in option values are preserved' );
+
+# --- knarr container: the Docker image's own start (k46) ---
+
+run_ok( [ 'container' ],
+  hash { field cmd => 'start'; field from_env => 1; field port => [ 8080, 11434 ];
+    field host => '0.0.0.0'; etc },
+  'knarr container runs start --from-env -p 8080 -p 11434' );
+run_ok( [ '-c', 'k.yaml', 'container' ],
+  hash { field cmd => 'start'; field config => 'k.yaml'; etc },
+  'knarr -c FILE container keeps the global config' );
+
+# --- start --help describes what the options do (k46) ---
+{
+  my ( $out, $err, $exit ) = capture {
+    system $^X, ( map { '-I'.$_ } grep { !ref } @INC ), '-e',
+      'use Langertha::Knarr::CLI; Langertha::Knarr::CLI->new_with_cmd', '--', 'start', '--help';
+  };
+  ( my $help = $out . $err ) =~ s/\s+/ /g;   # usage wraps long lines
+  like( $help, qr/-p --port.*replaces the config listen:/, 'start --help: -p replaces listen:' );
+  like( $help, qr/-H --host.*no effect without -p/, 'start --help: -H needs -p' );
+  like( $help, qr/-w --workers: Int Accepted, but without effect/, 'start --help: -w has no effect' );
+  unlike( $help, qr/Number of worker processes/, 'start --help: no worker-process promise' );
+  unlike( $help, qr/default: 8080 11434/, 'start --help: no wrong -p default' );
+}
 
 # --- unknown options still fail loudly ---
 {

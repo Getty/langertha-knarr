@@ -48,7 +48,9 @@ keys once, point everything at me" use case.
 
 Required. HashRef mapping protocol name (C<openai>, C<anthropic>,
 C<ollama>) to upstream base URL. The protocol's default chat path is
-appended.
+appended (C</v1/chat/completions>, C</v1/messages>, C</api/chat>); the raw
+passthrough of L<Langertha::Knarr> sends an Ollama C</api/generate> request
+to the upstream's C</api/generate>.
 
 =attr default_auth
 
@@ -111,13 +113,24 @@ my %DEFAULT_PATH = (
   ollama    => '/api/chat',
 );
 
+# Other chat paths a protocol has upstream, reached as the client asked:
+# Ollama's /api/generate takes a prompt, not messages, and answers in its
+# own shape, so its bytes must reach the upstream's /api/generate (k46).
+my %OTHER_PATHS = (
+  ollama => { '/api/generate' => 1 },
+);
+
+# $client_path: the path the client asked for; used when it is one of the
+# protocol's chat paths, else the protocol's default chat path.
 sub _upstream_url {
-  my ($self, $protocol_name) = @_;
+  my ($self, $protocol_name, $client_path) = @_;
   my $base = $self->upstreams->{$protocol_name}
     or die "Passthrough: no upstream configured for protocol '$protocol_name'\n";
   $base =~ s{/+$}{};
   my $path = $DEFAULT_PATH{$protocol_name}
     or die "Passthrough: no default path for protocol '$protocol_name'\n";
+  $path = $client_path
+    if defined $client_path && $OTHER_PATHS{$protocol_name}{$client_path};
   return "$base$path";
 }
 

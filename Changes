@@ -279,6 +279,14 @@ Revision history for Langertha-Knarr
       engine works with a plain OPENAI_API_KEY instead of failing for want
       of LANGERTHA_OPENAI_API_KEY.
 
+    - knarr container works again as the deprecated Docker alias: it runs
+      knarr start --from-env -p 8080 -p 11434 and listens on 0.0.0.0:8080
+      and 0.0.0.0:11434. An Ollama /api/generate request on the raw
+      passthrough now reaches the upstream's /api/generate instead of
+      /api/chat. knarr start --help describes -p, -H and -w as they
+      behave. The PSGI request wrapper is now a module of its own,
+      Langertha::Knarr::PSGI::FakeReq.
+
 
 1.101     2026-08-15 00:13:51Z
 

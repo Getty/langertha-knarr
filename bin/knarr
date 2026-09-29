@@ -50,9 +50,9 @@ C<--log_file>) in any position.
 
 =item B<check> — Validate the config file and report configuration status
 
-=item B<container> — Deprecated alias for C<start --from-env> that takes no
-options and therefore listens on loopback only; use
-C<start --from-env -p 8080 -p 11434>
+=item B<container> — Deprecated alias for C<start --from-env -p 8080 -p 11434>,
+the Docker image's own command: always C<0.0.0.0:8080> and C<0.0.0.0:11434>,
+no options of its own; for other ports use C<start --from-env -p ...>
 
 =back
 
