@@ -179,11 +179,14 @@ my ( $knarr, $port, $router ) = start_knarr( config => surface_config() );
   my $gpt_anthropic = model_entry( $data, 'gpt-alias', 'anthropic' )->{capabilities};
   ok $gpt_anthropic->{tools_native}, 'gpt-alias on anthropic: tools are forwarded';
   ok !$gpt_anthropic->{$_}, "gpt-alias on anthropic: $_ is not forwarded, not claimed"
-    for qw( response_format_json_schema response_format_json_object reasoning_effort seed prompt_cache_key );
+    for qw( response_format_json_schema response_format_json_object seed prompt_cache_key );
   my $gpt_ollama = model_entry( $data, 'gpt-alias', 'ollama' )->{capabilities};
   ok !$gpt_ollama->{$_}, "gpt-alias on ollama: $_ is not forwarded, not claimed"
     for qw( tool_choice_named tool_choice_auto response_format_json_schema response_size );
   ok $gpt_ollama->{$_}, "gpt-alias on ollama: $_ is forwarded" for qw( tools_native temperature );
+  # thinking / think arrive as reasoning_effort (k13).
+  ok $gpt_anthropic->{reasoning_effort}, 'gpt-alias on anthropic: reasoning_effort is forwarded';
+  ok $gpt_ollama->{reasoning_effort}, 'gpt-alias on ollama: reasoning_effort is forwarded';
 
   no_leaks( $body, 'native' );
 }

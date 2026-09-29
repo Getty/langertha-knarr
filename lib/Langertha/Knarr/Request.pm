@@ -40,7 +40,9 @@ extracted them. C<tool_choice> and C<response_format> are passed to
 L<Langertha::Engine> via C<chat_f> in their canonical form; Langertha
 normalizes them to the target engine's wire format. C<reasoning_effort>
 is the per-request reasoning effort (e.g. C<low>/C<medium>/C<high>),
-capability-gated like the other generation parameters.
+capability-gated like the other generation parameters. The OpenAI face
+carries it natively; the Anthropic face's C<thinking> and the Ollama face's
+C<think> are mapped onto it by L<Langertha::Knarr::Reasoning>.
 
 C<seed>, C<parallel_tool_use> and C<prompt_cache_key> are further
 per-request controls, each extracted by a protocol parser only where the

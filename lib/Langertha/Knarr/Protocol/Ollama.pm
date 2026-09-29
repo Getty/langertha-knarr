@@ -36,6 +36,7 @@ use POSIX qw( strftime );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::Response;
 use Langertha::Knarr::Image;
+use Langertha::Knarr::Reasoning;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -48,6 +49,23 @@ with 'Langertha::Knarr::Protocol';
 # ----------------------
 
 has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canonical => 1 ) } );
+
+has reasoning => (
+  is      => 'ro',
+  isa     => 'Langertha::Knarr::Reasoning',
+  lazy    => 1,
+  builder => '_build_reasoning',
+);
+
+sub _build_reasoning { Langertha::Knarr::Reasoning->new }
+
+=attr reasoning
+
+The L<Langertha::Knarr::Reasoning> that maps the body's C<think> (a boolean
+or a level string) onto the request's C<reasoning_effort>. Pass your own to
+override the level C<think: true> maps to.
+
+=cut
 
 sub protocol_name { 'ollama' }
 
@@ -73,7 +91,7 @@ sub manifest_endpoint {
       chat streaming system_prompt
       tools_native tools_hermes
       response_format_json_object
-      temperature seed
+      temperature seed reasoning_effort
       image_input
     )],
     # A message's images array becomes Langertha::Content::Image objects
@@ -108,6 +126,7 @@ sub parse_chat_request {
     stream          => exists $data->{stream} ? ( $data->{stream} ? 1 : 0 ) : 1,  # Ollama defaults to stream
     temperature     => $data->{options}{temperature},
     seed            => $data->{options}{seed},
+    reasoning_effort => scalar $self->reasoning->from_ollama( $data->{think}, $data->{reasoning_effort} ),
     tools           => $data->{tools},
     response_format => $data->{format},
   );

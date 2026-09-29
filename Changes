@@ -214,6 +214,20 @@ Revision history for Langertha-Knarr
       overhead, unlike the engine-measured non-streaming path. An empty
       or failed stream records no timing.
 
+    - The Anthropic and Ollama faces now forward a client's thinking
+      request on the routed path. Anthropic thinking (disabled: none,
+      adaptive or enabled without a budget: medium, budget_tokens: the
+      nearest level of Langertha's BudgetPolicy for the model) and Ollama
+      think (false: none, true: medium, a level string as sent) become the
+      request's reasoning_effort, capability-gated like the OpenAI field;
+      an explicit reasoning_effort or output_config.effort wins. The
+      default level and budget anchors are overridable through the
+      protocol's reasoning attribute (Langertha::Knarr::Reasoning).
+      budget_tokens needs a Langertha with
+      Langertha::Reasoning::BudgetPolicy; older ones leave it unmapped.
+      The manifest's anthropic and ollama endpoints now claim
+      reasoning_effort.
+
 1.101     2026-08-15 00:13:51Z
 
     - Fixed: the routed path died on any real engine response that

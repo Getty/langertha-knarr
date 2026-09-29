@@ -24,6 +24,7 @@ use Time::HiRes qw( time );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::Response;
 use Langertha::Knarr::Image;
+use Langertha::Knarr::Reasoning;
 
 with 'Langertha::Knarr::Protocol';
 
@@ -49,6 +50,23 @@ has _json => ( is => 'ro', default => sub { JSON::MaybeXS->new( utf8 => 1, canon
 # UTF-8, so they are encoded to characters here, not to bytes.
 has _args_json => ( is => 'ro', default => sub { JSON::MaybeXS->new( canonical => 1 ) } );
 
+has reasoning => (
+  is      => 'ro',
+  isa     => 'Langertha::Knarr::Reasoning',
+  lazy    => 1,
+  builder => '_build_reasoning',
+);
+
+sub _build_reasoning { Langertha::Knarr::Reasoning->new }
+
+=attr reasoning
+
+The L<Langertha::Knarr::Reasoning> that maps the body's C<thinking> (and an
+explicit C<output_config.effort>) onto the request's C<reasoning_effort>.
+Pass your own to override its default level or budget anchors.
+
+=cut
+
 sub protocol_name { 'anthropic' }
 
 sub protocol_routes {
@@ -60,8 +78,8 @@ sub protocol_routes {
 # Provider manifest (k14): anthropic-compat, not anthropic. parse_chat_request
 # below carries tools and tool_choice but not output_config.format, so a
 # client must do structured output the shim way (synthetic tool + forced
-# tool_choice). Nor are thinking, cache_control or disable_parallel_tool_use
-# forwarded.
+# tool_choice). thinking and output_config.effort arrive as reasoning_effort
+# (k13); cache_control and disable_parallel_tool_use are not forwarded.
 sub manifest_endpoint {
   return {
     dialect      => 'anthropic-compat',
@@ -70,7 +88,7 @@ sub manifest_endpoint {
       chat streaming system_prompt
       tools_native tools_hermes
       tool_choice_auto tool_choice_any tool_choice_none tool_choice_named
-      temperature response_size
+      temperature response_size reasoning_effort
       image_input
     )],
     # image blocks become Langertha::Content::Image objects (k33); an older
@@ -110,6 +128,7 @@ sub parse_chat_request {
     stream      => $data->{stream} ? 1 : 0,
     temperature => $data->{temperature},
     max_tokens  => $data->{max_tokens},
+    reasoning_effort => scalar $self->reasoning->from_anthropic($data),
     system      => $system_str,
     tools       => $data->{tools},
     tool_choice => $data->{tool_choice},
