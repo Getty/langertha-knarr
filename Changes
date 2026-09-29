@@ -306,7 +306,10 @@ Revision history for Langertha-Knarr
       configured under models:, and a request in a protocol without a
       passthrough upstream are still routed through their engine.
       Discovery still fills /v1/models, /api/tags, the manifest and the
-      capability probe.
+      capability probe. A model several endpoints list belongs to one
+      of them, the same on every run: the passthrough upstream first,
+      else the first by model config name; the others are logged at
+      debug level.
 
     - Ollama's /api/generate answers in Ollama's generate shape on the
       routed path as well: the text on response, streaming and

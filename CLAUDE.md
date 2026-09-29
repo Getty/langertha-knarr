@@ -59,6 +59,8 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
   when the client protocol's upstream is the endpoint that listed it (same
   scheme/host/port/path, trailing `/v1` ignored -- k54, `Passthrough::same_upstream`;
   `Router::discovered_url` + `Passthrough::is_upstream_for`), else it is routed (k47, k54).
+  An id several endpoints list belongs to the passthrough upstream's endpoint, else the
+  first by config name; collisions logged at debug (k55).
   Models under `models:` are always routed.
 - No model in the request (A2A always, ACP w/o `agent_name`) → default engine with its
   own `model:` (k42). Nothing can serve → 404 in the protocol's error shape.

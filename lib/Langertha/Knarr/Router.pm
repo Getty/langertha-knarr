@@ -8,6 +8,7 @@ use Scalar::Util qw( blessed refaddr );
 use Future;
 use Future::Utils qw( fmap_void );
 use Langertha ();
+use Langertha::Knarr::Handler::Passthrough;
 
 =head1 SYNOPSIS
 
@@ -33,6 +34,13 @@ C<LangerthaX::Engine::*>.
 When C<auto_discover> is enabled in the config, the router queries each
 configured endpoint (engine, URL and API key variable) for its full model list on first use, making all discovered
 models available as routing targets.
+
+A model id several endpoints list belongs to one of them, the same one on
+every run: an endpoint that is the passthrough upstream of some protocol
+(L<Langertha::Knarr::Config/passthrough>, compared with
+L<Langertha::Knarr::Handler::Passthrough/same_upstream>) before any other,
+then by model config name. The other endpoints listing it are logged at
+debug level.
 
 A discovered model is routed with the config of the model entry it was
 discovered through, minus the keys that describe that one model. The keys
@@ -284,19 +292,40 @@ sub _discover_models {
   my $models = $self->config->models;
   my %seen_endpoints;
 
-  for my $name (keys %$models) {
+  # One model config per endpoint, in a fixed order: an id several endpoints
+  # list belongs to the first (k55). Endpoints that are a passthrough
+  # upstream come first -- their models may pass through as the client sent
+  # them -- then the others, each group by model config name.
+  my ( @upstream, @other );
+  for my $name (sort keys %$models) {
     my $def = $models->{$name};
-    my $engine_class = $def->{engine};
     next if $seen_endpoints{ $self->_endpoint_key($def) }++;
+    my $engine = eval { $self->_get_engine($def, $name) };
+    unless ($engine) {
+      $log->debugf("Model discovery skipped for %s: %s", $def->{engine}, $@);
+      next;
+    }
+    push @{ $self->_is_passthrough_upstream($engine) ? \@upstream : \@other },
+      [ $name, $def, $engine ];
+  }
 
+  my %owner;
+  for my $endpoint (@upstream, @other) {
+    my ($name, $def, $engine) = @$endpoint;
+    my $engine_class = $def->{engine};
     eval {
-      my $engine = $self->_get_engine($def, $name);
       if ($engine->can('list_models')) {
         $log->debugf("Discovering models from %s", $engine_class);
         my $model_ids = $engine->list_models;
         for my $id (@$model_ids) {
           next if $models->{$id};
+          if ( my $first = $owner{$id} ) {
+            $log->debugf("Discovered model %s also listed by %s, stays with %s",
+              $id, $name, $first) if $first ne $name;
+            next;
+          }
           next if $self->_discovered_models->{$id};
+          $owner{$id} = $name;
           my %inherited = %$def;
           delete @inherited{@MODEL_SPECIFIC_KEYS};
           $self->_discovered_models->{$id} = {
@@ -316,6 +345,22 @@ sub _discover_models {
       $log->debugf("Model discovery skipped for %s: %s", $engine_class, $@);
     }
   }
+}
+
+# The class that knows when two URLs are the same upstream (k54).
+sub _passthrough_class { 'Langertha::Knarr::Handler::Passthrough' }
+
+# True when the engine's URL is the passthrough upstream of some protocol.
+sub _is_passthrough_upstream {
+  my ($self, $engine) = @_;
+  my $url = $engine->can('url') ? $engine->url : undef;
+  return 0 unless defined $url;
+  my $upstreams = $self->config->can('passthrough') ? $self->config->passthrough : undef;
+  return 0 unless ref $upstreams eq 'HASH';
+  for my $base ( values %$upstreams ) {
+    return 1 if $self->_passthrough_class->same_upstream( $base, $url );
+  }
+  return 0;
 }
 
 =method list_models
