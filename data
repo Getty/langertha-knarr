@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-29T20:43:21Z
+claimed_by: knarr-worker-pt
+class: standard
+completed: 2026-09-29T20:43:15Z
+created: 2026-09-29T20:15:33Z
+id: 52
+priority: high
+started: 2026-09-29T20:24:13Z
+status: done
+tags:
+- routing
+- passthrough
+title: 'Discovered-Passthrough (k47): ohne Client-Provider-Key auf Engine zurueckfallen
+  statt 401'
+updated: 2026-09-29T20:43:21Z
+---
+
+Maintainer-Entscheidung 2026-09-29: Seit k47 geht ein nur-auto-discovered Modell raw passthrough; ein Client ohne eigenen Provider-Key bekommt 401 vom Upstream. Neu: traegt der Request nach Entfernen des Knarr-Proxy-Keys (k44) keinen Provider-Key (kein Authorization / x-api-key, je nach Protokoll), wird das Modell ueber seine Engine mit Knarrs Key geroutet; mit eigenem Key bleibt es 1:1 passthrough. Test (native + PSGI, sync + stream). Doku (README Passthrough/How it works, CLAUDE.md, Config POD, Changes-Formulierung von k47 ggf. anpassen -- Changes macht release-manager).
+
+2026-09-29 20:32 Done. Knarr::_is_raw_passthrough: a discovered model on its protocol's passthrough upstream goes raw only when _carries_provider_key(sb_req) -- the parser's forward_headers after the proxy-key strip (k53) hold Authorization (OpenAI) or x-api-key/Authorization (Anthropic); Ollama needs none (keyless upstreams, keeps k47 there). Otherwise it falls to the handler chain, where Handler::Router resolves the discovered def -> engine with the endpoint's key. Unknown models unchanged (raw either way). Docs: Knarr.pm raw_passthrough/router POD, Config auto_discover POD, Router discovered_url POD, README (How it works, diagram, auto-discover paragraph -- the 'configure it under models:' escape hatch replaced by the keyless fallback, which also covers --from-env; Passthrough Mode; config table), share/example-config.yaml, CLAUDE.md. Test: t/94_discovered_keyless_engine.t (native+PSGI x sync+stream, 10 cases incl. proxy key only, key sent twice, open proxy, x-api-key on OpenAI, unknown model) -- route assertions failed before, pass after; t/94_discovered_passthrough.t, 89, 71, 40/41 streaming green. Changes: the k47 entry (unreleased) wording 'with the client's own key' should gain the keyless fallback -- release-manager.
+
+Committed as 8f5f85f
