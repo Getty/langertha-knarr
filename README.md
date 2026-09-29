@@ -779,6 +779,15 @@ piped 1:1 to the client. No key duplication, no model configuration
 needed. Knarr just sits in the middle and traces (passthrough requests get
 a Langfuse trace, but no request-log entry).
 
+Headers go through the same way, in both directions: a header the client
+sends twice reaches the upstream twice, in its order (only the proxy key is
+taken out, see above), and the upstream's response headers — `Set-Cookie`
+twice, `retry-after`, request ids, rate limits — come back to the client.
+Only connection-level headers (`Connection`, `Transfer-Encoding`,
+`Content-Length`, …) are Knarr's own on each side. Under PSGI the server
+already joins a repeated request header into one comma-separated value,
+which then goes to the upstream as that one line.
+
 If you also configure explicit model routing (the `models:` section),
 those models are handled by Langertha engines, and so are
 `auto_discover`ed models from a provider other than the protocol's

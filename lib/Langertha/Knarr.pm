@@ -5,6 +5,7 @@ use Moose;
 use Future;
 use Future::AsyncAwait;
 use IO::Async::Loop;
+use Net::Async::HTTP;
 use Net::Async::HTTP::Server;
 use HTTP::Response;
 use JSON::MaybeXS;
@@ -250,6 +251,19 @@ any other protocol (Ollama without an C<ollama> upstream, A2A, ACP, AG-UI)
 goes through the handler, where L<Langertha::Knarr::Handler::Router> hands
 it to the default engine, or answers C<404> in the protocol's error shape
 when there is none.
+
+Every client header line goes to the upstream as a line of its own, in
+its order -- a header sent twice arrives twice -- with the proxy key taken
+out of each line (see
+L</auth_token>) and without C<Host>, C<Content-Length>, C<Connection> and
+C<Transfer-Encoding>. The upstream's response headers come back the same
+way, repeats included (C<Set-Cookie> twice), except the connection-level
+ones and the framing Knarr sets itself (C<Transfer-Encoding>,
+C<Content-Length>). A body compressed with an encoding Knarr's HTTP client
+decodes (C<gzip>, C<deflate>) goes back decoded, without its
+C<Content-Encoding>, and so does every buffered answer; a stream in any
+other encoding is piped as it comes, with it. A stream gets
+C<Cache-Control: no-cache> when the upstream sent none.
 
 The provider key is looked for once the proxy key is taken out (see
 L</auth_token>): C<Authorization> for OpenAI, C<x-api-key> or
@@ -860,10 +874,12 @@ sub _handle_raw_passthrough {
       request   => $http_req,
       on_header => sub {
         my ($response) = @_;
+        # The upstream's headers go back with it (k56).
         my $header = HTTP::Response->new($response->code);
         $header->protocol('HTTP/1.1');
         $header->header('Content-Type'  => scalar $response->header('Content-Type'));
-        $header->header('Cache-Control' => 'no-cache');
+        $header->push_header(@$_) for @{ $self->_raw_passthrough_response_headers($response) };
+        $header->header('Cache-Control' => 'no-cache') unless defined $header->header('Cache-Control');
         $req->respond_chunk_header($header);
         $headers_sent = 1;
 
@@ -972,14 +988,16 @@ sub _raw_passthrough_request {
   my $http_req = HTTP::Request->new(POST => $url);
 
   # Forward all client headers except hop-by-hop / connection-specific
-  # ones, with Knarr's own key taken out (k44, k53)
+  # ones, with Knarr's own key taken out of each line (k44, k53). Every line
+  # is added, not set: a header sent twice reaches the upstream twice, in
+  # its order (k56).
   my %skip = map { lc($_) => 1 } qw( host content-length connection transfer-encoding );
   for my $pair (@$headers) {
     my ($name, $value) = @$pair;
     next if $skip{lc($name)};
     ($value) = $self->_without_proxy_key( $name, $value );
     next unless defined $value;
-    $http_req->header($name => $value);
+    $http_req->push_header($name => $value);
   }
   $http_req->content($body);
 
@@ -996,15 +1014,44 @@ sub _raw_passthrough_request {
   return ( $http_req, $trace );
 }
 
-# The upstream's answer as ( status, content type, body bytes ). A buffered
-# stream (PSGI) is traced as a stream, like the native one.
+# The upstream's answer as ( status, content type, body bytes, its other
+# headers ). A buffered stream (PSGI) is traced as a stream, like the
+# native one. The body goes back decoded, so its Content-Encoding stays
+# behind.
 sub _raw_passthrough_answer {
   my ($self, $sb_req, $trace, $resp) = @_;
   $self->tracing->end_trace( $trace,
     output => $sb_req->stream ? '[stream]' : '[passthrough]' ) if $trace;
   return ( $resp->code,
     scalar $resp->header('Content-Type') // 'application/json',
-    $resp->decoded_content( charset => 'none' ) // '' );
+    $resp->decoded_content( charset => 'none' ) // '',
+    $self->_raw_passthrough_response_headers( $resp, 1 ) );
+}
+
+# Upstream response headers that stay behind: connection-level ones, the
+# framing Knarr sets for what it sends itself, Content-Type, which the
+# callers set, and the note Net::Async::HTTP leaves on a body it decoded.
+my %RESPONSE_HEADER_SKIP = map { $_ => 1 } qw(
+  connection keep-alive proxy-connection te trailer upgrade
+  transfer-encoding content-length content-type x-original-content-encoding );
+
+# The upstream's response headers that go back to the client, as [ name,
+# value ] pairs: every line, a repeated header (Set-Cookie) repeated in its
+# order (k56). Content-Encoding goes along only while the bytes still carry
+# it: Net::Async::HTTP decodes every encoding it knows (gzip, deflate)
+# before Knarr sees a byte, and $buffered bytes go back decoded anyway.
+sub _raw_passthrough_response_headers {
+  my ($self, $resp, $buffered) = @_;
+  my @pairs;
+  $resp->headers->scan( sub {
+    my ($name, $value) = @_;
+    my $lc = lc $name;
+    return if $RESPONSE_HEADER_SKIP{$lc};
+    return if $lc eq 'content-encoding'
+      && ( $buffered || Net::Async::HTTP->can_decode($value) );
+    push @pairs, [ $name, $value ];
+  });
+  return \@pairs;
 }
 
 # An upstream that did not answer in time is a 504, any other failure to
@@ -1156,10 +1203,13 @@ sub _action_models {
   $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
+# $headers: optional further [ name, value ] pairs, each line added (the
+# raw passthrough's upstream headers, k56).
 sub _send_simple {
-  my ($self, $req, $status, $ctype, $body) = @_;
+  my ($self, $req, $status, $ctype, $body, $headers) = @_;
   my $resp = HTTP::Response->new( $status );
   $resp->protocol('HTTP/1.1');
+  $resp->push_header(@$_) for @{ $headers // [] };
   $resp->header( 'Content-Type'   => $ctype );
   $resp->header( 'Content-Length' => length($body) );
   $resp->content($body);

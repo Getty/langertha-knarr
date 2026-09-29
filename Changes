@@ -321,6 +321,15 @@ Revision history for Langertha-Knarr
       in the handler chain sends it to the upstream's /api/generate and
       reads its answer.
 
+    - The raw passthrough now forwards a header the client sends twice as
+      two lines, in order, instead of only its last value; the proxy key
+      is still taken out of every line. The upstream's response headers
+      come back to the client too -- Set-Cookie sent twice, retry-after,
+      request ids, rate limits -- where only the status, content type and
+      body did before; a body Knarr received decoded goes back without its
+      Content-Encoding. Under PSGI the server already joins a repeated
+      request header into one value, which is forwarded as that one line.
+
 
 1.101     2026-08-15 00:13:51Z
 

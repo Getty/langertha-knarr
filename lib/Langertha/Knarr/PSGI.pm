@@ -37,9 +37,15 @@ Raw passthrough works as on the native server: with a
 C<raw_passthrough> handler and a C<router> set on the Knarr, a chat request for a
 model the router does not configure is sent to the upstream byte for byte
 with the client's headers (minus the proxy key, see
-L<Langertha::Knarr/auth_token>), and the upstream's status, content type and body
-come back unchanged. A streamed passthrough answer is buffered like any
-other stream here.
+L<Langertha::Knarr/auth_token>), and the upstream's status, headers and body
+come back unchanged (see L<Langertha::Knarr/raw_passthrough>). A streamed
+passthrough answer is buffered like any other stream here, and goes back
+decoded, without its C<Content-Encoding>.
+
+One limit is the PSGI server's: it hands over a request header the client
+sent twice as one value joined with C<, > (one C<HTTP_*> key), so the
+upstream gets that header once, as that joined value. The native server
+forwards each line.
 
 Requests are authenticated exactly like on the native server: with
 L<Langertha::Knarr/auth_token> set, every route except the A2A agent card
@@ -161,10 +167,10 @@ sub _handle_psgi {
     my ($resp, $err, $category) = $sb->raw_passthrough->_upstream_request_f(
       request => $http_req, stream => $sb_req->stream ? 1 : 0 )
       ->else( sub { Future->done( undef, @_[0, 1] ) } )->get;
-    my ($status, $ctype, $obody) = $resp
+    my ($status, $ctype, $obody, $oheaders) = $resp
       ? $sb->_raw_passthrough_answer( $sb_req, $trace, $resp )
       : $sb->_raw_passthrough_failed( $proto, $sb_req, $trace, $err // 'unknown error', $category );
-    return [ $status, [ 'Content-Type' => $ctype ], [ $obody ] ];
+    return [ $status, [ 'Content-Type' => $ctype, map { @$_ } @{ $oheaders // [] } ], [ $obody ] ];
   }
 
   my $session = $sb->session( $sb_req->session_id );
