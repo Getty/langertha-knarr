@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T04:41:39Z
+claimed_by: knarr-worker-streamusage
+class: standard
+completed: 2026-09-30T04:41:35Z
+created: 2026-09-30T03:53:01Z
+id: 69
+priority: high
+started: 2026-09-30T03:53:33Z
+status: done
+tags:
+- streaming
+- tracing
+- bug
+title: 'Routed Streaming: Usage fehlt (Langfuse leer, Client-Stream ohne usage-Chunk)'
+updated: 2026-09-30T04:41:39Z
+---
+
+OTel-Verifikation gegen echtes Langfuse 3.225: routed stream (Engine) -> Generation usageDetails {} und model = Alias ('fake'), obwohl der Upstream einen finalen usage-Chunk (17/9/26) sendet; auch der Client-Stream enthaelt ihn nicht. Beide Transports betroffen. Erwartet: Usage aus dem Engine-Stream (Langertha liefert sie im finalen Chunk/Response?) an Handler::Tracing und in den Client-Stream des jeweiligen Protokolls (OpenAI: usage-Chunk wenn stream_options.include_usage; Anthropic: message_delta usage; Ollama: done-Frame counts). Erst klaeren was Langertha im Stream liefert (perl-ai-langertha). Tests, Streaming-Live-Tests.
+
+2026-09-30 03:56 Findings: Langertha::Stream::Chunk has usage (HashRef, last chunk carrying one = stream totals, cf. core aggregate_usage) and model (upstream-reported). Handler::Engine/Router callbacks ignored both; Stream had no slot; protocols closed with zero/no usage. Installed core 0.503 parse_stream_chunk (OpenAICompatible) DROPS the include_usage frame (choices: []), so the fake upstream's 17/9/26 never reaches Knarr there; ~/dev/langertha k298 (4b8fb6d, unreleased) keeps it and merges Anthropic message_start input usage. Core never requests stream_options.include_usage itself. Plan: Stream usage+upstream_model (from_callback cbs), handlers feed them, Tracing/RequestLog stream end records them, format_stream_close/done get a 4th arg usage (call sites Knarr.pm/PSGI.pm: 1 line each).
+
+2026-09-30 04:06 Done. Stream gains usage (Langertha::Usage; HashRef upgraded, empty ignored, last report wins as core's aggregate_usage, upstream-delegating); from_callback passes a 6th cb $usage. Handler::Engine/Router feed chunk->usage (and Response usage on the non-streaming fallback). Handler::Tracing/RequestLog stream end record usage. format_stream_close/done get a 4th arg $usage: OpenAI emits a choices:[] usage chunk after the terminal chunk, before [DONE], only with stream_options.include_usage (read from request->raw); Anthropic message_delta usage {input_tokens,output_tokens}; Ollama prompt_eval_count/eval_count on the done line. End markers unchanged. Call sites in Knarr.pm _handle_stream and PSGI.pm buffered stream pass stream->usage (hunks shared with k63/64/66 in those files). Core: installed 0.503 snapshot drops the include_usage frame (choices: []), ~/dev/langertha k298 keeps it; core never requests include_usage itself. Tests: t/46_stream_usage.t (unit, decorators, three wire formats, live Knarr + PSGI, real OpenAI engine vs local SSE upstream with core probe; passes on installed core and with -I ~/dev/langertha/lib). prove -lv t/40 t/41 PASS; prove -l t/ 70 files PASS. POD (Stream, Protocol, OpenAI, Ollama, handlers) + README section.
+
+Committed e4114b2
