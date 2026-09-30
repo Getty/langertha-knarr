@@ -66,7 +66,8 @@ sub execute {
   my $lf_pub = $lf->{public_key} // $ENV{LANGFUSE_PUBLIC_KEY};
   my $lf_sec = $lf->{secret_key} // $ENV{LANGFUSE_SECRET_KEY};
   if ($lf_pub && $lf_sec) {
-    print "  Langfuse: enabled (", ($lf->{url} // $ENV{LANGFUSE_URL} // 'cloud.langfuse.com'), ")\n";
+    print "  Langfuse: enabled (", ($lf->{url} // $ENV{LANGFUSE_URL} // 'cloud.langfuse.com'),
+      ", ", $config->langfuse_transport, ")\n";
   } else {
     print "  Langfuse: disabled (set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY to enable)\n";
   }

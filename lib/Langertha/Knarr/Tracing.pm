@@ -41,6 +41,13 @@ use IO::Async::Loop;
 Records every proxy request as a Langfuse trace with a nested generation. When
 tracing is not configured (no public and secret key), all methods are no-ops.
 
+Two transports carry the trace to Langfuse, selected by L</transport>:
+C<ingestion> (the default) posts events to Langfuse's
+C</api/public/ingestion> API, C<otel> exports OpenTelemetry spans (see
+L</OpenTelemetry transport>). Both record the same content through the
+same calls, in one fire-and-forget POST per request that gives up after
+L<Langertha::Knarr::Config/langfuse_timeout> seconds (default 15).
+
 Langfuse credentials are read from the config file's C<langfuse:> section or
 from the C<LANGFUSE_PUBLIC_KEY>, C<LANGFUSE_SECRET_KEY>, and C<LANGFUSE_URL>
 environment variables. The module strips surrounding quotes from environment
@@ -83,6 +90,48 @@ provider.
 
 Callers that pass no C<timing> therefore keep exactly the previous
 behaviour: proxy-measured C<endTime>, no C<completionStartTime>.
+
+=head2 OpenTelemetry transport
+
+With L</transport> C<otel>, each request goes out as one OTLP/HTTP request,
+JSON encoded, to C</api/public/otel/v1/traces> under L</config>'s Langfuse
+URL, with the same Basic authentication and the
+C<x-langfuse-ingestion-version: 4> header (Langfuse's real-time ingestion
+path). A span must not be exported twice, so L</start_trace> only records
+the start and L</end_trace> builds and sends the finished trace, two spans
+under one random trace id:
+
+=over
+
+=item * a root span named after L</trace_name> (kind C<SERVER>) with
+C<langfuse.trace.name>, C<langfuse.trace.tags> (C<knarr>),
+C<langfuse.trace.metadata.*> (C<format>, C<engine>, C<model>, C<params>,
+C<passthrough_fallback>),
+and the request messages and the output (or the error) as
+C<langfuse.observation.input> / C<langfuse.observation.output>, which
+Langfuse shows as the trace's input and output;
+
+=item * its child C<proxy-request> (kind C<CLIENT>), a
+C<langfuse.observation.type> C<generation> with
+C<langfuse.observation.model.name>, input and output,
+C<langfuse.observation.usage_details> (the same C<{ input, output, total }>
+counts the ingestion path sends, see L</end_trace>),
+C<langfuse.observation.completion_start_time> and
+C<langfuse.observation.metadata.*> (C<timing>, C<response_id>,
+C<configured_model>, C<thinking>, C<rate_limit>, C<tool_calls>). A
+C<start_hires> given to L</start_trace> is the start of both spans.
+
+=back
+
+An error sets the status of both spans to C<ERROR> with the message, plus
+C<langfuse.observation.level> C<ERROR> and
+C<langfuse.observation.status_message>, so the trace itself shows as
+failed, not only its generation.
+
+Span start and end are the instants the ingestion path reports (see
+L</Timing sources>), in Unix nanoseconds. Structured values (messages,
+params, usage, metadata hashes) are JSON-encoded into string attributes;
+plain strings go as they are, as Langfuse's own SDKs send them.
 
 =cut
 
@@ -157,6 +206,33 @@ sub _build_trace_name {
     // 'knarr-proxy';
 }
 
+has transport => (
+  is      => 'lazy',
+  builder => '_build_transport',
+);
+
+=attr transport
+
+C<ingestion> (default) or C<otel>, from
+L<Langertha::Knarr::Config/langfuse_transport> (C<langfuse.transport>, else
+C<KNARR_LANGFUSE_TRANSPORT>). An enabled tracer reads it, and
+L<Langertha::Knarr::Config/langfuse_timeout>, when it is built, so an
+invalid value croaks at startup, not on the first request.
+
+=cut
+
+sub _build_transport {
+  my ($self) = @_;
+  return $self->config->langfuse_transport;
+}
+
+sub BUILD {
+  my ($self) = @_;
+  return unless $self->_enabled;
+  $self->transport;
+  $self->config->langfuse_timeout;
+}
+
 sub _build__url {
   my ($self) = @_;
   return $self->config->langfuse->{url} // _strip_quotes($ENV{LANGFUSE_URL}) // _strip_quotes($ENV{LANGFUSE_BASE_URL}) // 'https://cloud.langfuse.com';
@@ -184,6 +260,32 @@ sub _build__json {
   return JSON::MaybeXS->new(utf8 => 1, convert_blessed => 1);
 }
 
+# Encodes structured values into OTLP string attributes. Character output:
+# the attribute ends up inside the payload _json encodes to UTF-8 bytes.
+has _attr_json => (
+  is      => 'lazy',
+  builder => '_build__attr_json',
+);
+
+sub _build__attr_json {
+  return JSON::MaybeXS->new( utf8 => 0, canonical => 1, convert_blessed => 1, allow_nonref => 1 );
+}
+
+# A random OTel id of $bytes bytes as lowercase hex (OTLP/JSON sends ids as
+# hex, not base64). All zeros is the invalid id, so it is never returned.
+sub _hex_id {
+  my ($bytes) = @_;
+  my $id;
+  do { $id = join '', map { sprintf '%02x', int rand 256 } 1 .. $bytes } until $id =~ /[^0]/;
+  return $id;
+}
+
+# A gettimeofday pair as OTLP's Unix nanoseconds, a decimal string.
+sub _unix_nano {
+  my ($s, $us) = @_;
+  return sprintf '%d%06d000', $s, $us;
+}
+
 sub _uuid {
   my @hex = map { sprintf("%04x", int(rand(65536))) } 1..8;
   return join('-',
@@ -202,11 +304,12 @@ sub _timestamp {
     $t[5]+1900, $t[4]+1, $t[3], $t[2], $t[1], $t[0], int($us/1000));
 }
 
-# ISO-8601 timestamp at $start_hires + $delta_seconds. Turns the deltas an
-# engine measured (ttft_seconds / total_seconds on Langertha::Response) into
-# absolute Langfuse timestamps anchored to the moment start_trace ran — not
-# to "now", which has already moved past the end of the call.
-sub _iso_after {
+# The instant $start_hires + $delta_seconds, as a gettimeofday pair that
+# either transport formats. Turns the deltas an engine measured
+# (ttft_seconds / total_seconds on Langertha::Response) into absolute
+# Langfuse timestamps anchored to the moment start_trace ran — not to "now",
+# which has already moved past the end of the call.
+sub _after {
   my ($start_hires, $delta_seconds) = @_;
   return undef unless ref $start_hires eq 'ARRAY' && defined $delta_seconds;
   # Clamp: a negative delta (clock skew, or a provider-reported duration we
@@ -214,7 +317,7 @@ sub _iso_after {
   $delta_seconds = 0 if $delta_seconds < 0;
   my ($s, $us) = @$start_hires;
   my $sum = $us + $delta_seconds * 1_000_000;
-  return _timestamp( $s + int( $sum / 1_000_000 ), int($sum) % 1_000_000 );
+  return [ $s + int( $sum / 1_000_000 ), int($sum) % 1_000_000 ];
 }
 
 # Flatten a Langertha::RateLimit (or an equivalent hashref) into plain
@@ -332,12 +435,36 @@ sub start_trace {
   my ($self, %opts) = @_;
   return undef unless $self->_enabled;
 
-  my $trace_id = _uuid();
-  my $gen_id   = _uuid();
   my @hires    = $opts{start_hires} ? @{ $opts{start_hires} } : gettimeofday;
   my $now      = _timestamp(@hires);
   # Image objects (k33) carry no TO_JSON and would fail the batch encode.
   my $input    = Langertha::Knarr::Image::plain_messages( $opts{messages} );
+
+  # OTel spans are exported once, finished: nothing is sent yet, end_trace
+  # builds both spans from what is kept here.
+  return {
+    trace_id    => _hex_id(16),
+    root_id     => _hex_id(8),
+    gen_id      => _hex_id(8),
+    start_time  => $now,
+    start_hires => \@hires,
+    otel        => {
+      name     => $self->trace_name,
+      model    => $opts{model},
+      input    => $input,
+      metadata => {
+        format => $opts{format},
+        engine => $opts{engine},
+        model  => $opts{model},
+        params => $opts{params},
+        # Left out when undef, like every other attribute.
+        passthrough_fallback => $opts{passthrough_fallback},
+      },
+    },
+  } if $self->transport eq 'otel';
+
+  my $trace_id = _uuid();
+  my $gen_id   = _uuid();
 
   push @{$self->_batch}, {
     id        => _uuid(),
@@ -452,9 +579,19 @@ sub end_trace {
   return unless $self->_enabled;
   return unless $trace_info;
 
-  my $now = _timestamp();
+  my @now  = gettimeofday;
+  my $now  = _timestamp(@now);
+  my $otel = $self->transport eq 'otel';
 
-  if ($opts{error}) {
+  if ( $opts{error} && $otel ) {
+    push @{$self->_batch}, {
+      info   => $trace_info,
+      now    => \@now,
+      end    => \@now,
+      output => $opts{output},
+      error  => "$opts{error}",
+    };
+  } elsif ($opts{error}) {
     push @{$self->_batch}, {
       id        => _uuid(),
       type      => 'generation-update',
@@ -472,13 +609,13 @@ sub end_trace {
     # Engine-measured deltas win over the proxy's wall clock: they are
     # anchored to the same instant as start_time and exclude our own
     # dispatch/formatting overhead. Without them endTime stays "now".
-    my $end_time         = $now;
-    my $completion_start = undef;
+    my $end_at        = \@now;
+    my $completion_at = undef;
     if ( $timing ) {
       my $hires = $trace_info->{start_hires};
-      $end_time = _iso_after( $hires, $timing->{total_seconds} ) // $end_time
+      $end_at = _after( $hires, $timing->{total_seconds} ) // $end_at
         if defined $timing->{total_seconds};
-      $completion_start = _iso_after( $hires, $timing->{ttft_seconds} )
+      $completion_at = _after( $hires, $timing->{ttft_seconds} )
         if defined $timing->{ttft_seconds};
     }
 
@@ -497,23 +634,36 @@ sub end_trace {
       $metadata{tool_calls} = $tcs;
     }
 
-    push @{$self->_batch}, {
-      id        => _uuid(),
-      type      => 'generation-update',
-      timestamp => $now,
-      body      => {
-        id      => $trace_info->{gen_id},
-        output  => $opts{output},
-        endTime => $end_time,
-        defined $completion_start ? (completionStartTime => $completion_start) : (),
-        $opts{model} ? (model => $opts{model}) : (),
-        # Langfuse v2 reads usage and drops usageDetails; v3 reads both,
-        # usageDetails overriding usage.
-        $usage       ? (usage        => { %$usage, unit => 'TOKENS' },
-                        usageDetails => $usage) : (),
-        %metadata    ? (metadata => \%metadata) : (),
-      },
-    };
+    if ($otel) {
+      push @{$self->_batch}, {
+        info             => $trace_info,
+        now              => \@now,
+        end              => $end_at,
+        completion_start => $completion_at,
+        output           => $opts{output},
+        model            => $opts{model},
+        usage            => $usage,
+        metadata         => \%metadata,
+      };
+    } else {
+      push @{$self->_batch}, {
+        id        => _uuid(),
+        type      => 'generation-update',
+        timestamp => $now,
+        body      => {
+          id      => $trace_info->{gen_id},
+          output  => $opts{output},
+          endTime => _timestamp(@$end_at),
+          defined $completion_at ? (completionStartTime => _timestamp(@$completion_at)) : (),
+          $opts{model} ? (model => $opts{model}) : (),
+          # Langfuse v2 reads usage and drops usageDetails; v3 reads both,
+          # usageDetails overriding usage.
+          $usage       ? (usage        => { %$usage, unit => 'TOKENS' },
+                          usageDetails => $usage) : (),
+          %metadata    ? (metadata => \%metadata) : (),
+        },
+      };
+    }
   }
 
   push @{$self->_batch}, {
@@ -524,7 +674,7 @@ sub end_trace {
       id     => $trace_info->{trace_id},
       output => $opts{output} // $opts{error},
     },
-  };
+  } unless $otel;
 
   $self->flush;
 }
@@ -533,18 +683,22 @@ sub end_trace {
 
     $tracing->flush;
 
-Sends all pending trace events to the Langfuse ingestion API as a batch and
-clears the internal buffer. Called automatically by L</end_trace>. Does nothing
-when tracing is disabled or the batch is empty.
+Sends all pending trace events to Langfuse in one POST and clears the
+internal buffer: an ingestion batch to C</api/public/ingestion>, or, with
+L</transport> C<otel>, an OTLP C<ExportTraceServiceRequest> to
+C</api/public/otel/v1/traces>. Called automatically by L</end_trace>. Does
+nothing when tracing is disabled or the batch is empty.
 
 Never throws: a batch that cannot be JSON-encoded is logged at error level and
 dropped, the same way an ingestion HTTP failure is. L</end_trace> runs on the
 request's response path, so a tracing problem must not take the client's
 response down with it.
 
-The ingestion POST is sent without waiting for it and gives up after 5
-seconds: a Langfuse that accepts the connection and never answers is logged
-as a C<Langfuse flush error> warning, and never holds a request.
+The POST is sent without waiting for it and gives up after
+L<Langertha::Knarr::Config/langfuse_timeout> seconds (C<langfuse.timeout>
+or C<KNARR_LANGFUSE_TIMEOUT>, default 15, C<0> for none): a Langfuse that
+accepts the connection and never answers is logged as a C<Langfuse flush
+error> warning, and never holds a request.
 
 =cut
 
@@ -557,7 +711,10 @@ has _http => (
   is      => 'lazy',
   builder => sub {
     my ($self) = @_;
-    my $h = Net::Async::HTTP->new( user_agent => 'Langertha-Knarr', timeout => 5 );
+    # Net::Async::HTTP times out at once on 0, so 0 (none) sets no timeout.
+    my $timeout = $self->config->langfuse_timeout;
+    my $h = Net::Async::HTTP->new( user_agent => 'Langertha-Knarr',
+      $timeout ? ( timeout => $timeout ) : () );
     $self->_loop->add($h);
     return $h;
   },
@@ -571,6 +728,7 @@ sub flush {
   $self->_batch([]);
 
   my $auth = encode_base64($self->_public_key . ':' . $self->_secret_key, '');
+  my $otel = $self->transport eq 'otel';
 
   # Tracing is observability, not the product. flush runs inside end_trace on
   # the response path — and for streams after the last chunk was written — so
@@ -582,7 +740,10 @@ sub flush {
   my $body;
   my $encode_error = do {
     local $@;
-    eval { $body = $self->_json->encode({ batch => $batch }); };
+    eval {
+      $body = $self->_json->encode(
+        $otel ? $self->_otlp_request($batch) : { batch => $batch } );
+    };
     $@;
   };
   if ($encode_error) {
@@ -592,10 +753,12 @@ sub flush {
   }
 
   my $req  = HTTP::Request->new(
-    POST => $self->_url . '/api/public/ingestion',
+    POST => $self->_url . ( $otel ? '/api/public/otel/v1/traces' : '/api/public/ingestion' ),
     [
       'Content-Type'  => 'application/json',
       'Authorization' => 'Basic ' . $auth,
+      # Selects Langfuse v4's real-time OTel ingestion (else up to 10 min late).
+      $otel ? ( 'x-langfuse-ingestion-version' => '4' ) : (),
     ],
     $body,
   );
@@ -612,6 +775,114 @@ sub flush {
   });
   $f->retain;
   return;
+}
+
+# OTLP/JSON ExportTraceServiceRequest for the traces end_trace finished.
+# Enums (span kind, status code) are integers, ids lowercase hex and times
+# decimal strings, as the OTLP/JSON encoding prescribes.
+sub _otlp_request {
+  my ($self, $batch) = @_;
+  return {
+    resourceSpans => [ {
+      resource   => { attributes => [ $self->_otel_attributes( 'service.name' => 'langertha-knarr' ) ] },
+      scopeSpans => [ {
+        scope => { name => __PACKAGE__, version => $VERSION },
+        spans => [ map { $self->_otel_spans($_) } @$batch ],
+      } ],
+    } ],
+  };
+}
+
+my %SPAN_KIND    = ( server => 2, client => 3 );
+my $STATUS_ERROR = 2;
+
+# The root span (the Langfuse trace) and its generation child for one
+# request, from the record end_trace pushed.
+sub _otel_spans {
+  my ($self, $rec) = @_;
+  my $info  = $rec->{info};
+  my $o     = $info->{otel};
+  my $error = $rec->{error};
+  my $start = _unix_nano( @{ $info->{start_hires} } );
+
+  # Langfuse v4 reads trace attributes off every span that carries them.
+  my @trace_attrs = (
+    $self->_otel_attributes( 'langfuse.trace.name' => $o->{name} ),
+    { key => 'langfuse.trace.tags',
+      value => { arrayValue => { values => [ { stringValue => 'knarr' } ] } } },
+  );
+  my $meta = $o->{metadata};
+  my $gen_meta = $rec->{metadata} // {};
+
+  # A failed request marks both the trace's span and the generation.
+  my @error_attrs = $error ? $self->_otel_attributes(
+    'langfuse.observation.level'          => 'ERROR',
+    'langfuse.observation.status_message' => $error,
+  ) : ();
+  my @error_status = $error ? ( status => { code => $STATUS_ERROR, message => $error } ) : ();
+
+  my $root = {
+    traceId           => $info->{trace_id},
+    spanId            => $info->{root_id},
+    name              => $o->{name},
+    kind              => $SPAN_KIND{server},
+    startTimeUnixNano => $start,
+    endTimeUnixNano   => _unix_nano( @{ $rec->{now} } ),
+    attributes        => [
+      @trace_attrs,
+      $self->_otel_attributes(
+        'langfuse.observation.type'   => 'span',
+        'langfuse.observation.input'  => $o->{input},
+        'langfuse.observation.output' => $rec->{output} // $error,
+        map { ( 'langfuse.trace.metadata.'.$_ => $meta->{$_} ) } sort keys %$meta,
+      ),
+      @error_attrs,
+    ],
+    @error_status,
+  };
+
+  my $gen = {
+    traceId           => $info->{trace_id},
+    spanId            => $info->{gen_id},
+    parentSpanId      => $info->{root_id},
+    name              => 'proxy-request',
+    kind              => $SPAN_KIND{client},
+    startTimeUnixNano => $start,
+    endTimeUnixNano   => _unix_nano( @{ $rec->{end} } ),
+    attributes        => [
+      @trace_attrs,
+      $self->_otel_attributes(
+        'langfuse.observation.type'       => 'generation',
+        'langfuse.observation.model.name' => $rec->{model} || $o->{model},
+        'langfuse.observation.input'      => $o->{input},
+        $error ? () : (
+          'langfuse.observation.output'                => $rec->{output},
+          'langfuse.observation.completion_start_time' =>
+            $rec->{completion_start} ? _timestamp( @{ $rec->{completion_start} } ) : undef,
+          'langfuse.observation.usage_details'         => $rec->{usage},
+          map { ( 'langfuse.observation.metadata.'.$_ => $gen_meta->{$_} ) } sort keys %$gen_meta,
+        ),
+      ),
+      @error_attrs,
+    ],
+    @error_status,
+  };
+
+  return ( $root, $gen );
+}
+
+# OTLP KeyValue list from key/value pairs. An undef value is left out; a
+# reference is JSON-encoded into a string, which is how Langfuse takes
+# structured input, output, usage and metadata; anything else is a string.
+sub _otel_attributes {
+  my ($self, @pairs) = @_;
+  my @attrs;
+  while ( my ( $key, $value ) = splice @pairs, 0, 2 ) {
+    next unless defined $value;
+    $value = $self->_attr_json->encode($value) if ref $value;
+    push @attrs, { key => $key, value => { stringValue => "$value" } };
+  }
+  return @attrs;
 }
 
 =seealso

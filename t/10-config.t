@@ -142,6 +142,12 @@ YAML
   like $yaml, qr/engine: Anthropic/, 'generated config has Anthropic';
   like $yaml, qr/auto_discover: true/, 'auto_discover enabled';
   like $yaml, qr/listen:/, 'has listen directive';
+  like $yaml, qr/^# langfuse:\n(?:#   .*\n)*#   transport: otel /m,
+    'commented langfuse section offers the transport';
+  like $yaml, qr/^# langfuse:\n(?:#   .*\n)*#   timeout: 15 /m,
+    'and the flush timeout';
+  my $parsed = YAML::PP->new->load_string($yaml);
+  ok !exists $parsed->{langfuse}, 'langfuse stays commented out';
 }
 
 # Test: Langfuse config

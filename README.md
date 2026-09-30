@@ -419,6 +419,38 @@ generation's `endTime` is anchored to the real call window and
 the engine's `ttft_seconds`. Streaming and raw passthrough have no
 response object to measure, so those traces use the proxy's wall clock.
 
+### Transport: ingestion API or OpenTelemetry
+
+By default Knarr posts trace and generation events to Langfuse's
+`/api/public/ingestion` API, which Langfuse has deprecated in favour of its
+OpenTelemetry endpoint. `langfuse.transport: otel` (or
+`KNARR_LANGFUSE_TRANSPORT=otel`) sends the same traces as OpenTelemetry
+spans instead — OTLP over HTTP, JSON encoded, to
+`/api/public/otel/v1/traces`, with the same keys and URL:
+
+```yaml
+langfuse:
+  transport: otel   # default: ingestion
+```
+
+Each request becomes a root span (the trace: name, `knarr` tag, format /
+engine / model / params metadata, input and output) with a `proxy-request`
+generation span below it (model, input, output, token usage, timing,
+tool calls). A failed request sets both spans to `ERROR` with its message,
+so the trace itself shows as failed. The OTel endpoint needs Langfuse
+Cloud or a self-hosted Langfuse v3.22 or later — the Langfuse v2 in the
+included `docker-compose.yml` has only the ingestion API, so keep the
+default there.
+
+### Flush timeout
+
+Traces are posted in the background and never hold a request. A post that
+Langfuse has not answered after `langfuse.timeout` seconds
+(`KNARR_LANGFUSE_TIMEOUT`, default `15`, `0` for no limit) is given up and
+logged as a `Langfuse flush error` warning — whichever transport is in use.
+A Langfuse that is slow under load may still store a trace Knarr already
+reported as timed out; raise the timeout if that shows up in the logs.
+
 ### Langfuse Cloud
 
 Just set the keys — Langfuse Cloud (`https://cloud.langfuse.com`) is the
@@ -800,6 +832,8 @@ passthrough:
 #   public_key: pk-lf-...
 #   secret_key: sk-lf-...
 #   trace_name: my-proxy   # optional, default knarr-proxy
+#   transport: otel        # optional, default ingestion
+#   timeout: 15            # optional, seconds per trace post (0: no limit)
 
 # Request logging: JSONL file and/or per-request JSON directory
 # logging:
@@ -822,7 +856,7 @@ there is one; the config value wins):
 | `passthrough` | `true` or per-protocol upstream URLs (`openai`, `anthropic`, `ollama`) | off |
 | `proxy_api_key` | key clients must send (`KNARR_API_KEY`) | open |
 | `public_url` | base URL in the provider manifest (`KNARR_PUBLIC_URL`) | from the request |
-| `langfuse` | `url`, `public_key`, `secret_key`, `trace_name` (`LANGFUSE_*`) | off |
+| `langfuse` | `url`, `public_key`, `secret_key`, `trace_name` (`LANGFUSE_*`), `transport` (`ingestion` or `otel`, `KNARR_LANGFUSE_TRANSPORT`), `timeout` (seconds per trace post, `KNARR_LANGFUSE_TIMEOUT`) | off; transport `ingestion`, timeout `15` |
 | `logging` | `file` (JSONL) and/or `dir` (`KNARR_LOG_FILE`, `KNARR_LOG_DIR`) | off |
 | `upstream_timeout` | seconds for a non-streaming upstream request; routed engines' `user_agent_timeout` (`KNARR_UPSTREAM_TIMEOUT`) | `300` |
 | `upstream_stall_timeout` | seconds a passthrough stream may go without data (`KNARR_UPSTREAM_STALL_TIMEOUT`) | `120` |
@@ -934,7 +968,7 @@ headers went out ends with the protocol's error frame. Routed engines get
 sets its own (for a stream it is their time without data). A routed engine
 or the Passthrough handler that runs out is answered the same way, 504 or
 the error frame; this needs a Langertha whose async requests report their
-timeouts. Any other failure there stays a `500`. Langfuse posts give up after 5 seconds and are only logged.
+timeouts. Any other failure there stays a `500`. Langfuse posts give up after `langfuse.timeout` seconds (default 15) and are only logged.
 
 ### Generating a Config
 
@@ -1011,6 +1045,8 @@ variant is the last resort (`knarr init` only; `--from-env` ignores
 | `LANGFUSE_BASE_URL` | Alias for `LANGFUSE_URL` | — |
 | `LANGFUSE_TRACE_NAME` | Trace name (beats `KNARR_TRACE_NAME`) | — |
 | `KNARR_TRACE_NAME` | Trace name | `knarr-proxy` |
+| `KNARR_LANGFUSE_TRANSPORT` | `ingestion` (ingestion API) or `otel` (OTLP/HTTP spans) | `ingestion` |
+| `KNARR_LANGFUSE_TIMEOUT` | Seconds a trace post may take before it is logged as failed (`0`: no limit) | `15` |
 
 ### Request Logging
 

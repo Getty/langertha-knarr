@@ -382,14 +382,67 @@ has langfuse => (
 =attr langfuse
 
 HashRef from the C<langfuse:> config section. May contain C<url>,
-C<public_key>, C<secret_key>, and C<trace_name>. Returns an empty hashref
-when the section is absent.
+C<public_key>, C<secret_key>, C<trace_name>, C<transport> (see
+L</langfuse_transport>) and C<timeout> (see L</langfuse_timeout>). Returns an empty hashref when the section is
+absent.
 
 =cut
 
 sub _build_langfuse {
   my ($self) = @_;
   return $self->_section('langfuse') // {};
+}
+
+has langfuse_transport => (
+  is      => 'lazy',
+  builder => '_build_langfuse_transport',
+);
+
+=attr langfuse_transport
+
+How L<Langertha::Knarr::Tracing> sends traces to Langfuse: C<ingestion>
+(the default) posts trace and generation events to Langfuse's
+C</api/public/ingestion> API; C<otel> exports them as OpenTelemetry spans
+(OTLP/HTTP, JSON encoded) to C</api/public/otel/v1/traces>, the path
+Langfuse now recommends (Langfuse Cloud, or self-hosted v3.22 and later;
+Langfuse v2 has only the ingestion API). See
+L<Langertha::Knarr::Tracing/OpenTelemetry transport>. Read from C<langfuse.transport>, falling back to
+the C<KNARR_LANGFUSE_TRANSPORT> environment variable, so it also applies
+under C<--from-env>. Case does not matter. Any other value croaks when
+read, and L</validate> reports it.
+
+=cut
+
+sub _build_langfuse_transport {
+  my ($self) = @_;
+  my $value = $self->langfuse->{transport} // _strip_quotes($ENV{KNARR_LANGFUSE_TRANSPORT});
+  return 'ingestion' unless defined $value && length $value;
+  croak "langfuse.transport '$value' must be ingestion or otel"
+    unless $value =~ /\A(?:ingestion|otel)\z/i;
+  return lc $value;
+}
+
+has langfuse_timeout => (
+  is      => 'lazy',
+  builder => '_build_langfuse_timeout',
+);
+
+=attr langfuse_timeout
+
+Seconds a trace POST to Langfuse may take before it is given up and logged
+as a C<Langfuse flush error> warning, for either
+L</langfuse_transport>. Default C<15>; C<0> disables it. The POST never
+holds a request, so this only decides when a slow Langfuse is reported as
+failed. Read from C<langfuse.timeout>, falling back to the
+C<KNARR_LANGFUSE_TIMEOUT> environment variable. A value that is not a
+non-negative number croaks when read, and L</validate> reports it.
+
+=cut
+
+sub _build_langfuse_timeout {
+  my ($self) = @_;
+  return _seconds( 'langfuse.timeout' =>
+    $self->langfuse->{timeout} // _strip_quotes($ENV{KNARR_LANGFUSE_TIMEOUT}), 15 );
 }
 
 has proxy_api_key => (
@@ -840,7 +893,7 @@ sub validate {
     push @errors, "No models configured and no default engine set";
   }
 
-  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout probe_timeout workers )) {
+  for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout probe_timeout workers langfuse_transport langfuse_timeout )) {
     next if eval { $self->$attr; 1 };
     push @errors, $self->_error_text($@);
   }
@@ -1006,6 +1059,8 @@ sub generate_config {
   push @lines, "#   url: http://localhost:3000";
   push @lines, "#   public_key: pk-lf-...";
   push @lines, "#   secret_key: sk-lf-...";
+  push @lines, "#   transport: otel   # default ingestion; otel needs Langfuse Cloud or v3.22+";
+  push @lines, "#   timeout: 15       # seconds per trace POST, 0 disables";
 
   return join("\n", @lines) . "\n";
 }

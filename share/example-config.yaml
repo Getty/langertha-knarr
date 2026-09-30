@@ -130,6 +130,10 @@ passthrough:
 #   public_key: pk-lf-...
 #   secret_key: sk-lf-...
 #   trace_name: my-proxy   # optional, default knarr-proxy
+#   transport: otel        # optional: OpenTelemetry (OTLP/HTTP) instead of the
+#                          # deprecated ingestion API (default ingestion);
+#                          # needs Langfuse Cloud or self-hosted v3.22+
+#   timeout: 15            # optional: seconds per trace post, 0 for no limit
 
 # Optional: request logging — JSONL file and/or per-request JSON directory
 # logging:

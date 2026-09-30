@@ -206,7 +206,7 @@ sub execute {
   my $lf_sec = $config->langfuse->{secret_key} // _strip_quotes($ENV{LANGFUSE_SECRET_KEY});
   my $lf_url = $config->langfuse->{url} // _strip_quotes($ENV{LANGFUSE_URL}) // _strip_quotes($ENV{LANGFUSE_BASE_URL}) // 'https://cloud.langfuse.com';
   if ($lf_pub && $lf_sec) {
-    _log("Langfuse: enabled -> $lf_url");
+    _log("Langfuse: enabled -> $lf_url (" . $config->langfuse_transport . ")");
   } else {
     _log("Langfuse: disabled (set LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY to enable)");
   }

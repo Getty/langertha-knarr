@@ -86,7 +86,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Langertha::Knarr::Request** — Normalized request value object (protocol, messages, tools, tool_choice, response_format, …)
 - **Langertha::Knarr::Response** — Normalized response value object (content, model, usage, tool_calls, finish_reason); `coerce()` upgrades any legacy shape
 - **Langertha::Knarr::Stream** — Async chunk iterator; `from_list`, `from_callback` constructors
-- **Langertha::Knarr::Tracing** — Langfuse trace/generation per request (async flush via Net::Async::HTTP)
+- **Langertha::Knarr::Tracing** — Langfuse trace/generation per request (async flush via Net::Async::HTTP); transport `ingestion` (batch API) or `otel` (OTLP/HTTP JSON spans, built at `end_trace`)
 - **Langertha::Knarr::RequestLog** — JSONL per-request logging
 - **Langertha::Knarr::Session** — Per-conversation state
 - **Langertha::Knarr::PSGI** — PSGI adapter (buffered streams, same auth + raw passthrough)
@@ -171,7 +171,7 @@ passthrough:                       # or: true (openai + anthropic)
   openai: https://api.openai.com
 proxy_api_key: ${KNARR_API_KEY}
 public_url: https://knarr.example  # manifest base URL
-langfuse: { url: "http://localhost:3000", public_key: pk-lf-x, secret_key: sk-lf-x, trace_name: knarr-proxy }
+langfuse: { url: "http://localhost:3000", public_key: pk-lf-x, secret_key: sk-lf-x, trace_name: knarr-proxy, transport: ingestion, timeout: 15 }  # or otel (OTLP/HTTP JSON)
 logging: { file: requests.jsonl, dir: requests/ }
 upstream_timeout: 300              # 0 disables
 upstream_stall_timeout: 120
@@ -217,6 +217,7 @@ per worker.
 - `KNARR_API_KEY` (proxy_api_key), `KNARR_PUBLIC_URL` (public_url)
 - `KNARR_LOG_FILE`, `KNARR_LOG_DIR` (logging.file / logging.dir)
 - `KNARR_TRACE_NAME`, `LANGFUSE_TRACE_NAME`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_URL` / `LANGFUSE_BASE_URL`
+- `KNARR_LANGFUSE_TRANSPORT` (langfuse.transport: `ingestion` default, `otel`), `KNARR_LANGFUSE_TIMEOUT` (langfuse.timeout, default 15 s, 0 = none)
 - `KNARR_UPSTREAM_TIMEOUT`, `KNARR_UPSTREAM_STALL_TIMEOUT`, `KNARR_PROBE_CAPABILITIES`, `KNARR_PROBE_TIMEOUT`, `KNARR_OLLAMA_COMPAT_VERSION`
 - `KNARR_A2A_NAME`, `KNARR_A2A_DESCRIPTION` (a2a.name / a2a.description)
 - `KNARR_WORKERS` (workers)

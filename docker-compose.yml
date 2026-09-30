@@ -18,6 +18,10 @@ services:
       - KNARR_API_KEY
       - KNARR_DEBUG
       - KNARR_TRACE_NAME
+      # The Langfuse v2 below has only the ingestion API, so leave
+      # KNARR_LANGFUSE_TRANSPORT unset (otel needs v3.22+ or Langfuse Cloud)
+      - KNARR_LANGFUSE_TRANSPORT
+      - KNARR_LANGFUSE_TIMEOUT
       - KNARR_LOG_FILE
       - KNARR_LOG_DIR
       - KNARR_PUBLIC_URL

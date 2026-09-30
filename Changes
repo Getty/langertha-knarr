@@ -29,6 +29,22 @@ Revision history for Langertha-Knarr
       published on 127.0.0.1 unless LANGFUSE_BIND says otherwise, and
       KNARR_BIND restricts Knarr's 8080 and 11434 to one address.
 
+    - langfuse.transport: otel (or KNARR_LANGFUSE_TRANSPORT=otel) sends each
+      trace to Langfuse's OpenTelemetry endpoint
+      (/api/public/otel/v1/traces, OTLP over HTTP, JSON) instead of the
+      deprecated ingestion API: a root span with the trace's name, tag,
+      metadata, input and output, and a proxy-request generation span with
+      model, token usage, timing and tool calls; a failed request marks
+      both spans as errors. Needs Langfuse Cloud or self-hosted v3.22 or
+      later; the default stays ingestion, which the Langfuse v2 in
+      docker-compose.yml needs.
+
+    - langfuse.timeout (or KNARR_LANGFUSE_TIMEOUT) sets how long a trace
+      post to Langfuse may take before it is logged as failed, on either
+      transport; the default is now 15 seconds instead of 5, and 0 sets no
+      limit. knarr init mentions both new settings in its commented
+      langfuse section.
+
     - The A2A agent card at /.well-known/agent.json now names the agent
       "Langertha Knarr Agent" and reports Knarr's own version. a2a.name and
       a2a.description in the config (KNARR_A2A_NAME, KNARR_A2A_DESCRIPTION)
