@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T04:41:48Z
+claimed_by: knarr-worker-streamusage
+class: standard
+completed: 2026-09-30T04:41:44Z
+created: 2026-09-30T03:53:06Z
+id: 70
+priority: low
+started: 2026-09-30T03:53:39Z
+status: done
+tags:
+- tracing
+- routing
+title: 'Routed: Trace-/Antwort-Model ist der konfigurierte Name statt des vom Upstream
+  gemeldeten Modells'
+updated: 2026-09-30T04:41:48Z
+---
+
+OTel-Verifikation: routed sync zeigt model fake-upstream-model (konfiguriert) statt fake-upstream-model-upstream (vom Upstream gemeldet). Pruefen, ob Langertha das Antwort-Modell liefert (Response->model), und dann: Langfuse-Generation-Model = gemeldetes Modell (konfiguriertes als Metadata). Client-Antwort: beim bisherigen Verhalten bleiben (Client sieht den angefragten Namen) ausser Protokoll-Konvention sagt anders -- dokumentieren. Test.
+
+2026-09-30 04:06 Done. Response gains upstream_model (clone_with carries it); Stream gains model (routed/configured label) and upstream_model (from chunk->model via 7th from_callback cb). Router: sync answer clone_with(model => configured, upstream_model => reported); stream sets stream->model(configured) unless alias_only. Handler::Tracing::_model_opts: generation model = upstream_model // label // request model; configured_model => label when it differs. Tracing.pm end_trace: one line $metadata{configured_model} + POD item (merge with k62: it only adds a key to %metadata, which k62 maps generically to langfuse.observation.metadata.*). Client-visible model unchanged (sync: configured name; stream: name asked for) and documented in Handler::Router POD + README: /v1/models lists the configured id, Ollama echoes the name asked for, OpenAI/Anthropic model is informational. Tests: t/47_trace_upstream_model.t (Router sync/stream, no report, alias-only, Handler::Engine, real Tracing payload metadata, live client model unchanged). prove -l t/ PASS.
+
+Committed 2b071c8
