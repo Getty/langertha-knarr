@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T04:41:31Z
+claimed_by: knarr-worker-401
+class: standard
+completed: 2026-09-30T04:41:26Z
+created: 2026-09-30T03:52:45Z
+id: 66
+priority: high
+started: 2026-09-30T03:53:28Z
+status: done
+tags:
+- routing
+- passthrough
+title: 'Discovered passthrough: 401 vom Upstream -> transparent ueber Engine mit Knarrs
+  Key wiederholen'
+updated: 2026-09-30T04:41:31Z
+---
+
+Maintainer-Entscheidung 2026-09-30: SDKs mit Platzhalter-Key (Bearer dummy) unter --from-env bekommen seit k47/k52 fuer entdeckte Modelle 401 vom Provider. Neu: antwortet der Upstream bei raw passthrough eines NUR auto-discovered Modells mit 401 (vor dem ersten weitergeleiteten Byte -- beim Streaming kommt der Status vor dem Body), wird der Request transparent ueber die Engine (Handler::Router, Knarrs Key) beantwortet; Client merkt nichts. Nicht fuer unbekannte (nicht discovered) Modelle und nicht fuer explizit konfigurierte. Body des Requests muss dafuer gepuffert vorliegen (ist er). Tracing: ein Trace, Fallback im Metadata vermerken. Native + PSGI, sync + stream. Tests. Doku.
+
+2026-09-30 03:57 Design: raw path decides on the upstream status before anything reaches the client (native sync on_done, native stream on_header, PSGI after the buffered get). A 401 for a request that may fall back (raw passthrough of a model the router resolves = discovered-only) notes extra->{passthrough_fallback}=401 on the parsed Request and answers it through the handler chain (Handler::Router -> engine, Knarr key); the upstream's 401 body is drained and dropped. One trace: the raw trace of a fallback-eligible request is started only once the status rules the fallback out (Tracing start_trace gets start_hires to keep its start time); on fallback the handler chain's Handler::Tracing trace is the one trace and carries metadata passthrough_fallback=401. Other statuses unchanged. Knarr.pm: tail of _action_chat moved into _handle_chat (pure move) so the fallback can reuse it.
+
+2026-09-30 04:09 Done. Raw passthrough of a discovered-only model (router resolves it) that gets 401 from the upstream is answered through the handler chain (Handler::Router -> engine, Knarr's key); decided on the status before any byte reaches the client: native sync on_done, native stream on_header (401 body drained+dropped, later on_fail ignored), PSGI after the buffered get (falls through to the handler code). Other statuses and unknown-model 401s unchanged. One trace: raw trace of fallback-eligible requests opens only once the status rules the fallback out, back-dated via new Tracing::start_trace start_hires; fallback traced by Handler::Tracing with metadata passthrough_fallback=401 (new start_trace option, passed from Request extra). Knarr.pm: tail of _action_chat moved verbatim into _handle_chat (fallback reuses it); new _raw_passthrough_trace/_may_fall_back/_falls_back/_fall_back. Files: Knarr.pm, PSGI.pm, Tracing.pm, Handler/Tracing.pm (_open_trace + POD), Config.pm POD, README.md, CLAUDE.md, new t/94_discovered_401_fallback.t (328 tests; native+PSGI x anthropic+openai x sync+stream; mutation-checked: disabling the fallback fails 64). Verified: prove -lv t/40_streaming_live.t t/41_streaming_protocols_live.t green; prove -l t/ green (70 files, 3895 tests; 65_manifest skipped as before: needs unreleased core). Not committed; Changes untouched. Tree also holds other workers' uncommitted changes (k63/64 workers, k69/70 stream usage) in Knarr.pm, PSGI.pm, Handler/Tracing.pm.
+
+Committed 2ae3087
