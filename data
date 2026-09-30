@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-30T03:14:50Z
+claimed_by: knarr-worker-compose
+class: standard
+completed: 2026-09-30T03:14:50Z
+created: 2026-09-29T21:11:32Z
+id: 58
+priority: medium
+started: 2026-09-30T03:02:52Z
+status: done
+tags:
+- docker
+- langfuse
+- docs
+title: 'docker-compose: Langfuse-Projekt + Keys per LANGFUSE_INIT_* automatisch anlegen'
+updated: 2026-09-30T03:14:50Z
+---
+
+Verifiziert mit Langfuse 2.95: LANGFUSE_INIT_ORG_ID/PROJECT_ID/PROJECT_PUBLIC_KEY/PROJECT_SECRET_KEY/USER_EMAIL/USER_PASSWORD legen Org/Projekt/Keys beim Start an. Heute muss man laut README erst localhost:3000 oeffnen, registrieren, Projekt anlegen, Keys kopieren. Neu: docker-compose.yml setzt die INIT-Variablen aus denselben LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY aus .env (mit sinnvollen Defaults fuer Org/Projekt/User, Passwort aus .env), README-Compose-Abschnitt und .env.example entsprechend. Hinweis Podman: Postgres-Healthcheck laeuft dort nicht automatisch -- pruefen ob depends_on condition service_healthy unter Podman blockiert und ggf. im README erwaehnen.
+
+2026-09-30 03:10 Read v2.95.11 source (web/src/initialize.ts, env.mjs): emptyStringAsUndefined=true, so empty INIT_USER_PASSWORD skips the user; keys need both PUBLIC+SECRET; no pk-lf-/sk-lf- prefix enforced on create or auth. Init never updates an existing key: new secret under same public key is ignored -> 401 (documented). Compose now: NEXTAUTH_SECRET/SALT from LANGFUSE_NEXTAUTH_SECRET/LANGFUSE_SALT with :? (fail loud), INIT_* keys from LANGFUSE_PUBLIC_KEY/SECRET_KEY, org/project default knarr. Podman healthcheck stall reproduced; podman healthcheck run unblocks.
+
+2026-09-30 03:11 Done: docker-compose.yml provisions Langfuse org/project 'knarr' + API keys from LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY via LANGFUSE_INIT_*; user admin@knarr.local only when LANGFUSE_INIT_USER_PASSWORD set; NEXTAUTH_SECRET/SALT now from LANGFUSE_NEXTAUTH_SECRET/LANGFUSE_SALT with no default (compose fails loud). README Docker Compose section + .env.example updated (incl. Podman healthcheck note). Verified on langfuse/langfuse:2 under podman: config -q ok (and fails with clear message without secrets); GET /api/public/projects with pk/sk -> {id:knarr,name:Knarr}; ingestion of a trace 201 and readable; wrong secret 401; user OWNER of org knarr; empty password -> no user created; new secret under same pk -> 401 (old still 200), new pk -> 200. Stack torn down with down -v, pulled langfuse image removed. Uncommitted, Changes untouched. Also found: DB password 'langfuse' stays hardcoded (db has no host port, left as is).
+
+2026-09-30 03:14 Follow-up per coordinator: Postgres password now from LANGFUSE_DB_PASSWORD, required (:?) like NEXTAUTH_SECRET/SALT, used in POSTGRES_PASSWORD and DATABASE_URL; hex recommended (openssl rand -hex 16) since it sits in a URL. Existing pgdata keeps old password 'langfuse' -> set that or down -v (README + .env.example + compose comment). Verified: config -q fails with clear message without it, ok with it; real up on fresh volume: langfuse ran migrations over the generated password, /api/public/projects 200 with provisioned keys. Torn down (down -v), pulled image removed.
+
+Committed as 0f67aaf
