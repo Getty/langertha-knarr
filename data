@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-30T03:02:18Z
+claimed_by: knarr-worker-rawpt
+class: standard
+completed: 2026-09-30T03:02:18Z
+created: 2026-09-30T02:40:00Z
+id: 61
+priority: high
+started: 2026-09-30T02:40:13Z
+status: done
+tags:
+- tracing
+- passthrough
+- langfuse
+title: 'Raw passthrough: Token-Usage aus einer Kopie der Upstream-Antwort an Langfuse
+  geben'
+updated: 2026-09-30T03:02:22Z
+---
+
+Aus k57: Der raw passthrough ruft end_trace ohne usage auf -- passthrough-Generations haben keine Token-Zahlen. Neu: waehrend die Bytes 1:1 an den Client gehen, eine KOPIE mitlesen (gepuffert: JSON-Body; Streaming: SSE/NDJSON-Frames der letzten usage-Events -- OpenAI usage im letzten chunk bei stream_options.include_usage, Anthropic message_start/message_delta usage, Ollama prompt_eval_count/eval_count im done-Frame) und die Usage an end_trace geben (Tracing._usage_hash mappt Provider-Hashes seit k57). Die weitergeleiteten Bytes duerfen sich NICHT aendern (Hazard: passthrough seam is bytes). Kein Parsen, wenn Tracing aus ist. Native + PSGI. Auch model aus der Antwort, falls vorhanden. Test mit Fake-Upstream + Fake-Ingestion.
+
+2026-09-30 02:51 Done: new Langertha::Knarr::PassthroughUsage (Moose) reads usage+model off a copy of the answer: buffered JSON, SSE/NDJSON line by line (split frames, CRLF, only the unfinished tail held, capped at max_line 64 KiB, prefilter so only usage/model lines are JSON-decoded). OpenAI last usage chunk, Anthropic message_start usage with message_delta overlaid, Ollama done-frame counts. Knarr.pm: _raw_passthrough_usage_reader (none without trace, none for still-encoded bytes), fed in native on_header chunk callback after write_chunk and in _raw_passthrough_answer (native sync + PSGI); end_trace gets usage/model. Tracing.pm: one POD sentence only. t/99_raw_passthrough_usage.t: unit + native/PSGI x 3 protocols x sync/stream against fake upstream + fake Langfuse, asserts client bytes identical, counts, model, no reader without trace; red without wiring. t/99_langfuse_usage_keys.t k57 subtest updated (passthrough now carries upstream counts). t/00-load.t lists the module. prove -l t/ green, streaming live tests green.
+
+2026-09-30 03:02 Committed 0532fec
