@@ -282,8 +282,9 @@ way, repeats included (C<Set-Cookie> twice), except the connection-level
 ones and the framing Knarr sets itself (C<Transfer-Encoding>,
 C<Content-Length>). A body compressed with an encoding Knarr's HTTP client
 decodes (C<gzip>, C<deflate>) goes back decoded, without its
-C<Content-Encoding>, and so does every buffered answer; a stream in any
-other encoding is piped as it comes, with it. A stream gets
+C<Content-Encoding>; a body in any other encoding (C<br>, C<zstd>, several
+stacked), buffered or streamed, goes back as the upstream sent it, with
+it. A stream gets
 C<Cache-Control: no-cache> when the upstream sent none.
 
 The provider key is looked for once the proxy key is taken out (see
@@ -1211,16 +1212,19 @@ sub _raw_passthrough_request {
 
 # The upstream's answer as ( status, content type, body bytes, its other
 # headers ). A buffered stream (PSGI) is traced as a stream, like the
-# native one. The body goes back decoded, so its Content-Encoding stays
-# behind.
+# native one. The body goes back as Net::Async::HTTP handed it over, like a
+# stream: decoded when it knew the encoding, otherwise the upstream's bytes
+# with their Content-Encoding -- never decoded again here, where an
+# encoding HTTP::Message cannot decode (br without IO::Uncompress::Brotli,
+# anything unknown) came back as an empty body (k59).
 sub _raw_passthrough_answer {
   my ($self, $sb_req, $trace, $resp) = @_;
   $self->tracing->end_trace( $trace,
     output => $sb_req->stream ? '[stream]' : '[passthrough]' ) if $trace;
   return ( $resp->code,
     scalar $resp->header('Content-Type') // 'application/json',
-    $resp->decoded_content( charset => 'none' ) // '',
-    $self->_raw_passthrough_response_headers( $resp, 1 ) );
+    $resp->content // '',
+    $self->_raw_passthrough_response_headers($resp) );
 }
 
 # Upstream response headers that stay behind: connection-level ones, the
@@ -1234,16 +1238,20 @@ my %RESPONSE_HEADER_SKIP = map { $_ => 1 } qw(
 # value ] pairs: every line, a repeated header (Set-Cookie) repeated in its
 # order (k56). Content-Encoding goes along only while the bytes still carry
 # it: Net::Async::HTTP decodes every encoding it knows (gzip, deflate)
-# before Knarr sees a byte, and $buffered bytes go back decoded anyway.
+# before Knarr sees a byte, buffered or streamed, and passes any other as
+# it came (k59). The decision is its own: the whole header value, repeated
+# lines joined, is what it looks up -- in on_header it has not removed the
+# header yet, on a finished response it has.
 sub _raw_passthrough_response_headers {
-  my ($self, $resp, $buffered) = @_;
+  my ($self, $resp) = @_;
+  my $encoding = $resp->header('Content-Encoding');
+  my $decoded = defined $encoding && Net::Async::HTTP->can_decode($encoding);
   my @pairs;
   $resp->headers->scan( sub {
     my ($name, $value) = @_;
     my $lc = lc $name;
     return if $RESPONSE_HEADER_SKIP{$lc};
-    return if $lc eq 'content-encoding'
-      && ( $buffered || Net::Async::HTTP->can_decode($value) );
+    return if $lc eq 'content-encoding' && $decoded;
     push @pairs, [ $name, $value ];
   });
   return \@pairs;

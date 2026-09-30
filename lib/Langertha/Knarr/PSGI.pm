@@ -39,8 +39,8 @@ model the router does not configure is sent to the upstream byte for byte
 with the client's headers (minus the proxy key, see
 L<Langertha::Knarr/auth_token>), and the upstream's status, headers and body
 come back unchanged (see L<Langertha::Knarr/raw_passthrough>). A streamed
-passthrough answer is buffered like any other stream here, and goes back
-decoded, without its C<Content-Encoding>.
+passthrough answer is buffered like any other stream here; its
+C<Content-Encoding> is handled as on the native server.
 
 One limit is the PSGI server's: it hands over a request header the client
 sent twice as one value joined with C<, > (one C<HTTP_*> key), so the

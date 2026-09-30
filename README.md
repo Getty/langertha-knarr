@@ -785,7 +785,10 @@ sends twice reaches the upstream twice, in its order (only the proxy key is
 taken out, see above), and the upstream's response headers — `Set-Cookie`
 twice, `retry-after`, request ids, rate limits — come back to the client.
 Only connection-level headers (`Connection`, `Transfer-Encoding`,
-`Content-Length`, …) are Knarr's own on each side. Under PSGI the server
+`Content-Length`, …) are Knarr's own on each side. A compressed answer
+in an encoding Knarr's HTTP client decodes (gzip, deflate) goes back
+decoded, without its `Content-Encoding`; any other encoding (br, zstd, …)
+goes back as the upstream sent it, with its `Content-Encoding`. Under PSGI the server
 already joins a repeated request header into one comma-separated value,
 which then goes to the upstream as that one line.
 
