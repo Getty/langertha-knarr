@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T04:59:24Z
+claimed_by: knarr-worker-cfg
+class: standard
+completed: 2026-09-30T04:59:24Z
+created: 2026-09-30T03:52:50Z
+id: 67
+priority: medium
+started: 2026-09-30T04:42:31Z
+status: done
+tags:
+- config
+- bug
+title: 'Config: a2a als String (a2a: Name) crasht mit Perl-Fehler statt Validierungsmeldung'
+updated: 2026-09-30T04:59:24Z
+---
+
+Review 2, bestaetigt (/tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review2/a2a_cfg.pl): Config.pm ~482/501 dereferenziert a2a als Hash; 'a2a: Support Agent' -> knarr start stirbt mit Can't use string as a HASH ref; validate faengt es nicht. Fix: ref-Check, validate meldet es sauber (auch knarr check). Gleiches Muster fuer andere Block-Keys pruefen (langfuse, logging, passthrough, models, default). Test.
+
+2026-09-30 04:43 Reproduced: 'a2a: Support Agent' passes knarr check (validate never reads a2a) and dies in start at Config.pm:482; 'models: [a, b]' / an empty file / broken YAML die raw inside validate (knarr check exit 255). Fix: section builders croak on a non-mapping, validate reports those croaks like ollama_compat_version/workers, plus a data-load check first.
+
+2026-09-30 04:54 Done. Config.pm: new _section($key) croaks when models/default/langfuse/logging/a2a is not a mapping; all builders read through it; passthrough croaks on a list (true/false/mapping stay legal; before a list was silently {}). _build_data croaks on invalid YAML (naming the file) and on a non-mapping top level (empty file, list). validate: data-load check first (reported alone), then the section checks (reported without knock-on errors), then a models entry that is not a mapping; the croak-trim is a shared _error_text. knarr check / knarr start now exit 1 with e.g. 'a2a must be a mapping of key: value pairs, not ''Support Agent''' (was: start died with Can't use string as a HASH ref; check said OK). Tests: t/10-config.t (each section per reader + validate, legal shapes, model entry, empty/list/invalid file, check+start via subprocess), fail on the old Config.pm. prove -l t/ green (71 files, 4024 tests). Drift, not fixed: knarr models does not run validate (now a croak with the clean message plus 'at line'); listen: as a mapping is not checked.
+
+2026-09-30 04:58 Follow-up (coordinator): knarr models now runs validate and exits 1 with 'Configuration INVALID:' + the errors on stderr (Models.pm, POD updated); listen: as a mapping, or a list holding a mapping/list, croaks on read ('listen must be a host:port string or a list of them') and validate reports it with the section errors. Tests in t/10-config.t (listen wrong/legal shapes; check/start/models subprocess, no 'at FILE line N'); each fails without its fix. prove -l t/ green (71 files, 4035 tests; the 'Cannot fork a worker' line is 97_workers_live under host load, test ok). Card stays in review.
+
+Committed a31da1a
