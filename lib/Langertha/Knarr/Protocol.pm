@@ -3,6 +3,7 @@ package Langertha::Knarr::Protocol;
 our $VERSION = '1.102';
 use Moose::Role;
 use JSON::MaybeXS ();
+use Scalar::Util ();
 
 =head1 DESCRIPTION
 
@@ -178,6 +179,20 @@ sub manifest_endpoint { undef }
 sub format_models_response {
   my ($self, $models) = @_;
   return ( 200, { 'Content-Type' => 'application/json' }, '{"data":[]}' );
+}
+
+# The client's headers of the given names as [ name, value ] pairs for a
+# Request's forward_headers: one pair per line the client sent, repeats in
+# their order, read with a list-context ->header (k60). A request object
+# that has no ->header gives none.
+sub _forward_headers {
+  my ($self, $http_req, @names) = @_;
+  return [] unless Scalar::Util::blessed($http_req) && $http_req->can('header');
+  my @pairs;
+  for my $name (@names) {
+    push @pairs, map { [ $name, $_ ] } grep { defined && length } $http_req->header($name);
+  }
+  return \@pairs;
 }
 
 1;

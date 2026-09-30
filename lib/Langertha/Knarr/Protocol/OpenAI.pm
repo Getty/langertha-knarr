@@ -77,12 +77,8 @@ sub manifest_endpoint {
 sub parse_chat_request {
   my ($self, $http_req, $body_ref) = @_;
   my $data = $self->_json->decode( $$body_ref || '{}' );
-  # Capture auth headers for passthrough
-  my %fwd;
-  for my $h (qw( authorization )) {
-    my $v = scalar $http_req->header($h);
-    $fwd{$h} = $v if defined $v && length $v;
-  }
+  # Capture auth headers for passthrough, one pair per line (k60)
+  my $fwd = $self->_forward_headers( $http_req, qw( authorization ) );
   return Langertha::Knarr::Request->new(
     protocol        => 'openai',
     raw             => $data,
@@ -99,7 +95,7 @@ sub parse_chat_request {
     tool_choice     => $data->{tool_choice},
     response_format => $data->{response_format},
     session_id      => $data->{user} // scalar( $http_req->header('X-Session-Id') ),
-    extra           => { forward_headers => \%fwd },
+    extra           => { forward_headers => $fwd },
   );
 }
 

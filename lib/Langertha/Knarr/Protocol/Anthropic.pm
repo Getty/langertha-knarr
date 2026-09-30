@@ -114,12 +114,8 @@ sub parse_chat_request {
   my @msgs;
   push @msgs, { role => 'system', content => $system_str } if defined $system_str;
   push @msgs, @{ Langertha::Knarr::Image::anthropic_messages( $data->{messages} || [] ) };
-  # Capture auth headers for passthrough
-  my %fwd;
-  for my $h (qw( x-api-key anthropic-version authorization )) {
-    my $v = scalar $http_req->header($h);
-    $fwd{$h} = $v if defined $v && length $v;
-  }
+  # Capture auth headers for passthrough, one pair per line (k60)
+  my $fwd = $self->_forward_headers( $http_req, qw( x-api-key anthropic-version authorization ) );
   return Langertha::Knarr::Request->new(
     protocol    => 'anthropic',
     raw         => $data,
@@ -132,7 +128,7 @@ sub parse_chat_request {
     system      => $system_str,
     tools       => $data->{tools},
     tool_choice => $data->{tool_choice},
-    extra       => { forward_headers => \%fwd },
+    extra       => { forward_headers => $fwd },
   );
 }
 

@@ -41,11 +41,11 @@ my $loop = IO::Async::Loop->new;
   my $body = $json->encode({ model => 'm', messages => [ { role => 'user', content => 'hi' } ] });
   my $req = Langertha::Knarr::Protocol::Ollama->new->parse_chat_request(
     OllamaFwdReq->new( authorization => 'Bearer remote-own', 'x-other' => 'no' ), \$body );
-  is( $req->extra->{forward_headers}, { authorization => 'Bearer remote-own' },
+  is( $req->extra->{forward_headers}, [ [ authorization => 'Bearer remote-own' ] ],
     'parse_chat_request captures Authorization as forward_headers' );
   is( $req->extra->{path}, '/api/chat', 'the path is still recorded' );
   my $none = Langertha::Knarr::Protocol::Ollama->new->parse_chat_request( undef, \$body );
-  is( $none->extra->{forward_headers}, {}, 'no request object: no forward_headers' );
+  is( $none->extra->{forward_headers}, [], 'no request object: no forward_headers' );
 }
 
 my @seen;

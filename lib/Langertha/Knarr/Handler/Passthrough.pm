@@ -46,7 +46,11 @@ The client's auth headers go along as the protocol's parser captured them
 in C<< $request->extra->{forward_headers} >>: C<Authorization> for OpenAI
 and Ollama, C<x-api-key>, C<anthropic-version> and C<Authorization> for
 Anthropic. L<Langertha::Knarr> takes its own proxy key out of them first
-(see L<Langertha::Knarr/auth_token>).
+(see L<Langertha::Knarr/auth_token>). Each header line the client sent
+reaches the upstream as a line of its own, in its order (see
+L<Langertha::Knarr::Request/forward_header_pairs>). Under
+L<Langertha::Knarr::PSGI> the PSGI server has already joined a header sent
+twice into one value with C<, >, and that value goes on as one line.
 
 This is the building block behind Knarr's classic "configure your API
 keys once, point everything at me" use case.
@@ -234,12 +238,10 @@ sub _build_upstream_request {
   my $url = $self->_upstream_url( $request->protocol, $request->extra->{path} );
   my $http_req = HTTP::Request->new( POST => $url );
   $http_req->header( 'Content-Type' => 'application/json' );
-  # Forward client auth headers (captured by protocol parsers)
-  if ( my $fwd = $request->extra->{forward_headers} ) {
-    for my $h (keys %$fwd) {
-      $http_req->header( $h => $fwd->{$h} );
-    }
-  }
+  # Forward client auth headers (captured by protocol parsers), each line
+  # added, not set: a header sent twice reaches the upstream twice, in its
+  # order (k60).
+  $http_req->push_header(@$_) for $request->forward_header_pairs;
   if ( my $auth = $self->default_auth ) {
     $http_req->header( Authorization => $auth ) unless $http_req->header('Authorization');
   }

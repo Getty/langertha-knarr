@@ -141,14 +141,9 @@ sub parse_chat_request {
     ? $http_req->path : undef;
   # Capture auth headers for passthrough, like the OpenAI and Anthropic
   # parsers: a Handler::Passthrough in the chain forwards them to an
-  # authenticated remote Ollama (k49). Knarr takes its own key out.
-  my %fwd;
-  if ( $http_req && Scalar::Util::blessed($http_req) && $http_req->can('header') ) {
-    for my $h (qw( authorization )) {
-      my $v = scalar $http_req->header($h);
-      $fwd{$h} = $v if defined $v && length $v;
-    }
-  }
+  # authenticated remote Ollama (k49), one pair per line (k60). Knarr takes
+  # its own key out.
+  my $fwd = $self->_forward_headers( $http_req, qw( authorization ) );
   my @msgs;
   if ( $data->{messages} ) {
     @msgs = @{ Langertha::Knarr::Image::ollama_messages( $data->{messages} ) };
@@ -173,7 +168,7 @@ sub parse_chat_request {
     reasoning_effort => scalar $self->reasoning->from_ollama( $data->{think}, $data->{reasoning_effort} ),
     tools           => $data->{tools},
     response_format => $data->{format},
-    extra           => { forward_headers => \%fwd, defined $path ? ( path => $path ) : () },
+    extra           => { forward_headers => $fwd, defined $path ? ( path => $path ) : () },
   );
 }
 

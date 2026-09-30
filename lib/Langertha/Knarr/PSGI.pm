@@ -45,7 +45,9 @@ C<Content-Encoding> is handled as on the native server.
 One limit is the PSGI server's: it hands over a request header the client
 sent twice as one value joined with C<, > (one C<HTTP_*> key), so the
 upstream gets that header once, as that joined value. The native server
-forwards each line.
+forwards each line. The same holds for the auth headers a
+L<Langertha::Knarr::Handler::Passthrough> in the handler chain forwards
+(C<forward_headers>, see L<Langertha::Knarr::Request/forward_header_pairs>).
 
 Requests are authenticated exactly like on the native server: with
 L<Langertha::Knarr/auth_token> set, every route except the A2A agent card

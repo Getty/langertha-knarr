@@ -825,10 +825,11 @@ my %PROXY_KEY_HEADER = ( 'authorization' => 1, 'x-api-key' => 1 );
 # A client header's value as it may leave Knarr (k44, k53). In Authorization
 # and x-api-key, every comma-separated element that is Knarr's key -- bare
 # or as 'Bearer <key>', in either header -- is removed: a header sent twice
-# arrives as one value joined with ', ' (a PSGI server's HTTP_*, the
-# parsers' scalar ->header). Returns the value unchanged, byte for byte, when
-# no element carries the key; the remaining elements joined with ', ' when
-# some do; nothing when only the key was there, so the header is dropped.
+# arrives as one value joined with ', ' under PSGI (one HTTP_* key), and
+# a client may join them itself. Returns the value unchanged, byte for
+# byte, when no element carries the key; the remaining elements joined with
+# ', ' when some do; nothing when only the key was there, so the header is
+# dropped.
 # Every path that forwards client headers goes through here: the raw
 # passthrough and the forward_headers of the protocol parsers.
 sub _without_proxy_key {
@@ -854,12 +855,16 @@ sub _without_proxy_key {
 sub _parse_chat_request {
   my ($self, $proto, $req, $body_ref) = @_;
   my $sb_req = $proto->parse_chat_request( $req, $body_ref );
-  my $fwd = $sb_req->extra && $sb_req->extra->{forward_headers};
-  if ( ref $fwd eq 'HASH' ) {
-    for my $name ( keys %$fwd ) {
-      my ($value) = $self->_without_proxy_key( $name, $fwd->{$name} );
-      if ( defined $value ) { $fwd->{$name} = $value } else { delete $fwd->{$name} }
+  # One header line at a time, as the parser recorded them (k60): a line
+  # that was only the key is dropped, the others keep their order.
+  my $extra = $sb_req->extra;
+  if ( $extra && $extra->{forward_headers} ) {
+    my @kept;
+    for my $pair ( $sb_req->forward_header_pairs ) {
+      my ($value) = $self->_without_proxy_key(@$pair);
+      push @kept, [ $pair->[0], $value ] if defined $value;
     }
+    $extra->{forward_headers} = \@kept;
   }
   return $sb_req;
 }
@@ -1180,8 +1185,7 @@ my %PROVIDER_KEY_HEADERS = (
 sub _carries_provider_key {
   my ($self, $sb_req) = @_;
   my $names = $PROVIDER_KEY_HEADERS{ $sb_req->protocol // '' } or return 1;
-  my $fwd = ( $sb_req->extra && $sb_req->extra->{forward_headers} ) || {};
-  return ( grep { defined $fwd->{$_} && length $fwd->{$_} } @$names ) ? 1 : 0;
+  return ( grep { length } map { $sb_req->forward_header($_) } @$names ) ? 1 : 0;
 }
 
 # $headers: the client's request headers as [ name, value ] pairs; $path:

@@ -368,6 +368,16 @@ Revision history for Langertha-Knarr
       The bytes the client gets are unchanged, and nothing is read when
       tracing is off.
 
+    - A header the client sends twice (Authorization, x-api-key,
+      anthropic-version) now reaches the upstream twice through a
+      Handler::Passthrough in the handler chain, in its order, for OpenAI,
+      Anthropic and Ollama requests, instead of as one merged value;
+      Knarr's proxy key is taken out of each line on its own. The request's
+      forward_headers is now a list of [ name, value ] pairs, no longer a
+      hash: read it with the new forward_header_pairs and forward_header
+      methods on Langertha::Knarr::Request. Under PSGI the server still
+      joins a repeated header into one value, which goes on as one line.
+
 
 1.101     2026-08-15 00:13:51Z
 

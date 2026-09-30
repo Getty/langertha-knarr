@@ -71,6 +71,13 @@ The Ollama parser records the path the client asked for as C<path>
 L<Langertha::Knarr::Handler::Passthrough> sends the request to the same path
 upstream.
 
+The OpenAI, Anthropic and Ollama parsers record the client's auth headers
+as C<forward_headers>, an ArrayRef of C<[ name, value ]> pairs with one pair
+per header line the client sent, in its order (a header sent twice is two
+pairs). L<Langertha::Knarr> takes its own proxy key out of every pair;
+L<Langertha::Knarr::Handler::Passthrough> sends each pair upstream as a line
+of its own. Read them with L</forward_header_pairs> and L</forward_header>.
+
 =cut
 
 has model => (
@@ -212,6 +219,44 @@ either C<tools_native> or C<tools_hermes>. Hermes-wire engines
 as a native C<tools> field, and Langertha's C<chat_f> renders them there
 and handles C<tool_choice> per wire, so gating on C<tools_native> alone
 would silently drop a client's tools on those backends.
+
+=cut
+
+sub forward_header_pairs {
+  my ($self) = @_;
+  my $fwd = $self->extra->{forward_headers};
+  return map { [ @$_ ] } @$fwd if ref $fwd eq 'ARRAY';
+  return map { [ $_, $fwd->{$_} ] } sort keys %$fwd if ref $fwd eq 'HASH';
+  return;
+}
+
+=method forward_header_pairs
+
+    for my $pair ( $request->forward_header_pairs ) {
+      my ($name, $value) = @$pair;
+      ...
+    }
+
+The client headers recorded in C<< extra->{forward_headers} >> as a list of
+C<[ name, value ]> pairs, in their order, repeats kept (copies: changing one
+leaves the request alone). A C<forward_headers> hash, as a request built by
+hand may carry, reads as one pair per key, sorted by name. Empty when the
+request has none.
+
+=cut
+
+sub forward_header {
+  my ($self, $name) = @_;
+  return map { $_->[1] }
+    grep { lc $_->[0] eq lc $name && defined $_->[1] } $self->forward_header_pairs;
+}
+
+=method forward_header
+
+    my @values = $request->forward_header('authorization');
+
+Every value of one forwarded header, the name matched without regard to
+case, in the order the client sent them. Empty when there is none.
 
 =cut
 
