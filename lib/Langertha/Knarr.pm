@@ -5,6 +5,7 @@ use Moose;
 use Future;
 use Future::AsyncAwait;
 use IO::Async::Loop;
+use IO::Async::Resolver;
 use Net::Async::HTTP;
 use Net::Async::HTTP::Server;
 use HTTP::Response;
@@ -358,8 +359,9 @@ end, before any worker exists -- each worker inherits the discovered models
 and the learned capabilities instead of asking the upstreams again. Until
 the probe is done (each probe gives up after
 L<Langertha::Knarr::Config/probe_timeout>), connections wait in the
-sockets' backlog. Upstream connections the probe kept open are closed, so
-no two workers share one.
+sockets' backlog. Upstream connections the probe kept open are closed, and
+the helper processes of the loop's resolver end, so no two workers share
+one: each worker starts its own resolver helpers.
 
 =item 3. L</workers> processes are forked; each rebuilds the loop's kernel
 state (L<IO::Async::Loop/post_fork>) and accepts on the inherited sockets.
@@ -739,6 +741,7 @@ sub _prepare_workers {
     $self->_capability_probe->get if $self->_capability_probe;
   }
   $self->_drop_upstream_connections;
+  $self->_drop_resolver;
   return;
 }
 
@@ -759,6 +762,28 @@ sub _drop_upstream_connections {
       $loop->add($http);
     }
   }
+  return;
+}
+
+# The loop's resolver looks names up in helper processes, started by the
+# first connect to a hostname -- the probe's. Workers that inherited them
+# would share their pipes and read each other's answers: a request would go
+# to another request's upstream, or hang (k63). The helpers exit here, and
+# the loop gets a fresh resolver, for which every worker starts its own.
+# Waiting for their exit also clears the loop's watch on their pids, which
+# a worker's own helper could otherwise reuse.
+sub _drop_resolver {
+  my ($self) = @_;
+  my $loop = $self->loop;
+  my @resolvers = grep { $_->isa('IO::Async::Resolver') && !$_->parent } $loop->notifiers
+    or return;
+  for my $resolver (@resolvers) {
+    my $stopped = $resolver->stop;
+    Future->wait_any( $stopped, $loop->delay_future( after => 10 ) )->get;
+    $log->warn("Resolver helpers did not exit within 10s") unless $stopped->is_ready;
+    $loop->remove($resolver);
+  }
+  $loop->set_resolver( IO::Async::Resolver->new );
   return;
 }
 

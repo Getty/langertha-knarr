@@ -106,8 +106,11 @@ sub reap {
 }
 
 # The server runs in its own process, forked before any loop exists here.
+# $args{ready}, when given, tells from the port when the server is up
+# (default: ask answers).
 sub start_server {
   my (%args) = @_;
+  my $ready = delete $args{ready} // \&ask;
   my $port = free_port();
   my $pid = fork // die "fork: $!";
   unless ($pid) {
@@ -125,7 +128,7 @@ sub start_server {
     warn "server failed: $@" unless $ok;
     POSIX::_exit( $ok ? 0 : 1 );
   }
-  my $up = wait_until( 15, sub { ask($port) } );
+  my $up = wait_until( 15, sub { $ready->($port) } );
   return ( $pid, $port, $up );
 }
 
@@ -239,6 +242,136 @@ subtest 'workers => 2: discovery and probe run once, before the fork' => sub {
 
   kill TERM => $super;
   is( reap( $super, 15 ), 0, 'SIGTERM: supervisor exits with status 0' );
+};
+
+# Stands in for Langertha::Knarr::Router in the raw passthrough: every model
+# is a passthrough model, and the probe looks up "localhost" -- a hostname,
+# so IO::Async starts its resolver helper process in the supervisor, as a
+# real probe's first connect does.
+{
+  package TestResolveRouter;
+  sub new { my ($class, %a) = @_; bless { %a }, $class }
+  sub list_models { [] }
+  sub is_passthrough_model { 1 }
+  sub probe_capabilities_f {
+    my ($self, %args) = @_;
+    return $args{loop}->resolver->getaddrinfo(
+      host => 'localhost', service => $self->{port}, socktype => 'stream',
+    )->then( sub { Future->done(1) } );
+  }
+}
+
+# A local upstream that answers every request with its own name.
+sub fake_upstream {
+  my ($name) = @_;
+  my $port = free_port();
+  my $pid = fork // die "fork: $!";
+  unless ($pid) {
+    require IO::Async::Loop;
+    require HTTP::Response;
+    require Net::Async::HTTP::Server;
+    my $loop = IO::Async::Loop->really_new;
+    my $srv = Net::Async::HTTP::Server->new( on_request => sub {
+      my ($srv, $req) = @_;
+      my $resp = HTTP::Response->new(200);
+      $resp->header( 'Content-Type' => 'application/json' );
+      $resp->content( $json->encode({ upstream => $name }) );
+      $resp->content_length( length $resp->content );
+      $req->respond($resp);
+    } );
+    $loop->add($srv);
+    $srv->listen( addr => { family => 'inet', socktype => 'stream', ip => '127.0.0.1', port => $port } )->get;
+    $loop->run;
+    POSIX::_exit(0);
+  }
+  return ( $pid, $port );
+}
+
+subtest 'workers do not share the supervisor\'s resolver helper' => sub {
+  require Langertha::Knarr::Handler::Passthrough;
+  my ($openai, $oport)    = fake_upstream('openai');
+  my ($anthropic, $aport) = fake_upstream('anthropic');
+  my ($super, $port, $up) = start_server(
+    workers         => 4,
+    router          => TestResolveRouter->new( port => $oport ),
+    raw_passthrough => Langertha::Knarr::Handler::Passthrough->new(
+      upstreams => { openai => "http://localhost:$oport", anthropic => "http://localhost:$aport" },
+      timeout   => 20,
+    ),
+    ready => sub {
+      require HTTP::Tiny;
+      HTTP::Tiny->new( keep_alive => 0, timeout => 2 )
+        ->get("http://127.0.0.1:$_[0]/api/version")->{success} ? 1 : ();
+    },
+  );
+  ok( $up, 'server answers' ) or do { kill KILL => $super, $openai, $anthropic; return };
+
+  # 40 requests at once, alternating protocols, each on its own connection:
+  # every worker resolves "localhost" for both upstreams concurrently. With
+  # a shared helper, a worker reads another's answer and connects to the
+  # wrong upstream -- or waits for an answer that never comes.
+  my @kids;
+  for my $i ( 1 .. 40 ) {
+    my $proto = $i % 2 ? 'openai' : 'anthropic';
+    pipe( my $r, my $w ) or die "pipe: $!";
+    my $pid = fork // die "fork: $!";
+    unless ($pid) {
+      close $r;
+      require HTTP::Tiny;
+      my ($path, $body) = $proto eq 'openai'
+        ? ( '/v1/chat/completions', { model => 'gpt-x', messages => [ { role => 'user', content => 'hi' } ] } )
+        : ( '/v1/messages', { model => 'claude-x', max_tokens => 5, messages => [ { role => 'user', content => 'hi' } ] } );
+      my $res = HTTP::Tiny->new( keep_alive => 0, timeout => 30 )->post( "http://127.0.0.1:$port$path", {
+        headers => { 'Content-Type' => 'application/json', 'x-api-key' => 'k', 'Authorization' => 'Bearer k' },
+        content => $json->encode($body),
+      } );
+      my $got = $res->{success}
+        ? ( eval { $json->decode( $res->{content} )->{upstream} } // 'garbled' )
+        : 'HTTP ' . $res->{status};
+      print {$w} "$proto -> $got";
+      close $w;
+      POSIX::_exit(0);
+    }
+    close $w;
+    push @kids, [ $pid, $r ];
+  }
+  my %tally;
+  for my $k (@kids) {
+    my $fh = $k->[1];
+    my $got = do { local $/; <$fh> };
+    waitpid( $k->[0], 0 );
+    $tally{$got}++;
+  }
+  is( \%tally, { 'openai -> openai' => 20, 'anthropic -> anthropic' => 20 },
+    'every request reached its own protocol\'s upstream' );
+
+  kill TERM => $super;
+  is( reap( $super, 15 ), 0, 'SIGTERM: supervisor exits with status 0' );
+  kill TERM => $openai, $anthropic;
+  waitpid( $_, 0 ) for $openai, $anthropic;
+};
+
+subtest 'the supervisor ends its resolver helpers before the fork' => sub {
+  require IO::Async::Loop;
+  my $loop = IO::Async::Loop->really_new;
+  my $knarr = Langertha::Knarr->new(
+    handler => Langertha::Knarr::Handler::Code->new( code => sub { 'x' } ),
+    router  => TestResolveRouter->new( port => 1 ),
+    listen  => [ '127.0.0.1:' . free_port() ],
+    loop    => $loop,
+    workers => 2,
+  );
+  my $before = $loop->resolver;
+  $knarr->_prepare_workers;
+  isnt( refaddr $loop->resolver, refaddr $before, 'the loop has a fresh resolver' );
+  ok( !$before->loop, 'the probe\'s resolver left the loop' );
+  is( $before->workers, 0, '... with its helper processes' );
+  is( $loop->resolver->workers, 0, 'the fresh one starts none until a worker needs it' );
+  is( [ keys %{ $loop->{childwatches} } ], [], 'no watch on a helper pid is inherited' );
+  my @addrs = $loop->resolver->getaddrinfo(
+    host => 'localhost', service => 1, socktype => 'stream' )->get;
+  ok( scalar @addrs, 'the fresh resolver resolves' );
+  $loop->resolver->stop;
 };
 
 subtest 'upstream connections are not inherited by workers' => sub {
