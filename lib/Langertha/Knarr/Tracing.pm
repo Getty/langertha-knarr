@@ -114,8 +114,9 @@ Langfuse shows as the trace's input and output;
 =item * its child C<proxy-request> (kind C<CLIENT>), a
 C<langfuse.observation.type> C<generation> with
 C<langfuse.observation.model.name>, input and output,
-C<langfuse.observation.usage_details> (the same C<{ input, output, total }>
-counts the ingestion path sends, see L</end_trace>),
+C<langfuse.observation.usage_details> (the same buckets the ingestion
+path sends as C<usageDetails>, cache reads and writes apart from the
+uncached input, see L</end_trace>),
 C<langfuse.observation.completion_start_time> and
 C<langfuse.observation.metadata.*> (C<timing>, C<response_id>,
 C<configured_model>, C<thinking>, C<rate_limit>, C<tool_calls>). A
@@ -348,33 +349,85 @@ sub _rate_limit_hash {
   return %out ? \%out : undef;
 }
 
-# Token counts in the keys Langfuse stores: { input, output, total }.
-# Langertha::Usage's canonical input_tokens / output_tokens / total_tokens
-# are keys Langfuse's ingestion silently drops, leaving the generation at
-# 0 / 0 / 0 (k57). Takes a Langertha::Usage, a hashref already in Langfuse's
-# keys (the shape end_trace's SYNOPSIS documents), or a provider's own usage
-# hash (OpenAI, Anthropic, Ollama), which Langertha::Usage reads. Anything
-# else, or an empty hash, is no usage at all -- never a zeroed one.
+# Langfuse's usage details are exclusive buckets, each priced on its own:
+# input is the uncached input, prompt-cache reads and writes have their own
+# keys (the names Langfuse's own normalizer and model prices use), and total
+# is the sum of all of them (k65).
+my @CACHE_BUCKETS = qw( input_cached_tokens input_cache_creation );
+
+# Token counts in the keys Langfuse stores: { input, output, total } plus
+# the cache buckets that are not zero. Langertha::Usage's canonical
+# input_tokens / output_tokens / total_tokens are keys Langfuse's ingestion
+# silently drops, leaving the generation at 0 / 0 / 0 (k57). Takes a
+# Langertha::Usage, a hashref already in Langfuse's keys (the shape
+# end_trace's SYNOPSIS documents), or a provider's own usage hash (OpenAI,
+# Anthropic, Ollama), which Langertha::Usage reads. Anything else, an empty
+# hash, or one that counts nothing, is no usage at all -- never a zeroed one.
 sub _usage_hash {
   my ($u) = @_;
   return undef unless defined $u;
   if ( ref $u eq 'HASH' ) {
-    return undef unless %$u;
-    return _langfuse_counts( @{$u}{qw( input output total )} )
+    return _langfuse_counts( $u, $u->{total} )
       if grep { defined $u->{$_} } qw( input output total );
     $u = Langertha::Usage->from_hash($u);
   }
   return undef unless blessed($u) && $u->can('input_tokens');
-  return _langfuse_counts( $u->input_tokens, $u->output_tokens, $u->total_tokens );
+  return _langfuse_counts( { _input_buckets($u), output => $u->output_tokens } );
+}
+
+# The input of a Langertha::Usage split into Langfuse's buckets. A core
+# that knows the cache counts says how they relate to input_tokens; older
+# ones (0.503) keep only the provider's hash, read here for the two wires
+# that carry cache counts: OpenAI counts cached_tokens (and
+# cache_write_tokens) inside prompt_tokens, Anthropic counts
+# cache_read_input_tokens and cache_creation_input_tokens beside
+# input_tokens.
+sub _input_buckets {
+  my ($u) = @_;
+  return (
+    input                => $u->uncached_input_tokens,
+    input_cached_tokens  => $u->cached_tokens,
+    input_cache_creation => $u->cache_write_tokens,
+  ) if $u->can('uncached_input_tokens');
+  my $input = $u->input_tokens;
+  my $raw   = $u->can('raw') ? $u->raw : undef;
+  return ( input => $input ) unless ref $raw eq 'HASH';
+  my $ptd = ref $raw->{prompt_tokens_details} eq 'HASH' ? $raw->{prompt_tokens_details} : undef;
+  my $inside = $ptd && grep { defined $ptd->{$_} } qw( cached_tokens cache_write_tokens );
+  # Copied out first: map aliases its list, which would add the missing
+  # keys to the provider's hash.
+  my @counts = $inside
+    ? ( $ptd->{cached_tokens}, $ptd->{cache_write_tokens} )
+    : ( $raw->{cache_read_input_tokens}, $raw->{cache_creation_input_tokens} );
+  my ( $read, $write ) = map { looks_like_number($_) ? int($_) : 0 } @counts;
+  if ($inside) {
+    $input -= $read + $write;
+    $input = 0 if $input < 0;
+  }
+  return ( input => $input, input_cached_tokens => $read, input_cache_creation => $write );
 }
 
 # Langfuse validates the counts as integers: a count that arrived as a
 # string would be encoded as a JSON string and the whole event rejected.
+# A missing total is the sum of the buckets; a usage that counts nothing
+# is none.
 sub _langfuse_counts {
-  my ( $input, $output, $total ) = @_;
-  $_ = looks_like_number($_) ? int($_) : 0 for $input, $output;
-  $total = looks_like_number($total) ? int($total) : $input + $output;
-  return { input => $input, output => $output, total => $total };
+  my ( $counts, $total ) = @_;
+  my %out = map { $_ => looks_like_number( $counts->{$_} ) ? int( $counts->{$_} ) : 0 }
+    qw( input output ), @CACHE_BUCKETS;
+  my $sum = 0;
+  $sum += $_ for values %out;
+  delete $out{$_} for grep { !$out{$_} } @CACHE_BUCKETS;
+  $out{total} = looks_like_number($total) ? int($total) : $sum;
+  return ( $sum || $out{total} ) ? \%out : undef;
+}
+
+# Langfuse v2's usage has no cache buckets: its input is the whole input.
+sub _legacy_usage {
+  my ($usage) = @_;
+  my $input = 0;
+  $input += $usage->{$_} // 0 for 'input', @CACHE_BUCKETS;
+  return { input => $input, output => $usage->{output}, total => $usage->{total}, unit => 'TOKENS' };
 }
 
 # Flatten the response's tool calls into plain hashes for the trace metadata.
@@ -555,13 +608,26 @@ carries), a hashref in Langfuse's own keys (C<input> / C<output> / C<total>),
 or a provider's usage hash (OpenAI C<prompt_tokens>, Anthropic
 C<input_tokens>, Ollama C<prompt_eval_count>, ...), read through
 L<Langertha::Usage/from_hash>. Whatever the input, the generation gets the
-counts in the only keys Langfuse stores: C<usage> as C<< { input, output,
-total, unit => 'TOKENS' } >> for Langfuse v2 and C<usageDetails> as
-C<< { input, output, total } >> for v3, which lets it override C<usage>;
-v2 drops the key it does not know. A missing C<total> is
-C<input + output>. Without usage, or with an empty hash, neither key is
-sent, so Langfuse never records a zeroed usage. The raw passthrough passes
-the provider's usage hash it read off a copy of the upstream's answer (see
+counts in the only keys Langfuse stores: C<usageDetails> for v3, which
+lets it override C<usage>, and C<usage> as C<< { input, output, total,
+unit => 'TOKENS' } >> for Langfuse v2, which drops the key it does not
+know.
+
+C<usageDetails> holds Langfuse's exclusive buckets, each priced on its own
+and C<total> their sum: C<input> is the uncached input, prompt-cache reads
+go to C<input_cached_tokens> and cache writes to C<input_cache_creation>
+(each only when not zero), and C<output>. Every token lands in exactly one
+bucket, whichever way the provider counts: Anthropic reports
+C<cache_read_input_tokens> / C<cache_creation_input_tokens> beside
+C<input_tokens>, OpenAI's C<prompt_tokens_details.cached_tokens> is part
+of C<prompt_tokens> and is taken out of C<input>. v2's C<usage> has no
+cache buckets, so its C<input> is the whole input, cache included. A
+hashref in Langfuse's keys may carry the two cache buckets itself; its
+missing C<total> is the sum of its buckets; a provider's C<total> is
+always the sum. Without usage, with an empty hash, or with one that
+counts no tokens (an error body, a hash without any count key), neither
+key is sent, so Langfuse never records a zeroed usage. The raw
+passthrough passes the provider's usage hash it read off a copy of the upstream's answer (see
 L<Langertha::Knarr/tracing>).
 
 =item * C<tool_calls> — the response's L<Langertha::ToolCall> list. The trace
@@ -658,7 +724,7 @@ sub end_trace {
           $opts{model} ? (model => $opts{model}) : (),
           # Langfuse v2 reads usage and drops usageDetails; v3 reads both,
           # usageDetails overriding usage.
-          $usage       ? (usage        => { %$usage, unit => 'TOKENS' },
+          $usage       ? (usage        => _legacy_usage($usage),
                           usageDetails => $usage) : (),
           %metadata    ? (metadata => \%metadata) : (),
         },

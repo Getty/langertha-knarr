@@ -2,6 +2,17 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Langfuse generations now carry prompt-cache tokens, on both
+      transports, for routed answers, routed streams and the raw
+      passthrough. The usage details are Langfuse's exclusive buckets:
+      input is the uncached input, cache reads are input_cached_tokens,
+      cache writes input_cache_creation, total their sum. Anthropic's
+      cache_read_input_tokens / cache_creation_input_tokens were dropped
+      before, so a cached request showed a handful of input tokens; OpenAI's
+      cached_tokens stayed inside input and was priced as uncached. The v2
+      usage keeps the whole input. A usage that counts no tokens (an error
+      body, a hash without a count key) is no usage, instead of a 0/0/0.
+
     - A config section of the wrong type (a2a: Support Agent, models: as a
       list, a default: string, listen: as a mapping, ...), a file that is
       not valid YAML and an empty config file are reported by knarr check

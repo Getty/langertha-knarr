@@ -31,6 +31,7 @@ use Langertha::Knarr::Config;
 use Langertha::Knarr::Router;
 use Langertha::Knarr::Session;
 use Langertha::Knarr::Request;
+use Langertha::Knarr::Stream;
 use Langertha::Knarr::Tracing;
 use Langertha::Knarr::Handler::Code;
 use Langertha::Knarr::Handler::Router;
@@ -136,11 +137,107 @@ for my $case (
 }
 
 subtest 'no usage: no usage keys, not a 0/0/0' => sub {
-  for my $usage ( undef, {} ) {
+  for my $usage ( undef, {}, { error => 'overloaded' }, { prompt_tokens_details => { cached_tokens => 0 } },
+                  Langertha::Usage->from_hash( { error => 'overloaded' } ) ) {
     my $gen = traced_usage($usage) or return;
     ok !exists $gen->{usage},        'no usage';
     ok !exists $gen->{usageDetails}, 'no usageDetails';
   }
+};
+
+# k65: prompt-cache counts. Langfuse's usage details are exclusive buckets:
+# input is the uncached input, cache reads go to input_cached_tokens, cache
+# writes to input_cache_creation, and total is the sum -- Langfuse prices
+# each bucket, so a count in two of them is charged twice. Anthropic counts
+# its cache beside input_tokens, OpenAI's cached_tokens is part of
+# prompt_tokens. v2's usage knows no buckets and keeps the whole input.
+my %ANTHROPIC_CACHED = ( input_tokens => 12, cache_read_input_tokens => 50000,
+                         cache_creation_input_tokens => 2000, output_tokens => 300 );
+my %LANGFUSE_ANTHROPIC_CACHED = (
+  usage        => { input => 52012, output => 300, total => 52312, unit => 'TOKENS' },
+  usageDetails => { input => 12, input_cached_tokens => 50000, input_cache_creation => 2000,
+                    output => 300, total => 52312 },
+);
+
+for my $case (
+  [ 'Anthropic, cache read and write' => { %ANTHROPIC_CACHED }, \%LANGFUSE_ANTHROPIC_CACHED ],
+  [ 'Anthropic, cache counts as strings' =>
+    { map { $_ => "$ANTHROPIC_CACHED{$_}" } keys %ANTHROPIC_CACHED }, \%LANGFUSE_ANTHROPIC_CACHED ],
+  [ 'Anthropic, as a Langertha::Usage' =>
+    Langertha::Usage->from_hash( { %ANTHROPIC_CACHED } ), \%LANGFUSE_ANTHROPIC_CACHED ],
+  [ 'OpenAI, cached_tokens inside prompt_tokens' =>
+    { prompt_tokens => 50012, completion_tokens => 300, total_tokens => 50312,
+      prompt_tokens_details => { cached_tokens => 50000 } },
+    { usage        => { input => 50012, output => 300, total => 50312, unit => 'TOKENS' },
+      usageDetails => { input => 12, input_cached_tokens => 50000, output => 300, total => 50312 } } ],
+  [ 'OpenAI, cache write inside prompt_tokens' =>
+    { prompt_tokens => 100, completion_tokens => 5,
+      prompt_tokens_details => { cached_tokens => 60, cache_write_tokens => 30 } },
+    { usage        => { input => 100, output => 5, total => 105, unit => 'TOKENS' },
+      usageDetails => { input => 10, input_cached_tokens => 60, input_cache_creation => 30,
+                        output => 5, total => 105 } } ],
+  [ 'OpenAI, no cache hit' =>
+    { prompt_tokens => 3, completion_tokens => 4, total_tokens => 7,
+      prompt_tokens_details => { cached_tokens => 0 } }, \%LANGFUSE_USAGE ],
+  [ 'Anthropic message_delta, output only' => { output_tokens => '7' },
+    { usage        => { input => 0, output => 7, total => 7, unit => 'TOKENS' },
+      usageDetails => { input => 0, output => 7, total => 7 } } ],
+  [ 'Langfuse keys with cache buckets' =>
+    { input => 12, input_cached_tokens => 50000, input_cache_creation => 2000, output => 300 },
+    \%LANGFUSE_ANTHROPIC_CACHED ],
+) {
+  my ( $name, $usage, $expect ) = @$case;
+  subtest "cache: $name" => sub {
+    my $before = ref $usage eq 'HASH' ? $json->encode($usage) : undef;
+    my $gen = traced_usage($usage) or return;
+    is { map { $_ => $gen->{$_} } qw( usage usageDetails ) }, $expect,
+      'each count in exactly one bucket';
+    is $json->encode($usage), $before, 'the provider hash is left as it was' if defined $before;
+  };
+}
+
+subtest 'cache: routed response' => sub {
+  my $handler = Langertha::Knarr::Handler::Tracing->new(
+    wrapped => Langertha::Knarr::Handler::Code->new( code => sub {
+      Langertha::Response->new( content => 'hi', model => 'claude-test',
+        usage => { %ANTHROPIC_CACHED } );
+    } ),
+    tracing => tracing(),
+  );
+  $handler->handle_chat_f( Langertha::Knarr::Session->new( id => 's' ),
+    Langertha::Knarr::Request->new( protocol => 'anthropic', model => 'claude-test',
+      messages => [ { role => 'user', content => 'hi' } ] ) )->get;
+  my $gen = next_generation_update() or return;
+  is { map { $_ => $gen->{$_} } qw( usage usageDetails ) }, \%LANGFUSE_ANTHROPIC_CACHED,
+    'the engine\'s cache counts in their own buckets';
+};
+
+{
+  package CachedUsageStream::Handler;
+  use Moose;
+  extends 'Langertha::Knarr::Handler::Code';
+  sub handle_stream_f {
+    my @parts = ( 'Hel', 'lo' );
+    return Future->done( Langertha::Knarr::Stream->new(
+      generator => sub { @parts ? shift @parts : undef },
+      usage     => { %ANTHROPIC_CACHED },
+    ) );
+  }
+  __PACKAGE__->meta->make_immutable;
+}
+
+subtest 'cache: routed stream' => sub {
+  my $handler = Langertha::Knarr::Handler::Tracing->new(
+    wrapped => CachedUsageStream::Handler->new( code => sub { 'unused' } ),
+    tracing => tracing(),
+  );
+  my $stream = $handler->handle_stream_f( Langertha::Knarr::Session->new( id => 's' ),
+    Langertha::Knarr::Request->new( protocol => 'anthropic', model => 'claude-test', stream => 1,
+      messages => [ { role => 'user', content => 'hi' } ] ) )->get;
+  1 while defined $stream->next_chunk_f->get;
+  my $gen = next_generation_update() or return;
+  is { map { $_ => $gen->{$_} } qw( usage usageDetails ) }, \%LANGFUSE_ANTHROPIC_CACHED,
+    'the stream\'s cache counts in their own buckets';
 };
 
 # Raw passthrough pipes the upstream bytes 1:1; its trace reads the usage off

@@ -46,10 +46,10 @@ my %STREAM = (
     qq(data: {"choices":[{"delta":{"content":"Hel"},"index":0}],"id":"c1","model":"gpt-4o-2024-08-06","usage":null}\n\n),
     qq(data: {"choices":[{"delta":{"content":"lo \\"usage\\":{"},"index":0}],"id":"c1","model":"gpt-4o-2024-08-06","usage":null}\n\n),
     qq(data: {"choices":[{"delta":{},"finish_reason":"stop","index":0}],"id":"c1","model":"gpt-4o-2024-08-06","usage":null}\n\n),
-    qq(data: {"choices":[],"id":"c1","model":"gpt-4o-2024-08-06","usage":{"completion_tokens":7,"prompt_tokens":11,"total_tokens":18}}\n\n),
+    qq(data: {"choices":[],"id":"c1","model":"gpt-4o-2024-08-06","usage":{"completion_tokens":7,"prompt_tokens":11,"prompt_tokens_details":{"cached_tokens":8},"total_tokens":18}}\n\n),
     "data: [DONE]\n\n" ),
   anthropic => join( '',
-    qq(event: message_start\ndata: {"message":{"id":"msg_1","model":"claude-x-20260101","role":"assistant","type":"message","usage":{"cache_read_input_tokens":0,"input_tokens":20,"output_tokens":1}},"type":"message_start"}\n\n),
+    qq(event: message_start\ndata: {"message":{"id":"msg_1","model":"claude-x-20260101","role":"assistant","type":"message","usage":{"cache_creation_input_tokens":4,"cache_read_input_tokens":30,"input_tokens":20,"output_tokens":1}},"type":"message_start"}\n\n),
     qq(event: content_block_delta\ndata: {"delta":{"text":"Hi","type":"text_delta"},"index":0,"type":"content_block_delta"}\n\n),
     qq(event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"},"type":"message_delta","usage":{"output_tokens":5}}\n\n),
     qq(event: message_stop\ndata: {"type":"message_stop"}\n\n) ),
@@ -58,14 +58,26 @@ my %STREAM = (
     qq({"created_at":"2026-09-30T00:00:01Z","done":true,"done_reason":"stop","eval_count":4,"message":{"content":"","role":"assistant"},"model":"llama3.2:3b","prompt_eval_count":9,"total_duration":123}\n) ),
 );
 my %BODY = (
-  openai    => qq({"choices":[{"finish_reason":"stop","index":0,"message":{"content":"Hello","role":"assistant"}}],"id":"c1","model":"gpt-4o-2024-08-06","usage":{"completion_tokens":7,"prompt_tokens":11,"total_tokens":18}}),
-  anthropic => qq({"content":[{"text":"Hi","type":"text"}],"id":"msg_1","model":"claude-x-20260101","role":"assistant","stop_reason":"end_turn","type":"message","usage":{"input_tokens":20,"output_tokens":5}}),
+  openai    => qq({"choices":[{"finish_reason":"stop","index":0,"message":{"content":"Hello","role":"assistant"}}],"id":"c1","model":"gpt-4o-2024-08-06","usage":{"completion_tokens":7,"prompt_tokens":11,"prompt_tokens_details":{"cached_tokens":8},"total_tokens":18}}),
+  anthropic => qq({"content":[{"text":"Hi","type":"text"}],"id":"msg_1","model":"claude-x-20260101","role":"assistant","stop_reason":"end_turn","type":"message","usage":{"cache_creation_input_tokens":4,"cache_read_input_tokens":30,"input_tokens":20,"output_tokens":5}}),
   ollama    => qq({"done":true,"eval_count":4,"message":{"content":"Hi","role":"assistant"},"model":"llama3.2:3b","prompt_eval_count":9}),
 );
 my %EXPECT = (
   openai    => { model => 'gpt-4o-2024-08-06', counts => [ 11, 7, 18 ] },
   anthropic => { model => 'claude-x-20260101', counts => [ 20, 5, 25 ] },
   ollama    => { model => 'llama3.2:3b',       counts => [ 9, 4, 13 ] },
+);
+# What the generation carries (k65): Langfuse's exclusive buckets -- the
+# uncached input, cache reads and writes apart, total their sum -- and v2's
+# usage with the whole input. OpenAI's cached_tokens are part of
+# prompt_tokens, Anthropic's cache counts come beside input_tokens.
+my %LANGFUSE = (
+  openai    => [ { input => 3,  input_cached_tokens => 8, output => 7, total => 18 },
+                 { input => 11, output => 7, total => 18, unit => 'TOKENS' } ],
+  anthropic => [ { input => 20, input_cached_tokens => 30, input_cache_creation => 4, output => 5, total => 59 },
+                 { input => 54, output => 5, total => 59, unit => 'TOKENS' } ],
+  ollama    => [ { input => 9,  output => 4, total => 13 },
+                 { input => 9,  output => 4, total => 13, unit => 'TOKENS' } ],
 );
 
 sub counts_of {
@@ -87,7 +99,8 @@ subtest 'a stream split at every byte gives the same usage' => sub {
   }
   my $r = Langertha::Knarr::PassthroughUsage->new;
   $r->add_chunk( $STREAM{anthropic} );
-  is( $r->usage, { cache_read_input_tokens => 0, input_tokens => 20, output_tokens => 5 },
+  is( $r->usage, { cache_creation_input_tokens => 4, cache_read_input_tokens => 30,
+                   input_tokens => 20, output_tokens => 5 },
     'anthropic: message_delta counts laid over message_start' );
 };
 
@@ -265,10 +278,8 @@ for my $p ( sort keys %STREAM ) {
         "$tag: the client gets the upstream's bytes, byte for byte" );
       my $gen = next_generation();
       ok( $gen, "$tag: Langfuse got the generation" ) or next;
-      my ($in, $out, $total) = @{ $EXPECT{$p}{counts} };
-      is( $gen->{usageDetails}, { input => $in, output => $out, total => $total },
-        "$tag: the upstream's token counts" );
-      is( $gen->{usage}{unit}, 'TOKENS', "$tag: v2 usage shape" );
+      is( $gen->{usageDetails}, $LANGFUSE{$p}[0], "$tag: the upstream's token counts, cache apart" );
+      is( $gen->{usage}, $LANGFUSE{$p}[1], "$tag: v2 usage shape, the whole input" );
       is( $gen->{model}, $EXPECT{$p}{model}, "$tag: the model that answered" );
       is( $gen->{output}, $stream ? '[stream]' : '[passthrough]', "$tag: output marker as before" );
     }

@@ -327,9 +327,62 @@ subtest 'a provider usage hash maps like the ingestion path' => sub {
   ok !exists $gen->{attr}{'langfuse.observation.input'}, 'no messages, no input attribute';
 };
 
+# k65: usage_details are exclusive buckets, total their sum; Anthropic
+# counts its cache beside input_tokens, OpenAI's cached_tokens inside
+# prompt_tokens.
+subtest 'cache counts in their own usage_details buckets' => sub {
+  my $tracing = tracing();
+  for my $case (
+    [ Anthropic => { input_tokens => 12, cache_read_input_tokens => 50000,
+                     cache_creation_input_tokens => 2000, output_tokens => 300 },
+      { input => 12, input_cached_tokens => 50000, input_cache_creation => 2000,
+        output => 300, total => 52312 } ],
+    [ OpenAI => { prompt_tokens => 50012, completion_tokens => 300, total_tokens => 50312,
+                  prompt_tokens_details => { cached_tokens => 50000 } },
+      { input => 12, input_cached_tokens => 50000, output => 300, total => 50312 } ],
+  ) {
+    my ( $name, $usage, $expect ) = @$case;
+    my $trace = $tracing->start_trace( model => 'm', format => lc $name );
+    $tracing->end_trace( $trace, output => '[passthrough]', usage => $usage );
+    my ( $root, $gen ) = next_spans() or return;
+    is $json->decode( $gen->{attr}{'langfuse.observation.usage_details'} ), $expect,
+      "$name: uncached input, cache read and write apart";
+  }
+};
+
+{
+  package CachedUsageStream::Handler;
+  use Moose;
+  extends 'Langertha::Knarr::Handler::Code';
+  sub handle_stream_f {
+    my @parts = ( 'Hel', 'lo' );
+    return Future->done( Langertha::Knarr::Stream->new(
+      generator => sub { @parts ? shift @parts : undef },
+      usage     => { input_tokens => 12, cache_read_input_tokens => 50000,
+                     cache_creation_input_tokens => 2000, output_tokens => 300 },
+    ) );
+  }
+  __PACKAGE__->meta->make_immutable;
+}
+
+subtest 'routed stream: cache counts in their own buckets' => sub {
+  my $handler = Langertha::Knarr::Handler::Tracing->new(
+    wrapped => CachedUsageStream::Handler->new( code => sub { 'unused' } ),
+    tracing => tracing(),
+  );
+  my $stream = $handler->handle_stream_f( Langertha::Knarr::Session->new( id => 's' ),
+    Langertha::Knarr::Request->new( protocol => 'anthropic', model => 'claude-test',
+      stream => 1, messages => $messages ) )->get;
+  1 while defined $stream->next_chunk_f->get;
+  my ( $root, $gen ) = next_spans() or return;
+  is $json->decode( $gen->{attr}{'langfuse.observation.usage_details'} ),
+    { input => 12, input_cached_tokens => 50000, input_cache_creation => 2000,
+      output => 300, total => 52312 }, 'the stream\'s usage, cache apart';
+};
+
 subtest 'no usage: no usage attribute, not a 0/0/0' => sub {
   my $tracing = tracing();
-  for my $usage ( undef, {} ) {
+  for my $usage ( undef, {}, { error => 'overloaded' } ) {
     my $trace = $tracing->start_trace( model => 'gpt-test', format => 'openai' );
     $tracing->end_trace( $trace, output => 'hi', defined $usage ? ( usage => $usage ) : () );
     my ( $root, $gen ) = next_spans() or return;
