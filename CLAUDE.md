@@ -84,6 +84,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Langertha::Knarr::Session** — Per-conversation state
 - **Langertha::Knarr::PSGI** — PSGI adapter (buffered streams, same auth + raw passthrough)
 - **Langertha::Knarr::Reasoning** — Anthropic `thinking` / Ollama `think` → normalized `reasoning_effort` (budget_tokens via core BudgetPolicy)
+- **Langertha::Knarr::PassthroughUsage** — reads token usage + model off a copy of a raw passthrough answer (JSON body or SSE/NDJSON frames) for the Langfuse trace; forwarded bytes untouched
 - **Langertha::Knarr::Image** — face image parts (OpenAI image_url, Anthropic image blocks, Ollama images) → core `Langertha::Content::Image`; no-op on a core that cannot write every content format
 - **Langertha::Knarr::Manifest** — `/.well-known/langertha.json` provider manifest from the exposed model surface (needs core `Langertha::Manifest::Builder`, else 404)
 - **Langertha::Knarr::Protocol** — Moose role for all wire protocols
@@ -125,7 +126,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 
 ## OOP Framework
 
-- **Moose**: Knarr.pm, Handler role, all Handler::* modules, Protocol role + Protocol::* modules, Role::UpstreamHTTP, Request, Response, Session, Stream, Manifest, PSGI, Reasoning
+- **Moose**: Knarr.pm, Handler role, all Handler::* modules, Protocol role + Protocol::* modules, Role::UpstreamHTTP, Request, Response, Session, Stream, Manifest, PSGI, Reasoning, PassthroughUsage
 - **Plain** (functions): Image
 - **Moo**: CLI, Config, Router, Tracing, RequestLog
 

@@ -13,6 +13,7 @@ my @modules = qw(
   Langertha::Knarr::Image
   Langertha::Knarr::Manifest
   Langertha::Knarr::Stream
+  Langertha::Knarr::PassthroughUsage
   Langertha::Knarr::Role::UpstreamHTTP
   Langertha::Knarr::Handler
   Langertha::Knarr::Handler::Code

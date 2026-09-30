@@ -143,10 +143,10 @@ subtest 'no usage: no usage keys, not a 0/0/0' => sub {
   }
 };
 
-# Raw passthrough pipes the upstream bytes 1:1 and never parses them, so it
-# has no usage to report. Its generation must then carry no usage at all --
-# never a zeroed one that Langfuse would store as real counts.
-subtest 'raw passthrough: no invented usage' => sub {
+# Raw passthrough pipes the upstream bytes 1:1; its trace reads the usage off
+# a copy of them (k61), so the generation carries the upstream's own counts
+# under Langfuse's keys -- the same mapping as a routed response.
+subtest 'raw passthrough: the upstream\'s usage under Langfuse\'s keys' => sub {
   my $backend = Langertha::Knarr->new(
     handler => Langertha::Knarr::Handler::Code->new( code => sub {
       Langertha::Response->new( content => 'UPSTREAM', model => 'gpt-mystery',
@@ -190,8 +190,8 @@ subtest 'raw passthrough: no invented usage' => sub {
 
   my $gen = next_generation_update() or return;
   is $gen->{output}, '[passthrough]', 'the passthrough generation';
-  ok !exists $gen->{usage},        'no usage';
-  ok !exists $gen->{usageDetails}, 'no usageDetails';
+  is $gen->{usage},        $LANGFUSE_USAGE{usage},        'usage: v2 shape with the upstream counts';
+  is $gen->{usageDetails}, $LANGFUSE_USAGE{usageDetails}, 'usageDetails: v3 shape with the upstream counts';
 };
 
 done_testing;

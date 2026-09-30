@@ -778,7 +778,11 @@ upstream API using the client's own API key and headers. All HTTP bytes —
 including SSE chunks, tool_use blocks, usage data, and cache_control — are
 piped 1:1 to the client. No key duplication, no model configuration
 needed. Knarr just sits in the middle and traces (passthrough requests get
-a Langfuse trace, but no request-log entry).
+a Langfuse trace, but no request-log entry). The trace carries the token
+usage and model the upstream reported, read off a copy of its answer — the
+JSON body, or the usage frames of a stream (OpenAI sends them only when the
+client asks with `stream_options.include_usage`); the bytes the client gets
+are not touched.
 
 Headers go through the same way, in both directions: a header the client
 sends twice reaches the upstream twice, in its order (only the proxy key is

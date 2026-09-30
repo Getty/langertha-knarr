@@ -361,6 +361,13 @@ Revision history for Langertha-Knarr
       0 / 0 / 0. A provider's own usage hash is mapped the same way, and
       a request without usage sends none rather than zeros.
 
+    - Raw passthrough: its Langfuse generation now carries the token usage
+      and model the upstream reported, read from a copy of the answer (the
+      JSON body, or a stream's usage frames: OpenAI's final usage chunk,
+      Anthropic's message_start and message_delta, Ollama's done frame).
+      The bytes the client gets are unchanged, and nothing is read when
+      tracing is off.
+
 
 1.101     2026-08-15 00:13:51Z
 

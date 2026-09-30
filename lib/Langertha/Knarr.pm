@@ -19,6 +19,7 @@ use Socket ();
 use Log::Any qw( $log );
 use Langertha::Knarr::Session;
 use Langertha::Knarr::Manifest;
+use Langertha::Knarr::PassthroughUsage;
 use Langertha::Knarr::Role::UpstreamHTTP ();
 
 =head1 SYNOPSIS
@@ -310,7 +311,14 @@ in L</start>.
 
 Optional L<Langertha::Knarr::Tracing>. Only the L</raw_passthrough> uses
 it: a request that bypasses the handler chain gets a lightweight Langfuse
-trace from here. Requests through the handler chain are traced by the
+trace from here. Its generation carries the token usage and the model the
+upstream reported, read off a copy of the answer by
+L<Langertha::Knarr::PassthroughUsage> -- the JSON body, or the frames of a
+stream that carry them (OpenAI's final usage chunk, which the client asks
+for with C<stream_options.include_usage>; Anthropic's C<message_start> and
+C<message_delta>; Ollama's C<done> frame). The bytes the client gets are
+never touched; nothing is read without an active trace, nor from bytes
+that still carry a C<Content-Encoding>. Requests through the handler chain are traced by the
 L<Langertha::Knarr::Handler::Tracing> decorator instead. Raw passthrough
 requests are not written to the request log.
 
@@ -1078,17 +1086,21 @@ sub _handle_raw_passthrough {
         $header->header('Cache-Control' => 'no-cache') unless defined $header->header('Cache-Control');
         $req->respond_chunk_header($header);
         $headers_sent = 1;
+        # The trace reads its usage off a copy of the bytes (k61).
+        my $usage = $self->_raw_passthrough_usage_reader( $trace, $response );
 
         return sub {
           my ($data) = @_;
           if (!defined $data) {
             $req->write_chunk_eof unless $req->is_closed;
-            $self->tracing->end_trace($trace, output => '[stream]') if $trace;
+            $self->tracing->end_trace( $trace, output => '[stream]',
+              $usage ? $usage->trace_args : () ) if $trace;
             return;
           }
           return unless length $data;
           $tail = substr( $tail . $data, -2 );
           $req->write_chunk($data) unless $req->is_closed;
+          $usage->add_chunk($data) if $usage;
         };
       },
     );
@@ -1219,8 +1231,13 @@ sub _raw_passthrough_request {
 # anything unknown) came back as an empty body (k59).
 sub _raw_passthrough_answer {
   my ($self, $sb_req, $trace, $resp) = @_;
-  $self->tracing->end_trace( $trace,
-    output => $sb_req->stream ? '[stream]' : '[passthrough]' ) if $trace;
+  if ($trace) {
+    my $usage = $self->_raw_passthrough_usage_reader( $trace, $resp );
+    $usage->read_body( $resp->content ) if $usage;
+    $self->tracing->end_trace( $trace,
+      output => $sb_req->stream ? '[stream]' : '[passthrough]',
+      $usage ? $usage->trace_args : () );
+  }
   return ( $resp->code,
     scalar $resp->header('Content-Type') // 'application/json',
     $resp->content // '',
@@ -1255,6 +1272,18 @@ sub _raw_passthrough_response_headers {
     push @pairs, [ $name, $value ];
   });
   return \@pairs;
+}
+
+# What reads the token usage and model off a copy of the upstream's answer
+# for its trace (k61): nothing without a trace, and nothing for bytes that
+# still carry a Content-Encoding -- Net::Async::HTTP decodes the ones it
+# knows, the same decision as in _raw_passthrough_response_headers.
+sub _raw_passthrough_usage_reader {
+  my ($self, $trace, $resp) = @_;
+  return unless $trace;
+  my $encoding = $resp->header('Content-Encoding');
+  return if defined $encoding && !Net::Async::HTTP->can_decode($encoding);
+  return Langertha::Knarr::PassthroughUsage->new;
 }
 
 # An upstream that did not answer in time is a 504, any other failure to

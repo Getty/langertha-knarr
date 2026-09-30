@@ -411,8 +411,9 @@ total, unit => 'TOKENS' } >> for Langfuse v2 and C<usageDetails> as
 C<< { input, output, total } >> for v3, which lets it override C<usage>;
 v2 drops the key it does not know. A missing C<total> is
 C<input + output>. Without usage, or with an empty hash, neither key is
-sent, so Langfuse never records a zeroed usage. The raw passthrough path
-parses no response, so its generations carry no usage.
+sent, so Langfuse never records a zeroed usage. The raw passthrough passes
+the provider's usage hash it read off a copy of the upstream's answer (see
+L<Langertha::Knarr/tracing>).
 
 =item * C<tool_calls> — the response's L<Langertha::ToolCall> list. The trace
 is the detailed view, so it records the B<full> tool calls — C<id>, C<name>,
