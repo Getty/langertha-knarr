@@ -340,7 +340,14 @@ Revision history for Langertha-Knarr
       with that engine's key, also under --from-env and in the Docker
       image; so do a model discovered from another provider, a model
       configured under models:, and a request in a protocol without a
-      passthrough upstream. Discovery still fills /v1/models, /api/tags,
+      passthrough upstream. So does a client whose key the upstream
+      refuses with 401 (the placeholder key an SDK sends when it has
+      none): the engine answers with Knarr's key instead of the 401
+      reaching the client, streaming too, on the native server and under
+      PSGI. The upstream is asked once and the request is traced once,
+      with passthrough_fallback: 401 in the trace's metadata; other
+      statuses, and the 401 for a model nobody configured or discovered,
+      pass through unchanged. Discovery still fills /v1/models, /api/tags,
       the manifest and the capability probe. A model several endpoints
       list belongs to one of them, the same on every run: the
       passthrough upstream first, else the first by model config name;

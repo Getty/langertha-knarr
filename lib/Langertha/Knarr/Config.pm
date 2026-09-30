@@ -669,7 +669,8 @@ the request carries the client's own provider key (C<Authorization> for
 OpenAI, C<x-api-key> or C<Authorization> for Anthropic, not counting the
 L</proxy_api_key>; Ollama needs none): then it passes through byte for byte
 like an unknown model, with that key. Without one it is routed through its
-engine, with the engine's key. A model under L</models> is always routed.
+engine, with the engine's key, and so it is when the upstream refuses that
+key with C<401> (see L<Langertha::Knarr/raw_passthrough>). A model under L</models> is always routed.
 Defaults to C<0>; L</from_env> and the C<knarr init> output turn it on.
 
 =cut

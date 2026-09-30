@@ -61,7 +61,14 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
   `Router::discovered_url` + `Passthrough::is_upstream_for`) AND the request still
   carries a provider key once the proxy key is stripped (OpenAI `Authorization`,
   Anthropic `x-api-key`/`Authorization`, Ollama none; `Knarr::_carries_provider_key`),
-  else it is routed (k47, k52). An id several endpoints list belongs to the passthrough
+  else it is routed (k47, k52). If that raw passthrough gets a 401 from the upstream
+  (placeholder key), the status is inspected before any byte reaches the client and the
+  request is answered through the handler chain instead (engine, Knarr's key; native +
+  PSGI, sync + stream); upstream asked once, one trace (Handler::Tracing) with metadata
+  `passthrough_fallback: 401` -- the raw trace of such a request opens only once the
+  status rules the fallback out (`Tracing::start_trace` `start_hires`). Other statuses
+  and unknown models' 401s pass through (k66; `Knarr::_raw_passthrough_falls_back`).
+  An id several endpoints list belongs to the passthrough
   upstream's endpoint, else the first by config name; collisions logged at debug (k55).
   Models under `models:` are always routed.
 - No model in the request (A2A always, ACP w/o `agent_name`) → default engine with its

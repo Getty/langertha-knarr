@@ -13,6 +13,7 @@ use JSON::MaybeXS;
 use Data::UUID;
 use Module::Runtime qw( use_module );
 use Scalar::Util qw( blessed );
+use Time::HiRes ();
 use Try::Tiny;
 use Carp ();
 use POSIX ();
@@ -296,6 +297,18 @@ requested without one goes through the handler instead, to the engine
 that listed it, with that engine's key -- the upstream would only answer
 C<401>. A model nobody configured or discovered passes through either way.
 
+A discovered model's request that does carry a key the upstream refuses
+with C<401> -- the placeholder key an SDK sends when it has none -- is
+answered the same way: through the handler, by the engine that listed the
+model, with that engine's key. The client never sees the C<401>, streaming
+or not: the upstream's status is known before any byte goes to the client.
+The upstream is asked once, its refusal is dropped, and the request is
+traced once, by L<Langertha::Knarr::Handler::Tracing>, with
+C<passthrough_fallback: 401> in the trace's metadata. Any other status
+(C<403>, C<429>, C<5xx>) goes back unchanged, and so does the C<401> for a
+model nobody configured or discovered, which has no engine to fall back
+to.
+
 =attr router
 
 Optional L<Langertha::Knarr::Router>, usually the one the
@@ -320,8 +333,12 @@ for with C<stream_options.include_usage>; Anthropic's C<message_start> and
 C<message_delta>; Ollama's C<done> frame). The bytes the client gets are
 never touched; nothing is read without an active trace, nor from bytes
 that still carry a C<Content-Encoding>. Requests through the handler chain are traced by the
-L<Langertha::Knarr::Handler::Tracing> decorator instead. Raw passthrough
-requests are not written to the request log.
+L<Langertha::Knarr::Handler::Tracing> decorator instead -- so is a raw
+passthrough that falls back to its engine after a C<401> (see
+L</raw_passthrough>); the trace of a request that may fall back is
+therefore opened only once the upstream's status is known, dated back to
+when the request went out. Raw passthrough requests are not written to the
+request log; a fallback is, by the handler chain.
 
 =method start
 
@@ -988,7 +1005,13 @@ sub _action_chat {
   if ( $self->_is_raw_passthrough($sb_req) ) {
     return $self->_handle_raw_passthrough( $proto, $req, $sb_req );
   }
+  return $self->_handle_chat( $proto, $req, $sb_req );
+}
 
+# A parsed chat request answered through the handler chain -- also a raw
+# passthrough that falls back to its engine (k66).
+sub _handle_chat {
+  my ($self, $proto, $req, $sb_req) = @_;
   my $session = $self->session( $sb_req->session_id );
   my $handler = $self->handler;
 
@@ -1135,7 +1158,7 @@ sub _stream_failure_frame {
 
 sub _handle_raw_passthrough {
   my ($self, $proto, $req, $sb_req) = @_;
-  my ($http_req, $trace) = $self->_raw_passthrough_request(
+  my ($http_req, $trace, $trace_from) = $self->_raw_passthrough_request(
     $sb_req, [ $req->headers ], $req->body, $req->path );
   my $pt = $self->raw_passthrough;
   my $model = $sb_req->model // 'unknown';
@@ -1146,11 +1169,21 @@ sub _handle_raw_passthrough {
     # middle of the stream (the headers are out: the protocol's error frame,
     # then the end of the stream). stall_timeout covers both (k35).
     my $headers_sent = 0;
+    my $fell_back = 0;
     my $tail = '';
     my $f = $pt->_upstream_request_f(
       request   => $http_req,
       on_header => sub {
         my ($response) = @_;
+        # The status is known before any byte goes to the client: a refused
+        # discovered model is answered by its engine instead, and the
+        # upstream's refusal is read and dropped (k66).
+        if ( $self->_raw_passthrough_falls_back( $sb_req, $response ) ) {
+          $fell_back = 1;
+          $self->_raw_passthrough_fall_back( $proto, $req, $sb_req );
+          return sub { };
+        }
+        $trace = $self->_raw_passthrough_trace( $sb_req, $trace_from ) if $trace_from;
         # The upstream's headers go back with it (k56).
         my $header = HTTP::Response->new($response->code);
         $header->protocol('HTTP/1.1');
@@ -1179,7 +1212,10 @@ sub _handle_raw_passthrough {
     );
     $f->on_fail(sub {
       my ($err, $category) = @_;
+      # The engine answers; the dropped refusal has nothing left to say.
+      return if $fell_back;
       unless ($headers_sent) {
+        $trace = $self->_raw_passthrough_trace( $sb_req, $trace_from ) if $trace_from;
         return $self->_send_simple( $req,
           $self->_raw_passthrough_failed( $proto, $sb_req, $trace, $err, $category ) );
       }
@@ -1202,10 +1238,15 @@ sub _handle_raw_passthrough {
   } else {
     my $f = $pt->_upstream_request_f(request => $http_req);
     $f->on_done(sub {
+      my ($resp) = @_;
+      return $self->_raw_passthrough_fall_back( $proto, $req, $sb_req )
+        if $self->_raw_passthrough_falls_back( $sb_req, $resp );
+      $trace = $self->_raw_passthrough_trace( $sb_req, $trace_from ) if $trace_from;
       $self->_send_simple( $req,
-        $self->_raw_passthrough_answer( $sb_req, $trace, $_[0] ) );
+        $self->_raw_passthrough_answer( $sb_req, $trace, $resp ) );
     });
     $f->on_fail(sub {
+      $trace = $self->_raw_passthrough_trace( $sb_req, $trace_from ) if $trace_from;
       $self->_send_simple( $req,
         $self->_raw_passthrough_failed( $proto, $sb_req, $trace, @_[0, 1] ) );
     });
@@ -1283,15 +1324,75 @@ sub _raw_passthrough_request {
 
   $log->infof("Passthrough %s [%s] -> %s", $model, $protocol, $url);
 
-  # Lightweight tracing for passthrough requests
-  my $trace = $self->tracing ? $self->tracing->start_trace(
-    model    => $model,
-    engine   => 'passthrough',
-    format   => $protocol,
-    messages => $sb_req->messages,
-  ) : undef;
+  # Lightweight tracing for passthrough requests. The trace of a request
+  # that may still fall back to its engine waits for the upstream's status,
+  # so a fallback is traced once, by the handler chain (k66); $trace_from
+  # is then the time the request goes out, for _raw_passthrough_trace.
+  my ( $trace, $trace_from );
+  if ( $self->_raw_passthrough_may_fall_back($sb_req) ) {
+    $trace_from = [ Time::HiRes::gettimeofday() ] if $self->tracing;
+  }
+  else {
+    $trace = $self->_raw_passthrough_trace($sb_req);
+  }
 
-  return ( $http_req, $trace );
+  return ( $http_req, $trace, $trace_from );
+}
+
+# The raw passthrough's trace, started now or, with $trace_from, dated back
+# to it. Undef without tracing.
+sub _raw_passthrough_trace {
+  my ($self, $sb_req, $trace_from) = @_;
+  my $tracing = $self->tracing or return;
+  return $tracing->start_trace(
+    model    => $sb_req->model // 'unknown',
+    engine   => 'passthrough',
+    format   => $sb_req->protocol,
+    messages => $sb_req->messages,
+    $trace_from ? ( start_hires => $trace_from ) : (),
+  );
+}
+
+# True for a raw passthrough that falls back to its engine should the
+# upstream refuse the client's key (k66): one of a model only auto-discovery
+# knows, which the router resolves -- every other raw passthrough is of a
+# model it does not know, and has no engine to fall back to.
+sub _raw_passthrough_may_fall_back {
+  my ($self, $sb_req) = @_;
+  my $router = $self->router or return 0;
+  return $router->is_passthrough_model( $sb_req->model ) ? 0 : 1;
+}
+
+# True when the upstream's answer sends a raw passthrough to its engine
+# instead (k66): a 401 -- the client's key refused, a placeholder an SDK
+# sent -- for a request that may fall back. Notes the fallback on the
+# request, for the handler chain's trace. Any other status, 403 and 429
+# included, goes back to the client as before.
+sub _raw_passthrough_falls_back {
+  my ($self, $sb_req, $resp) = @_;
+  return 0 unless $resp->code == 401 && $self->_raw_passthrough_may_fall_back($sb_req);
+  $log->infof("Passthrough %s refused the client's key (401), answering through its engine",
+    $sb_req->model // 'unknown');
+  $sb_req->extra->{passthrough_fallback} = 401;
+  return 1;
+}
+
+# The native server's fallback: the parsed request through the handler
+# chain, where Handler::Router sends it to the engine that listed the
+# model, with that engine's key. Nothing has gone to the client yet. It
+# runs in the upstream's callback, outside _dispatch's catch, so it answers
+# an error itself.
+sub _raw_passthrough_fall_back {
+  my ($self, $proto, $req, $sb_req) = @_;
+  try {
+    $self->_handle_chat( $proto, $req, $sb_req );
+  } catch {
+    my $err = $_;
+    $log->errorf("Passthrough fallback error [%s]: %s", $sb_req->model // 'unknown', $err);
+    $self->_send_simple( $req, 500, 'application/json',
+      $self->_json->encode({ error => { message => "$err" } }) );
+  };
+  return;
 }
 
 # The upstream's answer as ( status, content type, body bytes, its other

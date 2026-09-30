@@ -311,6 +311,21 @@ The returned hashref carries C<start_hires>, the C<gettimeofday> pair behind
 C<start_time>. L</end_trace> anchors engine-measured durations to it; see
 L</Timing sources>.
 
+Two optional arguments:
+
+=over
+
+=item * C<start_hires> -- a C<gettimeofday> pair the trace starts at instead
+of now, for a trace opened after the request went out. The raw passthrough
+of a model that may still fall back to its engine opens its trace only once
+the upstream's status rules that out (see L<Langertha::Knarr/raw_passthrough>).
+
+=item * C<passthrough_fallback> -- the upstream status that sent a raw
+passthrough request to its engine instead (C<401>), recorded in the trace's
+metadata. L<Langertha::Knarr::Handler::Tracing> passes it from the request.
+
+=back
+
 =cut
 
 sub start_trace {
@@ -319,7 +334,7 @@ sub start_trace {
 
   my $trace_id = _uuid();
   my $gen_id   = _uuid();
-  my @hires    = gettimeofday;
+  my @hires    = $opts{start_hires} ? @{ $opts{start_hires} } : gettimeofday;
   my $now      = _timestamp(@hires);
   # Image objects (k33) carry no TO_JSON and would fail the batch encode.
   my $input    = Langertha::Knarr::Image::plain_messages( $opts{messages} );
@@ -337,6 +352,8 @@ sub start_trace {
         engine  => $opts{engine},
         model   => $opts{model},
         params  => $opts{params},
+        defined $opts{passthrough_fallback}
+          ? ( passthrough_fallback => $opts{passthrough_fallback} ) : (),
       },
       tags => ['knarr'],
     },

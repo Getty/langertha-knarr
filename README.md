@@ -56,7 +56,9 @@ own API key. That includes the models auto-discovered from that very
 upstream (Anthropic's models on the Anthropic protocol, OpenAI's on the
 OpenAI protocol) when the client sends its own provider key; a client
 without one gets them through the engine, with the key from the
-environment. A model discovered from another provider (a Groq model
+environment, and so does a client whose key the upstream refuses with
+`401` (an SDK's placeholder key) — transparently, the client never sees the
+`401`. A model discovered from another provider (a Groq model
 asked for over the OpenAI protocol) goes through its engine. No key
 duplication, no configuration required for the simple cases.
 
@@ -334,9 +336,16 @@ the client sends its own provider key (`Authorization` for OpenAI,
 `x-api-key` or `Authorization` for Anthropic — the proxy key does not
 count); without one, and for the others (another provider's, or any over
 a protocol without a passthrough upstream), it is routed through its
-engine with the key from the environment. So a client that has no
-provider key of its own — only the proxy key, or nothing on an open
-proxy — can use every discovered model, `--from-env` included.
+engine with the key from the environment. When the upstream answers such
+a passthrough with `401` — the client sent a placeholder key, as SDKs do
+when they have none — Knarr answers the request through the engine
+instead, streaming included (the status arrives before any byte goes to
+the client); the upstream is asked once, and the one Langfuse trace notes
+`passthrough_fallback: 401`. Other statuses (`403`, `429`, `5xx`) come back
+unchanged, as does the `401` for a model nobody configured or discovered.
+So a client that has no provider key of its own — only the proxy key, a
+placeholder, or nothing on an open proxy — can use every discovered model,
+`--from-env` included.
 
 ## Langfuse Tracing
 

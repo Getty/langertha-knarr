@@ -40,7 +40,8 @@ with the client's headers (minus the proxy key, see
 L<Langertha::Knarr/auth_token>), and the upstream's status, headers and body
 come back unchanged (see L<Langertha::Knarr/raw_passthrough>). A streamed
 passthrough answer is buffered like any other stream here; its
-C<Content-Encoding> is handled as on the native server.
+C<Content-Encoding> is handled as on the native server. A discovered
+model's C<401> falls back to its engine as there, streamed or not.
 
 One limit is the PSGI server's: it hands over a request header the client
 sent twice as one value joined with C<, > (one C<HTTP_*> key), so the
@@ -159,9 +160,11 @@ sub _handle_psgi {
   # Raw passthrough, decided and prepared by the same Knarr code as on the
   # native server (k26): the client's bytes go 1:1 to the upstream and its
   # answer comes back unchanged. A streaming answer is buffered, like every
-  # stream under this adapter.
+  # stream under this adapter. A discovered model the upstream refuses the
+  # client's key for falls through to the handler chain below, to its
+  # engine (k66).
   if ( $sb->_is_raw_passthrough($sb_req) ) {
-    my ($http_req, $trace) = $sb->_raw_passthrough_request(
+    my ($http_req, $trace, $trace_from) = $sb->_raw_passthrough_request(
       $sb_req, [ $fake_http->headers ], $body, $path );
     # The failure as the future carries it, as the native on_fail sees it.
     # A buffered stream still gets the stall timeout, not the total one: a
@@ -169,10 +172,13 @@ sub _handle_psgi {
     my ($resp, $err, $category) = $sb->raw_passthrough->_upstream_request_f(
       request => $http_req, stream => $sb_req->stream ? 1 : 0 )
       ->else( sub { Future->done( undef, @_[0, 1] ) } )->get;
-    my ($status, $ctype, $obody, $oheaders) = $resp
-      ? $sb->_raw_passthrough_answer( $sb_req, $trace, $resp )
-      : $sb->_raw_passthrough_failed( $proto, $sb_req, $trace, $err // 'unknown error', $category );
-    return [ $status, [ 'Content-Type' => $ctype, map { @$_ } @{ $oheaders // [] } ], [ $obody ] ];
+    unless ( $resp && $sb->_raw_passthrough_falls_back( $sb_req, $resp ) ) {
+      $trace = $sb->_raw_passthrough_trace( $sb_req, $trace_from ) if $trace_from;
+      my ($status, $ctype, $obody, $oheaders) = $resp
+        ? $sb->_raw_passthrough_answer( $sb_req, $trace, $resp )
+        : $sb->_raw_passthrough_failed( $proto, $sb_req, $trace, $err // 'unknown error', $category );
+      return [ $status, [ 'Content-Type' => $ctype, map { @$_ } @{ $oheaders // [] } ], [ $obody ] ];
+    }
   }
 
   my $session = $sb->session( $sb_req->session_id );

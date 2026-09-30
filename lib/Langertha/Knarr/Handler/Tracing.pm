@@ -42,6 +42,11 @@ either the model the client asked for.
 C<knarr start> mounts this automatically when
 the config supplies Langfuse credentials.
 
+A raw passthrough request that L<Langertha::Knarr> answers through the
+handler chain after the upstream refused the client's key (see
+L<Langertha::Knarr/raw_passthrough>) is traced here only, once, with the
+refusing status as C<passthrough_fallback> in the trace's metadata.
+
 =attr wrapped
 
 Required. The inner L<Langertha::Knarr::Handler> being decorated. The
@@ -99,6 +104,9 @@ sub _open_trace {
       tools       => $request->tools,
     },
     format   => $request->protocol,
+    # A raw passthrough the upstream refused (k66): this is its one trace.
+    ( defined $request->extra->{passthrough_fallback}
+      ? ( passthrough_fallback => $request->extra->{passthrough_fallback} ) : () ),
   );
 }
 
