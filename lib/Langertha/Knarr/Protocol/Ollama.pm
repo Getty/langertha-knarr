@@ -215,7 +215,7 @@ backend reported usage. A C</api/chat> request gets the text on C<message>
 (with C<tool_calls>), a C</api/generate> request on C<response>, as Ollama
 answers it -- streaming alike, where every chunk carries its piece on
 C<message.content> or C<response> and the final C<{"done": true}> line an
-empty one.
+empty one, with the usage counters when the backend reported usage.
 
 =cut
 
@@ -317,9 +317,10 @@ sub format_stream_error {
 }
 
 # The routed stream carries the backend's tool calls complete; Ollama's own
-# wire sends message.tool_calls whole, so they ride on the done line (k19).
+# wire sends message.tool_calls whole, so they ride on the done line (k19),
+# and so do the usage counters, as Ollama's own done line has them.
 sub format_stream_done {
-  my ($self, $request, $finish_reason, $tool_calls) = @_;
+  my ($self, $request, $finish_reason, $tool_calls, $usage) = @_;
   my $payload = {
     model      => $request->model // 'unknown',
     created_at => _ts(),
@@ -327,6 +328,10 @@ sub format_stream_done {
     done       => JSON::MaybeXS::true(),
     done_reason => _done_reason($finish_reason),
   };
+  if ( $usage && $usage->can('to_ollama_format') ) {
+    my $u = $usage->to_ollama_format;
+    $payload->{$_} = $u->{$_} for keys %$u;
+  }
   return $self->_json->encode($payload) . "\n";
 }
 

@@ -61,7 +61,7 @@ protocol doesn't need framing — Anthropic/A2A/ACP/AG-UI override these
 to emit their named events around the chunk stream.
 
 C<format_stream_close> and C<format_stream_done> are called as
-C<($request, $finish_reason, $tool_calls)>: the second argument is the
+C<($request, $finish_reason, $tool_calls, $usage)>: the second argument is the
 backend's terminal finish reason from L<Langertha::Knarr::Stream/finish_reason>,
 verbatim and possibly C<undef> (always C<undef> after a stream error).
 A protocol maps it into its own vocabulary; Anthropic puts it on
@@ -73,6 +73,12 @@ backend emitted none (and absent after a stream error). A protocol that
 can carry tool calls emits them before its terminal frames: Anthropic
 as C<tool_use> content blocks, OpenAI as one C<delta.tool_calls> chunk,
 Ollama as C<message.tool_calls> on the done line.
+The fourth argument is the stream's token usage from
+L<Langertha::Knarr::Stream/usage>, a L<Langertha::Usage>, or C<undef> when
+the backend reported none (and after a stream error). Anthropic reports it
+on C<message_delta>, Ollama as C<prompt_eval_count> / C<eval_count> on the
+done line, OpenAI in a C<usage> chunk after the terminal one when the client
+asked for it with C<stream_options.include_usage>.
 
 =method format_error_response
 

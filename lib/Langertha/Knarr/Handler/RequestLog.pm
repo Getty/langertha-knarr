@@ -138,6 +138,8 @@ async sub handle_stream_f {
             output => $accumulated,
             ( $upstream->can('has_tool_calls') && $upstream->has_tool_calls
                 ? ( tool_calls => $upstream->tool_calls ) : () ),
+            ( $upstream->can('usage') && $upstream->usage
+                ? ( usage => $upstream->usage ) : () ),
           );
         }
         return Future->done(undef);

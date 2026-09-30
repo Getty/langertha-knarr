@@ -355,6 +355,25 @@ That's it. Every proxy request creates:
 - **Error tracking** when backend calls fail
 - Tag `knarr` on all traces
 
+### Token usage on routed streams
+
+A routed stream carries the token usage the backend reported on its stream
+into the Langfuse generation and the request log, and to the client the
+way each protocol reports it: Anthropic on `message_delta`, Ollama as
+`prompt_eval_count` / `eval_count` on the `{"done": true}` line, OpenAI in a
+chunk of its own (empty `choices`) before `data: [DONE]` — only when the
+client asked with `stream_options: {"include_usage": true}`, as OpenAI does.
+Anthropic's `message_start` goes out before any usage is known and keeps
+zero counts; the `message_delta` totals include the input tokens.
+
+What arrives depends on the backend and on Langertha: usage on the final
+chunk (Ollama, Anthropic's `message_delta`, servers that put it on the
+finish chunk) reaches every Langertha; OpenAI's separate include_usage
+frame and Anthropic's input tokens from `message_start` need a Langertha
+newer than 0.503.
+Knarr does not itself ask an OpenAI upstream for
+`stream_options.include_usage`.
+
 ### Trace name
 
 All traces share one name, resolved in this priority order:

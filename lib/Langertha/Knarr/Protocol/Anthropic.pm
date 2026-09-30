@@ -218,8 +218,11 @@ sub format_stream_chunk {
 # were fragmented upstream, so each call closes the stream as its own
 # tool_use block: content_block_start with an empty input, one
 # input_json_delta holding the full arguments, content_block_stop (k19).
+# message_delta carries the stream's usage, cumulative as Anthropic's own
+# does -- input_tokens included, since message_start went out before the
+# backend reported any.
 sub format_stream_close {
-  my ($self, $request, $finish_reason, $tool_calls) = @_;
+  my ($self, $request, $finish_reason, $tool_calls, $usage) = @_;
   my @calls = @{ $tool_calls // [] };
   my $stop_reason = _stop_reason( $finish_reason, scalar @calls );
   my @tool_events;
@@ -246,7 +249,8 @@ sub format_stream_close {
     $self->_sse_event( message_delta => {
       type => 'message_delta',
       delta => { stop_reason => $stop_reason, stop_sequence => undef },
-      usage => { output_tokens => 0 },
+      usage => ( $usage && $usage->can('to_anthropic_format')
+        ? $usage->to_anthropic_format : { output_tokens => 0 } ),
     }),
     $self->_sse_event( message_stop => { type => 'message_stop' } ),
   );

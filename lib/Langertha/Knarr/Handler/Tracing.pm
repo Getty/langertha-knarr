@@ -27,7 +27,8 @@ Decorator handler that opens a Langfuse trace + generation around every
 chat or stream request and closes it with the assistant text once the
 inner handler resolves (or fails). Streaming requests accumulate every
 delta into a single output before closing the trace, so the Langfuse
-view shows the full assembled response.
+view shows the full assembled response, with the token usage the backend
+reported on its stream (L<Langertha::Knarr::Stream/usage>).
 
 C<knarr start> mounts this automatically when
 the config supplies Langfuse credentials.
@@ -181,6 +182,9 @@ async sub handle_stream_f {
             # The complete tool calls, known once the stream is exhausted (k19).
             ( $upstream_stream->can('has_tool_calls') && $upstream_stream->has_tool_calls
                 ? ( tool_calls => $upstream_stream->tool_calls ) : () ),
+            # So is the token usage the backend reported on its chunks.
+            ( $upstream_stream->can('usage') && $upstream_stream->usage
+                ? ( usage => $upstream_stream->usage ) : () ),
           );
         }
         return Future->done(undef);

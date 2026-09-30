@@ -209,8 +209,9 @@ sub _handle_psgi {
       }
       my $finish_reason = $stream->can('finish_reason') ? $stream->finish_reason : undef;
       my $tool_calls    = $stream->can('tool_calls')    ? $stream->tool_calls    : [];
-      $out .= $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls );
-      $out .= $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls );
+      my $usage         = $stream->can('usage')         ? $stream->usage         : undef;
+      $out .= $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls, $usage );
+      $out .= $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls, $usage );
       $out;
     };
     if ( my $e = $@ ) {

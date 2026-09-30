@@ -157,11 +157,12 @@ async sub handle_stream_f {
     my $stream = Langertha::Knarr::Stream->from_list( $r->content );
     $stream->finish_reason( $r->finish_reason );
     $stream->tool_calls( $r->tool_calls );
+    $stream->usage( $r->usage ) if $r->usage;
     return $stream;
   }
 
   return Langertha::Knarr::Stream->from_callback( sub {
-    my ($emit, $done, $fail, $finish, $tool_call) = @_;
+    my ($emit, $done, $fail, $finish, $tool_call, $usage) = @_;
     my $cb = sub {
       my ($chunk) = @_;
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
@@ -176,6 +177,11 @@ async sub handle_stream_f {
       # protocol emits them when it closes the stream (k19).
       $tool_call->( @{ $chunk->tool_calls } )
         if ref $chunk && $chunk->can('has_tool_calls') && $chunk->has_tool_calls;
+      # The token usage rides on a chunk too, cumulative (the last report is
+      # the stream's totals); the protocol puts it on its terminal frames and
+      # the tracing decorator on the generation.
+      $usage->( $chunk->usage )
+        if ref $chunk && $chunk->can('has_usage') && $chunk->has_usage;
     };
     my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );

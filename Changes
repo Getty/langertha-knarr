@@ -153,6 +153,17 @@ Revision history for Langertha-Knarr
       whose stream parser attaches the assembled calls to its chunks;
       with one that does not, the stream carries none.
 
+    - A routed stream now carries the token usage the backend reported: the
+      Langfuse generation and the request log record it, and the client
+      gets it the way its protocol does -- Anthropic on message_delta,
+      Ollama as prompt_eval_count / eval_count on the done line, OpenAI in
+      a usage chunk before [DONE] when the request asks with
+      stream_options.include_usage. Langertha::Knarr::Stream carries it as
+      usage, and format_stream_close / format_stream_done receive it as a
+      fourth argument. An OpenAI upstream's separate usage frame and
+      Anthropic's input tokens from message_start need a Langertha newer
+      than 0.503.
+
     - Two models routed to the same engine, URL and API key now each get
       their own engine instance, so the upstream request carries the model
       the client asked for. This covers auto-discovered gateway models and

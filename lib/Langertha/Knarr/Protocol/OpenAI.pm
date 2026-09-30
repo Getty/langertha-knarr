@@ -16,7 +16,9 @@ L<Langertha::Knarr> instance.
 =back
 
 Streaming uses the standard SSE chunk format with C<data: [DONE]> as
-the terminator. C<tools>, C<tool_choice>, and C<response_format> are
+the terminator. A request with C<< stream_options => { include_usage => true } >>
+gets the backend's token usage in one more chunk before it, with empty
+C<choices>, as OpenAI sends it. C<tools>, C<tool_choice>, and C<response_format> are
 extracted into L<Langertha::Knarr::Request> attributes and forwarded to
 the engine via C<chat_f>. Tool-call responses are serialised into
 C<message.tool_calls> with C<finish_reason: "tool_calls">.
@@ -192,9 +194,13 @@ sub format_stream_chunk {
 # OpenAI streams end with a chunk whose delta is empty and whose
 # finish_reason is set, before data: [DONE]. The routed stream carries the
 # backend's tool calls complete, so they go out ahead of it in one chunk:
-# delta.tool_calls with every call whole, keyed by index (k19).
+# delta.tool_calls with every call whole, keyed by index (k19). A client that
+# asked for stream_options.include_usage gets the usage the way OpenAI sends
+# it: one more chunk after the terminal one, with empty choices. Without the
+# option OpenAI sends none, and neither does Knarr; without usage from the
+# backend there is nothing to report, and no zeroed chunk pretends otherwise.
 sub format_stream_close {
-  my ($self, $request, $finish_reason, $tool_calls) = @_;
+  my ($self, $request, $finish_reason, $tool_calls, $usage) = @_;
   my @calls = @{ $tool_calls // [] };
   my $out = '';
   if (@calls) {
@@ -213,7 +219,23 @@ sub format_stream_close {
   }
   $out .= $self->_stream_chunk( $request,
     { index => 0, delta => {}, finish_reason => _finish_reason( $finish_reason, scalar @calls ) } );
+  if ( $usage && $usage->can('to_openai_format') && _wants_usage($request) ) {
+    $out .= "data: " . $self->_json->encode({
+      id      => 'chatcmpl-stream',
+      object  => 'chat.completion.chunk',
+      created => int( time() ),
+      model   => $request->model // 'unknown',
+      choices => [],
+      usage   => $usage->to_openai_format,
+    }) . "\n\n";
+  }
   return $out;
+}
+
+sub _wants_usage {
+  my ($request) = @_;
+  my $opts = $request->raw->{stream_options};
+  return ref $opts eq 'HASH' && $opts->{include_usage} ? 1 : 0;
 }
 
 # OpenAI reports a failure inside a stream as a data line carrying an error

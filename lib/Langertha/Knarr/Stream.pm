@@ -3,7 +3,8 @@ package Langertha::Knarr::Stream;
 our $VERSION = '1.102';
 use Moose;
 use Future;
-use Scalar::Util qw( weaken );
+use Scalar::Util qw( blessed weaken );
+use Langertha::Usage;
 
 =head1 SYNOPSIS
 
@@ -68,10 +69,22 @@ of its own answers with its upstream's.
 
 True when L</tool_calls> holds at least one call.
 
+=attr usage
+
+The backend's token usage for the whole stream as a L<Langertha::Usage>, or
+C<undef> when it reported none. Like L</finish_reason> it is known once the
+stream is exhausted: the protocol puts it on its terminal frames and the
+tracing and request-log decorators record it. Settable; a provider usage
+HashRef (OpenAI C<prompt_tokens>, Anthropic C<input_tokens>, Ollama
+C<prompt_eval_count>, ...) is upgraded through
+L<Langertha::Usage/from_hash>, an empty one is no usage. A stream that wraps
+another and has none of its own answers with its upstream's.
+
 =attr upstream
 
 Optional. The stream this one wraps, as the tracing and request-log
-decorators do. Only consulted by L</finish_reason> and L</tool_calls>.
+decorators do. Only consulted by L</finish_reason>, L</tool_calls> and
+L</usage>.
 
 =method next_chunk_f
 
@@ -88,12 +101,13 @@ chunk strings.
 =method from_callback
 
     my $stream = Langertha::Knarr::Stream->from_callback( sub {
-        my ($emit, $done, $fail, $finish, $tool_call) = @_;
+        my ($emit, $done, $fail, $finish, $tool_call, $usage) = @_;
         my $f = $engine->simple_chat_stream_realtime_f(
             sub {
                 $emit->( $_[0]->content );
                 $finish->( $_[0]->finish_reason ) if $_[0]->has_finish_reason;
                 $tool_call->( @{ $_[0]->tool_calls } ) if $_[0]->has_tool_calls;
+                $usage->( $_[0]->usage ) if $_[0]->has_usage;
             },
             @messages,
         );
@@ -103,12 +117,14 @@ chunk strings.
     });
 
 Builds a stream backed by a callback-driven producer. The setup sub
-receives five callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
+receives six callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
 C<$fail-E<gt>($err)>, C<$finish-E<gt>($finish_reason)>,
-C<$tool_call-E<gt>(@tool_calls)> — and is expected to wire them to the
-underlying async source. C<$finish> sets L</finish_reason>; an C<undef>
-reason is ignored, a later one wins. C<$tool_call> appends complete
-L<Langertha::ToolCall> objects to L</tool_calls>. Internally maintains a queue and pending Future so the
+C<$tool_call-E<gt>(@tool_calls)>, C<$usage-E<gt>($usage)> — and is
+expected to wire them to the underlying async source. C<$finish> sets L</finish_reason>; an C<undef> reason is
+ignored, a later one wins. C<$tool_call> appends complete
+L<Langertha::ToolCall> objects to L</tool_calls>. C<$usage> sets L</usage>;
+streamed usage is cumulative, so a later report wins, and an C<undef> or
+empty one is ignored. Internally maintains a queue and pending Future so the
 consumer side can sit on C<next_chunk_f> without polling.
 
 This is the canonical replacement for the queue/pending/finished/error
@@ -167,8 +183,15 @@ sub from_callback {
     my @calls = grep { defined } @_;
     $weak->tool_calls( [ @{ $weak->_tool_calls // [] }, @calls ] ) if $weak && @calls;
   };
+  # Every dialect reports cumulative usage, the last report being the
+  # stream's totals -- not always on the final chunk: OpenAI's include_usage
+  # frame comes after it.
+  my $usage = sub {
+    my ($u) = @_;
+    $weak->usage($u) if $weak && $weak->_usable_usage($u);
+  };
 
-  $setup->($emit, $done, $fail, $finish, $tool_call);
+  $setup->($emit, $done, $fail, $finish, $tool_call, $usage);
 
   return $stream;
 }
@@ -212,6 +235,34 @@ sub tool_calls {
 }
 
 sub has_tool_calls { scalar @{ $_[0]->tool_calls } > 0 }
+
+has _usage => (
+  is       => 'rw',
+  isa      => 'Maybe[Object]',
+  init_arg => undef,
+);
+
+sub usage {
+  my $self = shift;
+  if (@_) {
+    my ($u) = @_;
+    return $self->_usage( ref $u eq 'HASH' ? ( %$u ? Langertha::Usage->from_hash($u) : undef ) : $u );
+  }
+  my $own = $self->_usage;
+  return $own if $own;
+  my $up = $self->upstream;
+  return $up && $up->can('usage') ? $up->usage : undef;
+}
+
+sub _usable_usage {
+  my ($self, $u) = @_;
+  return ref $u eq 'HASH' ? ( %$u ? 1 : 0 ) : blessed($u) ? 1 : 0;
+}
+
+sub BUILD {
+  my ($self, $args) = @_;
+  $self->usage( $args->{usage} ) if defined $args->{usage};
+}
 
 sub next_chunk_f {
   my ($self) = @_;

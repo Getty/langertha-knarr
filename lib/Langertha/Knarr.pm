@@ -1060,13 +1060,14 @@ sub _handle_stream {
           $pump->();
         }
         else {
-          # The backend's terminal reason and its complete tool calls are
-          # known only now; the protocol maps the reason into its own
-          # vocabulary (k18) and frames the calls (k19).
+          # The backend's terminal reason, its complete tool calls and its
+          # token usage are known only now; the protocol maps the reason into
+          # its own vocabulary (k18) and frames the calls (k19) and the usage.
           my $finish_reason = $stream->can('finish_reason') ? $stream->finish_reason : undef;
           my $tool_calls    = $stream->can('tool_calls')    ? $stream->tool_calls    : [];
-          $write->( $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls ) );
-          $write->( $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls ) );
+          my $usage         = $stream->can('usage')         ? $stream->usage         : undef;
+          $write->( $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls, $usage ) );
+          $write->( $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls, $usage ) );
           $req->write_chunk_eof;
           undef $pump;
         }
