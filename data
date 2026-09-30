@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T04:41:13Z
+claimed_by: knarr-worker-fork
+class: standard
+completed: 2026-09-30T04:41:09Z
+created: 2026-09-30T03:52:29Z
+id: 63
+priority: critical
+started: 2026-09-30T03:53:18Z
+status: done
+tags:
+- workers
+- io-async
+- bug
+title: 'Prefork: Worker erben den DNS-Resolver des Supervisors -- falscher Upstream,
+  Haenger, Crashes'
+updated: 2026-09-30T04:41:13Z
+---
+
+Review 2, bestaetigt: _prepare_workers/_drop_upstream_connections (Knarr.pm ~729/749) schliessen die Net::Async::HTTP-Pools vor dem Fork, aber nicht IO::Asyncs Resolver-Helper-Prozess (gestartet vom ersten Hostnamen-Connect des Capability-Probes). Alle Worker erben dessen Pipes; post_fork baut ihn nicht neu. Folge: Worker lesen fremde DNS-Antworten -> Anthropic-Request (mit Client-Key!) geht an OpenAI-Adresse und umgekehrt, 504-Haenger, Crash 'Can't use an undefined value as a subroutine reference at IO/Async/Channel.pm line 535'. Nur mit Hostnamen-Upstreams + Core mit probe_model_capabilities_f. Repro: /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review2/resolver_fork2.pl, /tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review2/workers_resolver_e2e.pl (workers=>4, raw passthrough localhost:P1/P2, 40 parallele Clients). Fix: Resolver im Supervisor vor dem Fork stoppen (Helper beenden), jeder Worker startet eigenen; Regressionstest nach e2e-Muster (muss vor Fix rot sein).
+
+2026-09-30 03:58 Cause: IO::Async::Loop->resolver is an IO::Async::Function (min_workers 0) whose helper process is forked on the first hostname lookup (the probe's connect). _prepare_workers dropped NaHTTP pools but left the resolver + its helper; every worker inherited its arg/ret pipes -> answers read by the wrong worker. Fix: Knarr->_drop_resolver in _prepare_workers: $resolver->stop (Future, waited up to 10s so the loop reaps the helper and clears its childwatch -- avoids 'Already have a handler for PID' on pid reuse), loop->remove, loop->set_resolver(new) -> each worker spawns its own helper lazily. Checked other loop-owned helpers: signal pipe is rebuilt by post_fork; ChildManager only holds the helper's watch (cleared by the wait); timers harmless; no other IO::Async::Function/Process in Knarr, Langertha or NaHTTP. Tests red pre-fix (504/599 in e2e, unit asserts). Also found: cpanfile 'requires IO::Async, >= 0.802' uses the forbidden '>=' form (not changed, out of scope).
+
+2026-09-30 04:19 Done: Knarr->_drop_resolver (called at the end of _prepare_workers, after _drop_upstream_connections): stops every top-level IO::Async::Resolver's helpers and waits (max 10s, warns otherwise) so the loop reaps them and clears their childwatch, removes it from the loop, installs a fresh IO::Async::Resolver via set_resolver (min_workers 0 -> nothing starts until a worker resolves). use IO::Async::Resolver added. POD run() step 2 updated. Tests in t/97_workers_live.t: 'workers do not share the supervisor's resolver helper' (e2e: 4 workers, raw passthrough to localhost:P1/P2, router probe resolves 'localhost' directly -> works with CPAN Langertha; 40 parallel clients) and 'the supervisor ends its resolver helpers before the fork' (_prepare_workers unit: fresh resolver, old one out of loop with 0 workers, no childwatches). Red against HEAD Knarr.pm (e2e: 13+14 correct, 7x 599, 3x 504; unit 5/6 fail), green now; the review's e2e script also 20/20+20/20 twice. prove -l t/: 70 files, 3895 tests PASS (65_manifest skipped: installed core lacks Manifest::Builder). Other loop helpers checked: signal pipe rebuilt by post_fork, no other Function/Process in Knarr/Langertha/NaHTTP, timers harmless.
+
+Committed 3833361
