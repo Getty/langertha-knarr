@@ -191,13 +191,25 @@ This starts:
 
 | Service | Port | Description |
 |---------|------|-------------|
-| Knarr | 8080, 11434 | LLM Proxy |
-| Langfuse | 3000 | Tracing Dashboard |
+| Knarr | 8080, 11434 (all interfaces) | LLM Proxy |
+| Langfuse | 3000 (`127.0.0.1` only) | Tracing Dashboard |
 | PostgreSQL | — | Langfuse storage |
 
-The `docker-compose.yml` automatically loads `.env` and connects Knarr to
-the Langfuse instance. It runs Langfuse v2 (`langfuse/langfuse:2`), which
-needs only PostgreSQL; Langfuse v3 would also need ClickHouse, Redis and
+`KNARR_BIND` publishes Knarr's ports on one address only
+(`KNARR_BIND=127.0.0.1`); `LANGFUSE_BIND=0.0.0.0` makes the dashboard
+reachable from other hosts. Set both in `.env` or the shell.
+
+The `docker-compose.yml` reads `.env` automatically and connects Knarr to
+the Langfuse instance. Knarr does not get all of `.env`: its service lists
+the variables it reads (provider keys, `KNARR_*`, `LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, `LANGFUSE_TRACE_NAME`), each taken from `.env` or
+the shell (the shell wins) and left unset when neither has it. The
+Langfuse server secrets below stay with Langfuse and Postgres. A variable
+not on that list, such as a custom `api_key_env`, needs its own line
+under the knarr service's `environment:`.
+
+The stack runs Langfuse v2 (`langfuse/langfuse:2`), which needs only
+PostgreSQL; Langfuse v3 would also need ClickHouse, Redis and
 S3-compatible storage.
 
 There is no manual Langfuse setup. The keys come first: choose any

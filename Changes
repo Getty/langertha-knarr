@@ -21,7 +21,13 @@ Revision history for Langertha-Knarr
       arrive without first creating a project in the Langfuse UI. A
       dashboard login is created when LANGFUSE_INIT_USER_PASSWORD is set.
       Langfuse's NEXTAUTH_SECRET and SALT and the Postgres password come
-      from .env instead of fixed values.
+      from .env instead of fixed values. The Knarr container no longer gets
+      the whole .env, so the Langfuse server secrets stay out of it: it
+      gets only the variables Knarr reads, each from .env or the shell (the
+      shell wins); a custom api_key_env name needs its own line under the
+      knarr service's environment:. Langfuse's dashboard port 3000 is
+      published on 127.0.0.1 unless LANGFUSE_BIND says otherwise, and
+      KNARR_BIND restricts Knarr's 8080 and 11434 to one address.
 
     - The A2A agent card at /.well-known/agent.json now names the agent
       "Langertha Knarr Agent" and reports Knarr's own version. a2a.name and
