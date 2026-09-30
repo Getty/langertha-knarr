@@ -179,7 +179,9 @@ out of the box:
 
 ```bash
 cp .env.example .env
-# Edit .env — add your API keys and Langfuse keys
+# Edit .env — add your API keys, pick a Langfuse key pair, and set
+# LANGFUSE_NEXTAUTH_SECRET + LANGFUSE_SALT (openssl rand -base64 32)
+# and LANGFUSE_DB_PASSWORD (openssl rand -hex 16)
 docker compose up
 ```
 
@@ -196,11 +198,48 @@ the Langfuse instance. It runs Langfuse v2 (`langfuse/langfuse:2`), which
 needs only PostgreSQL; Langfuse v3 would also need ClickHouse, Redis and
 S3-compatible storage.
 
-The local Langfuse starts empty: open http://localhost:3000, sign up,
-create a project, put its `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
-into `.env`, and restart Knarr (`docker compose up -d knarr`). From then
-on every LLM call through Knarr is traced with model, input, output,
-latency, and token usage.
+There is no manual Langfuse setup. The keys come first: choose any
+`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` pair in `.env` (by
+convention `pk-lf-…` / `sk-lf-…`, e.g. `pk-lf-$(openssl rand -hex 16)`).
+On startup Langfuse creates an organization and a project (both `knarr`)
+and registers exactly that pair as the project's API keys, through its
+`LANGFUSE_INIT_*` headless initialization. Knarr reads the same two
+variables, so every LLM call through Knarr is traced with model, input,
+output, latency, and token usage from the first request.
+
+```bash
+# .env
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_NEXTAUTH_SECRET=...        # required, openssl rand -base64 32
+LANGFUSE_SALT=...                   # required, openssl rand -base64 32
+LANGFUSE_DB_PASSWORD=...            # required, openssl rand -hex 16
+LANGFUSE_INIT_USER_PASSWORD=...     # optional: login for the dashboard
+```
+
+- `LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_SALT` and `LANGFUSE_DB_PASSWORD`
+  have no defaults; `docker compose` refuses to start while one is unset.
+- `LANGFUSE_DB_PASSWORD` is part of Langfuse's `DATABASE_URL`, so keep
+  it URL-safe (hex is). Postgres applies it only when the `pgdata` volume
+  is created: an existing volume keeps its password, which was `langfuse`
+  before this setting existed. Set `LANGFUSE_DB_PASSWORD=langfuse` to
+  keep that volume, or start over with `docker compose down -v`.
+- With `LANGFUSE_INIT_USER_PASSWORD` set, Langfuse also creates the
+  dashboard login `admin@knarr.local` (`LANGFUSE_INIT_USER_EMAIL`) as
+  owner of the organization. Without it no user is created; sign up at
+  http://localhost:3000 instead.
+- Org and project ids and names can be changed with
+  `LANGFUSE_INIT_ORG_ID`, `LANGFUSE_INIT_ORG_NAME`,
+  `LANGFUSE_INIT_PROJECT_ID` and `LANGFUSE_INIT_PROJECT_NAME`.
+- Initialization only adds what is missing, it never updates. A new
+  public key is registered on the next start; a new secret key under the
+  same public key is not, and Knarr gets `401`. Change both together,
+  or start over with `docker compose down -v`.
+
+Under Podman's Docker-compatible socket, the Postgres healthcheck may
+not run on its own, which leaves Langfuse waiting on
+`condition: service_healthy`. Run it once by hand:
+`podman healthcheck run <db container>`.
 
 ### Minimal Docker Compose (without Langfuse)
 

@@ -2,6 +2,20 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Upgrade note for docker-compose users: LANGFUSE_NEXTAUTH_SECRET,
+      LANGFUSE_SALT and LANGFUSE_DB_PASSWORD are now required in .env and
+      compose refuses to start without them; an existing Postgres volume
+      keeps its old password, so set LANGFUSE_DB_PASSWORD=langfuse or start
+      over with docker compose down -v.
+
+    - docker-compose.yml sets up its Langfuse on startup: an organization
+      and a project named knarr, with LANGFUSE_PUBLIC_KEY and
+      LANGFUSE_SECRET_KEY from .env as the project's API keys, so traces
+      arrive without first creating a project in the Langfuse UI. A
+      dashboard login is created when LANGFUSE_INIT_USER_PASSWORD is set.
+      Langfuse's NEXTAUTH_SECRET and SALT and the Postgres password come
+      from .env instead of fixed values.
+
     - The A2A agent card at /.well-known/agent.json now names the agent
       "Langertha Knarr Agent" and reports Knarr's own version. a2a.name and
       a2a.description in the config (KNARR_A2A_NAME, KNARR_A2A_DESCRIPTION)
