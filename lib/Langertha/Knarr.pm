@@ -368,7 +368,10 @@ state (L<IO::Async::Loop/post_fork>) and accepts on the inherited sockets.
 
 =item 4. This process supervises them: a worker that exits is replaced --
 one that dies within five seconds of its start after a pause of 1, 2, 4
-... up to 30 seconds, so a worker that cannot start does not spin.
+... up to 30 seconds, so a worker that cannot start does not spin. A
+replacement that cannot be forked (out of processes or memory) is tried
+again the same way while the other workers serve on; only a failed fork of
+the first workers makes L</run> die, after stopping those already started.
 C<SIGTERM> or C<SIGINT> is passed on to the workers as C<SIGTERM>; once
 they have exited, L</run> returns.
 
@@ -702,22 +705,37 @@ sub _run_workers {
   };
 
   try {
+    # Only these first forks must succeed: without them nothing serves.
     $spawn->() for 1 .. $self->workers;
     my $delay = 0;
-    while ( %workers ) {
-      my $pid = waitpid( -1, 0 );
-      last if $pid < 0;
+    while ( %workers || !$stopping ) {
+      my $missing = $stopping ? 0 : $self->workers - keys %workers;
+      if ( $missing > 0 ) {
+        sleep $delay if $delay;   # a signal ends it early
+        next if $stopping;
+        next if eval { $spawn->(); 1 };
+        # A replacement that cannot be forked (EAGAIN, ENOMEM) is treated
+        # like a crashing worker: the others keep serving, and it is tried
+        # again after a pause (k64).
+        $delay = $self->_restart_delay($delay);
+        $log->errorf( "%s; trying again in %ds", _error_text($@), $delay );
+      }
+      # While a worker is missing, only look: the retry must not wait for
+      # the next death.
+      my $pid = waitpid( -1, $missing > 0 ? POSIX::WNOHANG() : 0 );
+      next if $pid == 0;
+      if ( $pid < 0 ) {   # no children left
+        last unless $missing > 0;
+        next;
+      }
       my $started = delete $workers{$pid} // next;
       next if $stopping;
       my $status = $?;
-      # A worker that dies within 5s of its start is crashing: pause 1, 2,
-      # 4 ... 30 seconds before the next one, so it cannot spin.
-      $delay = time - $started < 5 ? ( $delay ? $delay * 2 : 1 ) : 0;
-      $delay = 30 if $delay > 30;
+      # A worker that dies within 5s of its start is crashing: pause before
+      # the next one, so it cannot spin.
+      $delay = time - $started < 5 ? $self->_restart_delay($delay) : 0;
       $log->warnf( "Worker %d %s, starting a new one%s", $pid,
         $self->_exit_text($status), $delay ? " in ${delay}s" : '' );
-      sleep $delay if $delay;   # a signal ends it early
-      $spawn->() unless $stopping;
     }
   } catch {
     my $err = $_;
@@ -726,6 +744,13 @@ sub _run_workers {
     die $err;
   };
   return;
+}
+
+# The pause before the next restart: 1, 2, 4 ... 30 seconds.
+sub _restart_delay {
+  my ($self, $delay) = @_;
+  $delay = $delay ? $delay * 2 : 1;
+  return $delay > 30 ? 30 : $delay;
 }
 
 sub _prepare_workers {
@@ -792,13 +817,27 @@ sub _drop_resolver {
 # kernel state (epoll/kqueue fd, signal pipe) and accepts on the inherited
 # sockets. POSIX::_exit: the supervisor's END blocks and destructors are not
 # the worker's to run.
+#
+# SIGTERM and SIGINT stay blocked from before the fork until the worker has
+# dropped the supervisor's handlers (k64): one that reached the worker in
+# between would run the supervisor's stop -- killing the other workers --
+# and the worker would serve on. Blocked, it waits and then ends the worker;
+# in the supervisor it runs once the fork is done.
 sub _fork_worker {
   my ($self) = @_;
-  my $pid = fork;
-  Carp::croak( "Cannot fork a worker: $!" ) unless defined $pid;
+  my $signals = POSIX::SigSet->new( POSIX::SIGTERM(), POSIX::SIGINT() );
+  my $mask = POSIX::SigSet->new;
+  POSIX::sigprocmask( POSIX::SIG_BLOCK(), $signals, $mask )
+    or Carp::croak( "Cannot block signals for the fork: $!" );
+  my $pid = $self->_fork;
+  my $error = $!;
+  if ( defined $pid && !$pid ) {
+    $SIG{$_} = 'DEFAULT' for qw( TERM INT );
+  }
+  POSIX::sigprocmask( POSIX::SIG_SETMASK(), $mask );
+  Carp::croak( "Cannot fork a worker: $error" ) unless defined $pid;
   return $pid if $pid;
   my $ok = eval {
-    $SIG{$_} = 'DEFAULT' for qw( TERM INT );
     my $loop = $self->loop;
     $loop->post_fork;
     $loop->add($_) for @{ $self->_servers };
@@ -808,6 +847,9 @@ sub _fork_worker {
   $log->errorf( "Worker %d failed: %s", $$, $@ ) unless $ok;
   POSIX::_exit( $ok ? 0 : 1 );
 }
+
+# The fork itself, apart so a test can make it fail.
+sub _fork { fork }
 
 sub _exit_text {
   my ($self, $status) = @_;

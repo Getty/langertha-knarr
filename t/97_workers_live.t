@@ -107,15 +107,16 @@ sub reap {
 
 # The server runs in its own process, forked before any loop exists here.
 # $args{ready}, when given, tells from the port when the server is up
-# (default: ask answers).
+# (default: ask answers); $args{class} replaces Langertha::Knarr.
 sub start_server {
   my (%args) = @_;
   my $ready = delete $args{ready} // \&ask;
+  my $class = delete $args{class} // 'Langertha::Knarr';
   my $port = free_port();
   my $pid = fork // die "fork: $!";
   unless ($pid) {
     my $ok = eval {
-      Langertha::Knarr->new(
+      $class->new(
         handler => Langertha::Knarr::Handler::Code->new( code => sub {
           sleep 0.3;   # holds this worker, so a parallel request needs another
           return "pid:$$";
@@ -372,6 +373,120 @@ subtest 'the supervisor ends its resolver helpers before the fork' => sub {
     host => 'localhost', service => 1, socktype => 'stream' )->get;
   ok( scalar @addrs, 'the fresh resolver resolves' );
   $loop->resolver->stop;
+};
+
+# Makes the supervisor's forks misbehave on cue, by call number: 'fail'
+# fails it with EAGAIN, 'term' sends the new worker SIGTERM the moment it
+# exists (while the worker still dawdles in the fork for 0.3s). Every fork
+# is logged as "<n> <pid>" or "fail <n>".
+{
+  package TestForkKnarr;
+  use Moose;
+  use Path::Tiny;
+  use Time::HiRes ();
+  extends 'Langertha::Knarr';
+  has fork_plan => ( is => 'ro', default => sub { {} } );
+  has fork_log  => ( is => 'ro', required => 1 );
+  has _forks    => ( is => 'rw', default => 0 );
+  sub _fork {
+    my ($self) = @_;
+    my $n = $self->_forks( $self->_forks + 1 );
+    my $plan = $self->fork_plan->{$n} // '';
+    if ( $plan eq 'fail' ) {
+      path( $self->fork_log )->append("fail $n\n");
+      $! = POSIX::EAGAIN();
+      return undef;
+    }
+    my $pid = $self->SUPER::_fork;
+    return $pid unless defined $pid;
+    if ($pid) {
+      path( $self->fork_log )->append("$n $pid\n");
+      kill TERM => $pid if $plan eq 'term';
+    }
+    elsif ( $plan eq 'term' ) {
+      Time::HiRes::sleep(0.3);
+    }
+    return $pid;
+  }
+  __PACKAGE__->meta->make_immutable;
+}
+
+# The forks the supervisor logged: n => pid (0 for a failed one).
+sub forks {
+  my ($log) = @_;
+  my %forks;
+  for ( $log->lines( { chomp => 1 } ) ) {
+    /\Afail (\d+)\z/ ? ( $forks{$1} = 0 ) : /\A(\d+) (\d+)\z/ ? ( $forks{$1} = $2 ) : ();
+  }
+  return \%forks;
+}
+
+subtest 'a restart that cannot fork is retried, the others keep serving' => sub {
+  my $log = path( tempdir( CLEANUP => 1 ), 'forks' );
+  $log->touch;
+  my ($super, $port, $up) = start_server(
+    class     => 'TestForkKnarr',
+    workers   => 2,
+    fork_log  => "$log",
+    fork_plan => { 3 => 'fail' },
+  );
+  ok( $up, 'server answers' ) or do { kill KILL => $super; return };
+  my ( $first, $second ) = @{ forks($log) }{ 1, 2 };
+
+  kill KILL => $first;
+  ok( wait_until( 20, sub { forks($log)->{4} } ), 'after a failed fork, the next one is tried' );
+  is( forks($log)->{3}, 0, '... the failed one was the first restart' );
+  is( reap( $super, 1 ), undef, 'the supervisor survived the failed fork' );
+  ok( alive($second), 'so did the other worker' );
+  my %seen;
+  wait_until( 20, sub {
+    $seen{$_}++ for ask_parallel( $port, 4 );
+    keys %seen >= 2 ? 1 : ();
+  } );
+  is( [ sort keys %seen ], [ sort $second, forks($log)->{4} ],
+    'the other worker and the new one serve' );
+
+  kill TERM => $super;
+  is( reap( $super, 15 ), 0, 'SIGTERM: supervisor exits with status 0' );
+};
+
+subtest 'a first worker that cannot fork is fatal' => sub {
+  my $log = path( tempdir( CLEANUP => 1 ), 'forks' );
+  $log->touch;
+  my ($super) = start_server(
+    class     => 'TestForkKnarr',
+    workers   => 2,
+    fork_log  => "$log",
+    fork_plan => { 2 => 'fail' },
+    ready     => sub { 1 },
+  );
+  my $status = reap( $super, 20 );
+  is( defined $status ? $status >> 8 : undef, 1, 'run() dies, the server exits with status 1' );
+  my $first = forks($log)->{1};
+  ok( $first, 'the first worker had started' );
+  ok( !alive($first), '... and was stopped' ) if $first;
+};
+
+subtest 'SIGTERM right after the fork ends only that worker' => sub {
+  my $log = path( tempdir( CLEANUP => 1 ), 'forks' );
+  $log->touch;
+  my ($super, $port, $up) = start_server(
+    class     => 'TestForkKnarr',
+    workers   => 2,
+    fork_log  => "$log",
+    fork_plan => { 2 => 'term' },
+    ready     => sub { 1 },
+  );
+  # The worker TERMed in the fork dies; the supervisor replaces it.
+  ok( wait_until( 20, sub { forks($log)->{3} } ), 'the TERMed worker was replaced' );
+  my ( $first, $termed ) = @{ forks($log) }{ 1, 2 };
+  ok( wait_until( 5, sub { alive($termed) ? () : 1 } ), 'the TERMed worker is gone' );
+  ok( alive($first), 'the first worker was not touched' );
+  is( reap( $super, 1 ), undef, 'the supervisor serves on' );
+  ok( wait_until( 15, sub { ask($port) } ), 'the server answers' );
+
+  kill TERM => $super;
+  is( reap( $super, 15 ), 0, 'SIGTERM: supervisor exits with status 0' );
 };
 
 subtest 'upstream connections are not inherited by workers' => sub {

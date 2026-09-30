@@ -107,8 +107,8 @@ With more, Knarr binds the listen addresses, runs auto-discovery and the
 capability probe once, then forks I<n> workers that accept on the same
 sockets. The first process stays as their supervisor: it restarts a worker
 that exits (pausing up to 30 seconds when one keeps dying right after its
-start) and passes C<SIGTERM>/C<SIGINT> on to all of them, exiting once they
-are gone. Each worker keeps its own sessions: a Raider conversation
+start or cannot be forked, while the others serve on) and passes
+C<SIGTERM>/C<SIGINT> on to all of them, exiting once they are gone. Each worker keeps its own sessions: a Raider conversation
 continues only when its next request reaches the same worker, which
 nothing guarantees.
 

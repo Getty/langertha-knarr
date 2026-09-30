@@ -1028,7 +1028,8 @@ knarr check                                Validate config file
   binds the listen addresses, runs auto-discovery and the capability probe
   once, then forks N workers that accept on the same sockets. The first
   process stays as their supervisor — it restarts a worker that exits
-  (pausing up to 30 s when one keeps dying at start) and passes
+  (pausing up to 30 s when one keeps dying at start or cannot be forked,
+  while the others serve on) and passes
   `SIGTERM` / `SIGINT` on to all of them. Sessions (a Raider conversation)
   live in one worker and are not routed back to it; the request log file is
   shared, one whole line per write.

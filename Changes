@@ -356,12 +356,15 @@ Revision history for Langertha-Knarr
       workers that accept on the same sockets. The first process
       supervises them, restarts a worker that exits (pausing up to 30
       seconds when one keeps dying at start) and passes SIGTERM/SIGINT on
-      to all of them. Each worker looks up upstream hostnames through its
+      to all of them. A replacement that cannot be forked (out of
+      processes or memory) does not stop the server: the other workers
+      keep serving and the fork is retried after the same growing pause. A
+      SIGTERM or SIGINT that reaches a worker right after its fork ends
+      only that worker. Each worker looks up upstream hostnames through its
       own resolver, not the one the supervisor's capability probe started,
       so no worker gets another's answer. Sessions stay in the worker that
-      created them. The
-      default of 1 forks nothing, as before; a worker count below 1 stops
-      start before anything is bound.
+      created them. The default of 1 forks nothing, as before; a worker
+      count below 1 stops start before anything is bound.
 
     - Request log lines are written in one piece, so workers sharing a log
       file never interleave them, and per-request files in logging.dir are
