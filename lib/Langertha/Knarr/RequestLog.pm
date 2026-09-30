@@ -8,6 +8,7 @@ use JSON::MaybeXS ();
 use File::Spec;
 use Log::Any qw( $log );
 use Langertha::Knarr::Image;
+use Langertha::Knarr::Tracing;
 
 # The JSONL log is the running operational record, not the detailed trace, so
 # tool-call arguments are capped: enough to see what was called, without
@@ -170,10 +171,21 @@ sub _timestamp {
 # warns, the whole log entry would silently disappear. A plain hashref (the
 # shape end_request's own SYNOPSIS documents) passes through untouched; an
 # object we cannot flatten is dropped rather than costing the entry.
+# The canonical counts keep their meaning; prompt-cache tokens ride beside
+# them as cached_tokens / cache_write_tokens when not zero, split the way
+# the Langfuse trace splits them (k65), so nothing is counted twice (k71).
+# A usage that counts no token at all is no usage, not a 0/0/0.
 sub _usage_hash {
   my ($u) = @_;
   return undef unless defined $u;
-  return $u->to_hash if blessed($u) && $u->can('to_hash');
+  if ( blessed($u) && $u->can('to_hash') ) {
+    my $counts = Langertha::Knarr::Tracing::_usage_hash($u) or return undef;
+    return {
+      %{ $u->to_hash },
+      $counts->{input_cached_tokens}  ? ( cached_tokens      => $counts->{input_cached_tokens} )  : (),
+      $counts->{input_cache_creation} ? ( cache_write_tokens => $counts->{input_cache_creation} ) : ()
+    };
+  }
   return $u if ref($u) eq 'HASH';
   return undef;
 }
@@ -268,8 +280,11 @@ Does nothing when C<$handle> is C<undef> (logging was disabled at start).
 
 C<usage> takes a L<Langertha::Usage> (the shape every routed response
 carries) or a plain hashref. Objects are flattened with C<to_hash> to
-C<input_tokens> / C<output_tokens> / C<total_tokens>; hashrefs are logged
-verbatim.
+C<input_tokens> / C<output_tokens> / C<total_tokens>, plus C<cached_tokens>
+(prompt-cache reads) and C<cache_write_tokens> (prompt-cache writes) when
+the request had any; those are informational, the three canonical counts
+are unchanged. An object that counts no token is logged as C<null>.
+Hashrefs are logged verbatim.
 
 C<tool_calls> takes the response's L<Langertha::ToolCall> list and is logged
 B<trimmed>: each call keeps its C<name> and C<id> plus an C<arguments> preview

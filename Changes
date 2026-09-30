@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - The JSONL request log (logging.file / logging.dir) now carries
+      prompt-cache tokens: usage gets cached_tokens (cache reads) and
+      cache_write_tokens (cache writes) beside input_tokens /
+      output_tokens / total_tokens, only when not zero, split the way the
+      Langfuse trace splits them. The existing fields keep their meaning.
+      A usage that counts no token is logged as null instead of 0/0/0.
+
     - Langfuse generations now carry prompt-cache tokens, on both
       transports, for routed answers, routed streams and the raw
       passthrough. The usage details are Langfuse's exclusive buckets:
