@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-30T03:02:09Z
+claimed_by: knarr-worker-rawpt
+class: standard
+completed: 2026-09-30T03:02:09Z
+created: 2026-09-29T21:18:06Z
+id: 59
+priority: medium
+started: 2026-09-30T02:40:08Z
+status: done
+tags:
+- passthrough
+- bug
+title: 'Raw passthrough: gepufferte Antwort in nicht dekodierbarem Encoding (z.B.
+  br) kommt leer an'
+updated: 2026-09-30T03:02:13Z
+---
+
+Aus k56: Eine gepufferte raw-passthrough-Antwort in einem Encoding, das HTTP::Message nicht dekodieren kann (br ohne IO::Uncompress::Brotli), kommt mit leerem Body an, weil decoded_content undef liefert. Bestand schon vorher. Erwartet: dann die rohen Bytes samt Content-Encoding 1:1 durchreichen (Bytes-Prinzip), nie leer. Test mit Fake-Upstream, Content-Encoding: br (oder erfundenes Encoding).
+
+2026-09-30 02:43 Cause: _raw_passthrough_answer re-decoded the body via HTTP::Message->decoded_content, which returns undef for encodings it cannot decode (br w/o Brotli, unknown, stacked) -> ''. Net::Async::HTTP already decodes what it knows (gzip/deflate/bzip2) and removes Content-Encoding, leaving others raw. Fix: buffered answer returns $resp->content as handed over; _raw_passthrough_response_headers drops Content-Encoding only when NAH decodes the whole (joined) value -- same rule buffered and streamed, also fixes a split decision on repeated CE lines (gzip + br). Test t/99_passthrough_undecodable_encoding.t red before (29 failures), green after.
+
+2026-09-30 02:51 Done: Knarr.pm _raw_passthrough_answer returns $resp->content as Net::Async::HTTP handed it over (no second decode via HTTP::Message); _raw_passthrough_response_headers drops Content-Encoding only when NAH decodes the whole joined value (buffered and streamed alike, $buffered param gone). Decision: pure bytes, not decode-with-fallback -- br/x-gzip that HTTP::Message could decode now go back raw with their CE too (client's Accept-Encoding is forwarded, native stream already did this). POD (Knarr raw_passthrough, PSGI) + README updated. New t/99_passthrough_undecodable_encoding.t (br, unknown, 'gzip, br', two CE lines; native+PSGI, sync+stream; gzip still decoded) red before (29 fails), green after. prove -l t/ green (67 files, 3546 tests), streaming live tests green.
+
+2026-09-30 03:02 Committed 2b91e9b
