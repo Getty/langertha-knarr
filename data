@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T04:41:22Z
+claimed_by: knarr-worker-fork
+class: standard
+completed: 2026-09-30T04:41:18Z
+created: 2026-09-30T03:52:35Z
+id: 64
+priority: high
+started: 2026-09-30T03:53:22Z
+status: done
+tags:
+- workers
+- bug
+title: 'Prefork: fehlgeschlagener Fork beim Restart beendet alle Worker; TERM-Fenster
+  zwischen fork und Handler-Reset'
+updated: 2026-09-30T04:41:22Z
+---
+
+Review 2: (a) Knarr.pm ~773 croakt bei fork-Fehler innerhalb try (~718), catch (~720) killt alle Worker und stirbt -> bei EAGAIN/ENOMEM im Restart faellt der ganze Dienst. Fix: im Restart-Zweig wie Crash behandeln (loggen, Backoff, retry); nur initialer Spawn fatal. (b) plausibel: kill TERM direkt nach fork (~698), Kind setzt Handler erst ~776 zurueck -> TERM im Fenster laesst Kind die Supervisor-$stop-Closure ausfuehren (killt Geschwister, schluckt Signal, serviert weiter), Supervisor haengt in waitpid. Fix: TERM/INT per POSIX::sigprocmask um fork blocken, im Kind Handler resetten, dann in beiden entblocken. Tests wo machbar (fork-Fehler simulierbar via Override).
+
+2026-09-30 04:19 Done: (a) _run_workers restart loop rewritten: initial spawn stays inside try (fatal, kills the started ones, dies); afterwards the loop runs while workers exist or not stopping, computes missing workers, sleeps $delay, spawns in eval; a failed fork logs '<error>; trying again in Ns' and backs off like a crash (new _restart_delay: 1,2,4..30), reaping with WNOHANG while a worker is missing so the retry doesn't wait for a death. (b) _fork_worker blocks TERM/INT with POSIX::sigprocmask before fork, the child sets them to DEFAULT, then both restore the old mask; fork itself is the new _fork seam. POD run() item 4, README -w, bin/knarr POD updated. Tests (t/97_workers_live.t, TestForkKnarr subclass overriding _fork): restart fork fails with EAGAIN -> retried, other worker + new one serve, supervisor not reaped, SIGTERM exit 0; initial fork failure fatal, first worker stopped; SIGTERM sent right after fork while child dawdles 0.3s -> only that worker dies, first untouched. Red on a copy of Knarr.pm with only the _fork seam (restart: supervisor exits 1, both workers gone; TERM: termed worker survives, first worker killed), green now, 3 green runs of 97. prove -l t/ PASS (70 files, 3895 tests).
+
+Committed c02f20f
