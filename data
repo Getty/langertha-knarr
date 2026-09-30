@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-30T03:02:27Z
+claimed_by: knarr-worker-fwdhdr
+class: standard
+completed: 2026-09-30T03:02:27Z
+created: 2026-09-29T21:18:10Z
+id: 60
+priority: low
+started: 2026-09-30T02:40:17Z
+status: done
+tags:
+- passthrough
+title: 'Chain Handler::Passthrough: forward_headers als Hash -- doppelte Header bleiben
+  gemergt'
+updated: 2026-09-30T03:02:31Z
+---
+
+Aus k56: Auf dem Handler-Chain-Pfad haelt Handler::Passthrough forward_headers als Hash; ein doppelt gesendeter Header geht als ein gemergter Wert raus (der raw passthrough ist seit k56 1:1). Erwartet: forward_headers als Liste von [name,value]-Paaren (Reihenfolge, Wiederholung), Proxy-Key-Stripping (k53) pro Zeile; alle drei Parser (OpenAI, Anthropic, Ollama) + PSGI-Limit dokumentiert. Test.
+
+2026-09-30 02:41 Plan: parsers build forward_headers as [[name,value],...] via a Protocol-role helper reading ->header(name) in list context (HTTP::Headers gives each line); Request gets forward_header_pairs (tolerates a legacy hash, e.g. t/85); Knarr::_parse_chat_request strips per pair; _carries_provider_key + Passthrough use the helper, Passthrough push_header. Tracing/RequestLog/Handler::Router do not read forward_headers (grep).
+
+2026-09-30 02:47 Reproduced: new t/98_chain_passthrough_duplicate_headers.t failed natively for all three protocols (x-api-key/anthropic-version/authorization repeats merged). Fix in; new test + t/91 + streaming live tests pass. Full suite in shared tree: only t/99_langfuse_usage_keys.t 'raw passthrough: no invented usage' fails -- comes from the other worker's in-progress PassthroughUsage.pm (raw passthrough now reports usage), not forward_headers; verifying in an isolated worktree with only k60's changes.
+
+2026-09-30 02:52 Done: forward_headers is now an ArrayRef of [name, value] pairs, one per header line the client sent, in order. The OpenAI, Anthropic and Ollama parsers build it with a new Protocol-role helper _forward_headers, which reads ->header(name) in list context. Knarr::_parse_chat_request runs _without_proxy_key on each pair, drops lines that held only the key, and also normalises a hand-built hash into pairs. Request gains forward_header_pairs and forward_header(name); forward_header does the case-insensitive lookup that _carries_provider_key now uses. Handler::Passthrough sends each pair with push_header. Tracing, RequestLog and Handler::Router never read forward_headers. t/85, which builds the hash shape by hand, still passes. POD updated: Request, Handler::Passthrough, and the PSGI limit paragraph in PSGI.pm (the PSGI server joins repeats). Tests: new t/98_chain_passthrough_duplicate_headers.t, key-free, all three protocols x native/PSGI x sync/stream, upstream records raw lines. Before the fix it failed on the native server for all three protocols. t/91_ollama_forward_headers.t now expects the pair shape. Full prove -l t/ green in the shared tree (67 files, 3546 tests) and in an isolated worktree holding only k60's changes (65 files, 3392 tests). Streaming live tests t/40 and t/41 green.
+
+2026-09-30 03:02 Committed 50a0833
