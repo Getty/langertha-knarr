@@ -164,6 +164,12 @@ Revision history for Langertha-Knarr
       Anthropic's input tokens from message_start need a Langertha newer
       than 0.503.
 
+    - The Langfuse generation of a routed request names the model the
+      upstream reported answering with (gpt-4o-2024-08-06 for gpt-4o), the
+      configured model kept in its metadata as configured_model; clients
+      still see the configured name. Langertha::Knarr::Response and Stream
+      carry the reported one as upstream_model.
+
     - Two models routed to the same engine, URL and API key now each get
       their own engine instance, so the upstream request carries the model
       the client asked for. This covers auto-discovered gateway models and

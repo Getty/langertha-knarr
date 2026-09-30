@@ -30,6 +30,15 @@ delta into a single output before closing the trace, so the Langfuse
 view shows the full assembled response, with the token usage the backend
 reported on its stream (L<Langertha::Knarr::Stream/usage>).
 
+The generation's C<model> is the model the backend reported answering with
+(L<Langertha::Knarr::Response/upstream_model>,
+L<Langertha::Knarr::Stream/upstream_model>), which can be more concrete than
+the one asked for. When a handler labeled the answer with another name --
+L<Langertha::Knarr::Handler::Router> answers under the configured model --
+that name is recorded as C<configured_model> in the generation's metadata.
+Without a reported model the generation gets the label, and a stream without
+either the model the client asked for.
+
 C<knarr start> mounts this automatically when
 the config supplies Langfuse credentials.
 
@@ -93,6 +102,19 @@ sub _open_trace {
   );
 }
 
+# The generation's model is the one the backend reported answering with; the
+# name the handler labeled the answer with (the configured model a Router
+# relabels it to, k70) goes into the metadata when it differs.
+sub _model_opts {
+  my ($self, $label, $reported, $fallback) = @_;
+  my $model = $reported // $label // $fallback;
+  return (
+    model => $model,
+    ( defined $reported && defined $label && $label ne $reported
+      ? ( configured_model => $label ) : () ),
+  );
+}
+
 sub _close_trace {
   my ($self, $trace, $r) = @_;
   my $resp = Langertha::Knarr::Response->coerce($r);
@@ -103,7 +125,7 @@ sub _close_trace {
   $self->tracing->end_trace(
     $trace,
     output => $resp->content,
-    model  => $resp->model,
+    $self->_model_opts( $resp->model, $resp->upstream_model ),
     ( $resp->usage              ? ( usage       => $resp->usage )      : () ),
     ( $resp->timing             ? ( timing      => $resp->timing )     : () ),
     ( defined $resp->id         ? ( response_id => $resp->id )         : () ),
@@ -177,7 +199,11 @@ async sub handle_stream_f {
           $self->tracing->end_trace(
             $trace,
             output => $accumulated,
-            model  => $request->model,
+            $self->_model_opts(
+              ( $upstream_stream->can('model')          ? $upstream_stream->model          : undef ),
+              ( $upstream_stream->can('upstream_model') ? $upstream_stream->upstream_model : undef ),
+              $request->model,
+            ),
             ( defined $ttft ? ( timing => { ttft_seconds => $ttft } ) : () ),
             # The complete tool calls, known once the stream is exhausted (k19).
             ( $upstream_stream->can('has_tool_calls') && $upstream_stream->has_tool_calls

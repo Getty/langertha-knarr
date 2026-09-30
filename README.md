@@ -355,6 +355,12 @@ That's it. Every proxy request creates:
 - **Error tracking** when backend calls fail
 - Tag `knarr` on all traces
 
+The generation's model is the one the upstream reported answering with,
+which can be more concrete than the one configured (`gpt-4o` answers as
+`gpt-4o-2024-08-06`); the configured name is kept next to it as
+`configured_model` in the generation's metadata. Clients keep seeing the
+configured name, the id `/v1/models` lists.
+
 ### Token usage on routed streams
 
 A routed stream carries the token usage the backend reported on its stream

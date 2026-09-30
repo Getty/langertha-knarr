@@ -394,6 +394,11 @@ provider-native stage durations survive too. See L</Timing sources>.
 =item * C<response_id> — the provider's own response id, for correlating a
 Langfuse generation with the provider's logs.
 
+=item * C<configured_model> — the model name Knarr answers the client under
+when it differs from the C<model> the backend reported (a routed model's
+configured name). The generation's C<model> is the reported one; this keeps
+the configured one next to it.
+
 =item * C<thinking> — reasoning text the engine split off C<content>. It is
 model output that C<output> no longer contains, so the trace is the only
 place it survives.
@@ -465,6 +470,7 @@ sub end_trace {
     my %metadata;
     $metadata{timing}      = $timing if $timing;
     $metadata{response_id} = $opts{response_id} if defined $opts{response_id};
+    $metadata{configured_model} = $opts{configured_model} if defined $opts{configured_model};
     $metadata{thinking}    = $opts{thinking}
       if defined $opts{thinking} && length $opts{thinking};
     if ( my $rl = _rate_limit_hash( $opts{rate_limit} ) ) {

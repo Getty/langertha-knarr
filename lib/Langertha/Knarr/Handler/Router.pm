@@ -42,6 +42,17 @@ config without a C<model> key the provider's default answers, so the
 response keeps the model the upstream reported, else the engine's
 C<chat_model>; it is never relabeled with the alias.
 
+The client keeps seeing the configured name -- the id C</v1/models> lists
+and the one it can ask for again -- even where the upstream reported a more
+concrete one (C<gpt-4o> answering as C<gpt-4o-2024-08-06>). No protocol
+requires otherwise: Ollama echoes the name asked for, and the C<model> of an
+OpenAI or Anthropic answer, where the provider puts its concrete name, is
+informational -- clients do not match it against the request. The
+reported model is kept as L<Langertha::Knarr::Response/upstream_model> (on a
+stream L<Langertha::Knarr::Stream/upstream_model>, the configured name as
+its C<model>), and L<Langertha::Knarr::Handler::Tracing> records it as the
+Langfuse generation's model, the configured name in its metadata.
+
 A request that names no model (A2A always; ACP without C<agent_name>, and
 any other protocol whose body leaves the model out) goes to the default
 engine with the C<model> configured under C<default:>, or with the
@@ -141,12 +152,14 @@ async sub handle_chat_f {
     my $chat_model = $engine->can('chat_model') ? $engine->chat_model : undef;
     return defined $chat_model ? $r->clone_with( model => $chat_model ) : $r;
   }
-  return $r->clone_with( model => $canonical_model );
+  # The client sees the configured name, as /v1/models lists it; the model
+  # the upstream reported goes to the trace (k70).
+  return $r->clone_with( model => $canonical_model, upstream_model => $r->model );
 }
 
 async sub handle_stream_f {
   my ($self, $session, $request) = @_;
-  my ($engine) = $self->_resolve($request);
+  my ($engine, $canonical_model, $alias_only) = $self->_resolve($request);
 
   unless ( $engine ) {
     return await $self->passthrough->handle_stream_f( $session, $request );
@@ -158,11 +171,13 @@ async sub handle_stream_f {
     $stream->finish_reason( $r->finish_reason );
     $stream->tool_calls( $r->tool_calls );
     $stream->usage( $r->usage ) if $r->usage;
+    $stream->model( $r->model );
+    $stream->upstream_model( $r->upstream_model );
     return $stream;
   }
 
-  return Langertha::Knarr::Stream->from_callback( sub {
-    my ($emit, $done, $fail, $finish, $tool_call, $usage) = @_;
+  my $stream = Langertha::Knarr::Stream->from_callback( sub {
+    my ($emit, $done, $fail, $finish, $tool_call, $usage, $model) = @_;
     my $cb = sub {
       my ($chunk) = @_;
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
@@ -182,12 +197,19 @@ async sub handle_stream_f {
       # the tracing decorator on the generation.
       $usage->( $chunk->usage )
         if ref $chunk && $chunk->can('has_usage') && $chunk->has_usage;
+      # The model the backend reports answering with, for the trace.
+      $model->( $chunk->model )
+        if ref $chunk && $chunk->can('has_model') && $chunk->has_model;
     };
     my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );
     $f->on_fail( $fail );
     $f->retain;
   });
+  # Labeled like the non-streaming answer: the configured model, unless the
+  # config names none and the provider default answers (k22).
+  $stream->model($canonical_model) unless $alias_only;
+  return $stream;
 }
 
 sub _supports_streaming {

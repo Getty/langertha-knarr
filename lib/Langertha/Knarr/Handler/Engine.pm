@@ -90,11 +90,13 @@ async sub handle_stream_f {
     $stream->finish_reason( $r->finish_reason );
     $stream->tool_calls( $r->tool_calls );
     $stream->usage( $r->usage ) if $r->usage;
+    $stream->model( $r->model );
+    $stream->upstream_model( $r->upstream_model );
     return $stream;
   }
 
   return Langertha::Knarr::Stream->from_callback( sub {
-    my ($emit, $done, $fail, $finish, $tool_call, $usage) = @_;
+    my ($emit, $done, $fail, $finish, $tool_call, $usage, $model) = @_;
     my $cb = sub {
       my ($chunk) = @_;
       my $text = ref $chunk && $chunk->can('content') ? $chunk->content : "$chunk";
@@ -114,6 +116,9 @@ async sub handle_stream_f {
       # the tracing decorator on the generation.
       $usage->( $chunk->usage )
         if ref $chunk && $chunk->can('has_usage') && $chunk->has_usage;
+      # The model the backend reports answering with, for the trace.
+      $model->( $chunk->model )
+        if ref $chunk && $chunk->can('has_model') && $chunk->has_model;
     };
     my $f = $engine->chat_stream_realtime_f( chunk_callback => $cb, $request->chat_f_args($engine) );
     $f->on_done( $done );

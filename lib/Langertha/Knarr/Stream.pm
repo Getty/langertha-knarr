@@ -80,11 +80,26 @@ C<prompt_eval_count>, ...) is upgraded through
 L<Langertha::Usage/from_hash>, an empty one is no usage. A stream that wraps
 another and has none of its own answers with its upstream's.
 
+=attr model
+
+Optional. The model name a handler routes the stream to, as the
+non-streaming L<Langertha::Knarr::Response/model>:
+L<Langertha::Knarr::Handler::Router> sets the model of the config entry.
+Settable; a stream that wraps another and has none of its own answers with
+its upstream's.
+
+=attr upstream_model
+
+The model the backend reported on its stream chunks, or C<undef> when it
+reported none. Known once the stream is exhausted; the tracing decorator
+records it as the generation's model. Settable; a stream that wraps another
+and has none of its own answers with its upstream's.
+
 =attr upstream
 
 Optional. The stream this one wraps, as the tracing and request-log
-decorators do. Only consulted by L</finish_reason>, L</tool_calls> and
-L</usage>.
+decorators do. Only consulted by L</finish_reason>, L</tool_calls>,
+L</usage>, L</model> and L</upstream_model>.
 
 =method next_chunk_f
 
@@ -101,13 +116,14 @@ chunk strings.
 =method from_callback
 
     my $stream = Langertha::Knarr::Stream->from_callback( sub {
-        my ($emit, $done, $fail, $finish, $tool_call, $usage) = @_;
+        my ($emit, $done, $fail, $finish, $tool_call, $usage, $model) = @_;
         my $f = $engine->simple_chat_stream_realtime_f(
             sub {
                 $emit->( $_[0]->content );
                 $finish->( $_[0]->finish_reason ) if $_[0]->has_finish_reason;
                 $tool_call->( @{ $_[0]->tool_calls } ) if $_[0]->has_tool_calls;
                 $usage->( $_[0]->usage ) if $_[0]->has_usage;
+                $model->( $_[0]->model ) if $_[0]->has_model;
             },
             @messages,
         );
@@ -117,15 +133,18 @@ chunk strings.
     });
 
 Builds a stream backed by a callback-driven producer. The setup sub
-receives six callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
+receives seven callbacks — C<$emit-E<gt>($chunk)>, C<$done-E<gt>()>,
 C<$fail-E<gt>($err)>, C<$finish-E<gt>($finish_reason)>,
-C<$tool_call-E<gt>(@tool_calls)>, C<$usage-E<gt>($usage)> — and is
-expected to wire them to the underlying async source. C<$finish> sets L</finish_reason>; an C<undef> reason is
+C<$tool_call-E<gt>(@tool_calls)>, C<$usage-E<gt>($usage)>,
+C<$model-E<gt>($model)> — and is expected to wire them to the underlying
+async source. C<$finish> sets L</finish_reason>; an C<undef> reason is
 ignored, a later one wins. C<$tool_call> appends complete
 L<Langertha::ToolCall> objects to L</tool_calls>. C<$usage> sets L</usage>;
 streamed usage is cumulative, so a later report wins, and an C<undef> or
-empty one is ignored. Internally maintains a queue and pending Future so the
-consumer side can sit on C<next_chunk_f> without polling.
+empty one is ignored. C<$model> sets L</upstream_model>; an C<undef> or
+empty name is ignored, a later one wins. Internally maintains a queue and
+pending Future so the consumer side can sit on C<next_chunk_f> without
+polling.
 
 This is the canonical replacement for the queue/pending/finished/error
 pump that engine-backed handlers used to inline.
@@ -191,7 +210,12 @@ sub from_callback {
     $weak->usage($u) if $weak && $weak->_usable_usage($u);
   };
 
-  $setup->($emit, $done, $fail, $finish, $tool_call, $usage);
+  my $model = sub {
+    my ($name) = @_;
+    $weak->upstream_model($name) if $weak && defined $name && length $name;
+  };
+
+  $setup->($emit, $done, $fail, $finish, $tool_call, $usage, $model);
 
   return $stream;
 }
@@ -252,6 +276,36 @@ sub usage {
   return $own if $own;
   my $up = $self->upstream;
   return $up && $up->can('usage') ? $up->usage : undef;
+}
+
+has _model => (
+  is       => 'rw',
+  isa      => 'Maybe[Str]',
+  init_arg => 'model',
+);
+
+sub model {
+  my $self = shift;
+  return $self->_model(@_) if @_;
+  my $own = $self->_model;
+  return $own if defined $own;
+  my $up = $self->upstream;
+  return $up && $up->can('model') ? $up->model : undef;
+}
+
+has _upstream_model => (
+  is       => 'rw',
+  isa      => 'Maybe[Str]',
+  init_arg => 'upstream_model',
+);
+
+sub upstream_model {
+  my $self = shift;
+  return $self->_upstream_model(@_) if @_;
+  my $own = $self->_upstream_model;
+  return $own if defined $own;
+  my $up = $self->upstream;
+  return $up && $up->can('upstream_model') ? $up->upstream_model : undef;
 }
 
 sub _usable_usage {

@@ -26,7 +26,18 @@ Plain assistant text. Defaults to empty string.
 
 =attr model
 
-The model id that produced the response, if known.
+The model id the response is labeled with for the client, if known: the
+model that produced it, or the configured name a handler answers under
+(L<Langertha::Knarr::Handler::Router> labels a routed answer with the model
+of its config entry).
+
+=attr upstream_model
+
+The model the backend reported answering with, when a handler relabeled
+L</model> for the client; C<undef> otherwise, L</model> then being the
+reported one. Providers answer with a concrete name for the one asked
+(C<gpt-4o> answers as C<gpt-4o-2024-08-06>); the Langfuse generation records
+this one, see L<Langertha::Knarr::Handler::Tracing>.
 
 =attr usage
 
@@ -103,6 +114,12 @@ has content => (
 );
 
 has model => (
+  is => 'ro',
+  isa => 'Maybe[Str]',
+  default => sub { undef },
+);
+
+has upstream_model => (
   is => 'ro',
   isa => 'Maybe[Str]',
   default => sub { undef },
@@ -296,6 +313,7 @@ sub clone_with {
   return ref($self)->new(
     content       => $self->content,
     model         => $self->model,
+    upstream_model => $self->upstream_model,
     usage         => $self->usage,
     tool_calls    => $self->tool_calls,
     finish_reason => $self->finish_reason,
