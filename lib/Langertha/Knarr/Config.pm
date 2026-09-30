@@ -66,7 +66,10 @@ sub _build_data {
   my $file = $self->file;
   croak "Config file not found: $file" unless -f $file;
   my $ypp = YAML::PP->new;
-  my $data = $ypp->load_file($file);
+  my $data = eval { $ypp->load_file($file) };
+  croak "Config file $file is not valid YAML: ".$self->_error_text($@) if $@;
+  croak "Config file $file must be a mapping of key: value pairs"
+    unless ref $data eq 'HASH';
   _interpolate_env($data);
   $log->debugf("Loaded config from %s", $file);
   return $data;
@@ -254,7 +257,11 @@ sub _build_listen {
   my ($self) = @_;
   my $raw = $self->data->{listen};
   return ['127.0.0.1:8080', '127.0.0.1:11434'] unless defined $raw;
-  return ref $raw eq 'ARRAY' ? $raw : [$raw];
+  my $list = ref $raw eq 'ARRAY' ? $raw : [$raw];
+  # A mapping would be bound as "HASH(0x...)" (k67); validate reports it
+  croak "listen must be a host:port string or a list of them"
+    if grep { ref } @$list;
+  return $list;
 }
 
 has models => (
@@ -284,7 +291,7 @@ C<context_size>; see L<Langertha::Knarr::Router/DESCRIPTION> for the split.
 
 sub _build_models {
   my ($self) = @_;
-  my $models = $self->data->{models} // {};
+  my $models = $self->_section('models') // {};
   $self->_warn_unused_context_size( "Model '$_'", $models->{$_} )
     for sort keys %$models;
   return $models;
@@ -328,7 +335,7 @@ the engine reads only its own C<LANGERTHA_*_API_KEY> variable.
 
 sub _build_default_engine {
   my ($self) = @_;
-  my $default = $self->data->{default} // undef;
+  my $default = $self->_section('default');
   $self->_warn_unused_context_size( 'Default', $default );
   return $default;
 }
@@ -347,7 +354,7 @@ C<logging.file> in config or C<KNARR_LOG_FILE> environment variable.
 
 sub _build_log_file {
   my ($self) = @_;
-  return $self->data->{logging}{file} // _strip_quotes($ENV{KNARR_LOG_FILE}) // undef;
+  return ( $self->_section('logging') // {} )->{file} // _strip_quotes($ENV{KNARR_LOG_FILE}) // undef;
 }
 
 has log_dir => (
@@ -364,7 +371,7 @@ C<logging.dir> in config or C<KNARR_LOG_DIR> environment variable.
 
 sub _build_log_dir {
   my ($self) = @_;
-  return $self->data->{logging}{dir} // _strip_quotes($ENV{KNARR_LOG_DIR}) // undef;
+  return ( $self->_section('logging') // {} )->{dir} // _strip_quotes($ENV{KNARR_LOG_DIR}) // undef;
 }
 
 has langfuse => (
@@ -382,7 +389,7 @@ when the section is absent.
 
 sub _build_langfuse {
   my ($self) = @_;
-  return $self->data->{langfuse} // {};
+  return $self->_section('langfuse') // {};
 }
 
 has proxy_api_key => (
@@ -479,7 +486,7 @@ card says C<Langertha Knarr Agent>.
 
 sub _build_a2a_name {
   my ($self) = @_;
-  return $self->data->{a2a}{name} // _strip_quotes($ENV{KNARR_A2A_NAME}) // undef;
+  return ( $self->_section('a2a') // {} )->{name} // _strip_quotes($ENV{KNARR_A2A_NAME}) // undef;
 }
 
 has a2a_description => (
@@ -498,7 +505,7 @@ variable. When not set, Knarr's default description applies.
 
 sub _build_a2a_description {
   my ($self) = @_;
-  return $self->data->{a2a}{description} // _strip_quotes($ENV{KNARR_A2A_DESCRIPTION}) // undef;
+  return ( $self->_section('a2a') // {} )->{description} // _strip_quotes($ENV{KNARR_A2A_DESCRIPTION}) // undef;
 }
 
 sub protocol_args {
@@ -642,6 +649,17 @@ sub _build_workers {
   return $value + 0;
 }
 
+# A config section (models:, default:, logging:, ...) that is not a mapping
+# croaks when read (k67), instead of dying later as a HASH dereference;
+# validate reports it.
+sub _section {
+  my ($self, $key) = @_;
+  my $value = $self->data->{$key};
+  return $value if !defined $value || ref $value eq 'HASH';
+  croak "$key must be a mapping of key: value pairs, not "
+    . ( ref $value eq 'ARRAY' ? 'a list' : "'".$value."'" );
+}
+
 sub _seconds {
   my ($name, $value, $default) = @_;
   return $default unless defined $value && length $value;
@@ -718,7 +736,8 @@ sub _build_passthrough {
     return $raw ? { %PASSTHROUGH_DEFAULTS } : {};
   }
 
-  return {} unless ref $raw eq 'HASH';
+  croak "passthrough must be true, false or a mapping of format: URL, not a list"
+    unless ref $raw eq 'HASH';
 
   my %result;
   for my $format (keys %$raw) {
@@ -753,7 +772,13 @@ C<anthropic>), or C<undef> if passthrough is not configured for that format.
     my @errors = $config->validate;
 
 Validates the configuration and returns a list of error strings. Returns an
-empty list when the config is valid. Checks that every model entry has an
+empty list when the config is valid. A config file that does not load (not
+YAML, or not a mapping) is reported alone, and so are the sections
+C<models>, C<default>, C<langfuse>, C<logging>, C<a2a> and C<passthrough>
+when one is not a mapping (C<passthrough> may also be C<true> or C<false>),
+and C<listen> when it is not a string or a list of strings: reading such a
+section croaks. Otherwise it checks that every model entry is a
+mapping with an
 C<engine> key, that the default engine (if set) has an C<engine> key,
 that at least one model or default engine is configured, that a model's
 C<context_size> (and the default engine's), when set, is a positive integer, and its
@@ -769,9 +794,25 @@ sub validate {
   my ($self) = @_;
   my @errors;
 
+  # A file that does not load leaves nothing else to check (k67)
+  return $self->_error_text($@) unless eval { $self->data; 1 };
+
+  # A section that is not a mapping croaks when read (k67)
+  for my $key (qw( models default langfuse logging a2a )) {
+    push @errors, $self->_error_text($@) unless eval { $self->_section($key); 1 };
+  }
+  for my $attr (qw( passthrough listen )) {
+    push @errors, $self->_error_text($@) unless eval { $self->$attr; 1 };
+  }
+  return @errors if @errors;
+
   my $models = $self->models;
   for my $name (keys %$models) {
     my $def = $models->{$name};
+    if ( defined $def && ref $def ne 'HASH' ) {
+      push @errors, "Model '$name' must be a mapping of key: value pairs";
+      next;
+    }
     unless ($def->{engine}) {
       push @errors, "Model '$name': missing 'engine' key";
     }
@@ -801,11 +842,17 @@ sub validate {
 
   for my $attr (qw( ollama_compat_version upstream_timeout upstream_stall_timeout probe_timeout workers )) {
     next if eval { $self->$attr; 1 };
-    ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
-    push @errors, $err;
+    push @errors, $self->_error_text($@);
   }
 
   return @errors;
+}
+
+# A croak as a validation error: without the trailing "at FILE line N."
+sub _error_text {
+  my ($self, $err) = @_;
+  $err =~ s/\s+at \S+ line \d+\.?\s*\z//;
+  return $err;
 }
 
 sub engine_definitions {

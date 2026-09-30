@@ -8,9 +8,10 @@ use MooX::Options protect_argv => 0, usage_string => 'USAGE: knarr models [optio
 
 =head1 DESCRIPTION
 
-Implements the C<knarr models> command. Loads the config file, triggers
-auto-discovery (if enabled), and prints the full model list as a table or
-JSON. Each row shows the model ID, engine class, backend model name, and
+Implements the C<knarr models> command. Loads and validates the config
+file (an invalid one exits C<1> with the errors of C<knarr check>, on
+stderr), triggers auto-discovery (if enabled), and prints the full model
+list as a table or JSON. Each row shows the model ID, engine class, backend model name, and
 whether it was explicitly configured or auto-discovered.
 
 See L<knarr> for option details and L<Langertha::Knarr::Config> for the
@@ -49,6 +50,13 @@ sub execute {
   require Langertha::Knarr::Router;
 
   my $config = Langertha::Knarr::Config->new(file => $config_file);
+  # Like check and start (k67): stdout is the model list, errors go to stderr
+  my @errors = $config->validate;
+  if (@errors) {
+    print STDERR "Configuration INVALID:\n";
+    print STDERR "  - $_\n" for @errors;
+    exit 1;
+  }
   my $router = Langertha::Knarr::Router->new(config => $config);
   my $models = $router->list_models;
 

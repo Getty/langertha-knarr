@@ -2,6 +2,13 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - A config section of the wrong type (a2a: Support Agent, models: as a
+      list, a default: string, listen: as a mapping, ...), a file that is
+      not valid YAML and an empty config file are reported by knarr check
+      and stop knarr start and knarr models with a message naming the
+      section, instead of a Perl error. passthrough: as a list is now such
+      an error rather than silently off.
+
     - Upgrade note for docker-compose users: LANGFUSE_NEXTAUTH_SECRET,
       LANGFUSE_SALT and LANGFUSE_DB_PASSWORD are now required in .env and
       compose refuses to start without them; an existing Postgres volume
