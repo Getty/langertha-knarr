@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-30T04:59:10Z
+claimed_by: knarr-worker-cfg
+class: standard
+completed: 2026-09-30T04:59:01Z
+created: 2026-09-30T03:52:55Z
+id: 68
+priority: medium
+started: 2026-09-30T04:42:35Z
+status: done
+tags:
+- docker
+- security
+title: 'docker-compose: Langfuse-Secrets landen im knarr-Container; Langfuse-Port
+  oeffentlich'
+updated: 2026-09-30T04:59:10Z
+---
+
+Review 2: knarr-Service hat env_file: .env und bekommt damit LANGFUSE_DB_PASSWORD, LANGFUSE_NEXTAUTH_SECRET, LANGFUSE_SALT, LANGFUSE_INIT_USER_PASSWORD, die er nicht braucht. Fix: knarr bekommt die Provider-Keys + KNARR_* + LANGFUSE_PUBLIC_KEY/SECRET_KEY/URL explizit (oder die Langfuse-Server-Secrets in eigene Datei .env.langfuse). Langfuse-Port 3000 standardmaessig an 127.0.0.1 binden (Admin-Login wird automatisch angelegt); knarr-Ports 8080/11434 bleiben (sind der Zweck), aber per Variable bindbar (KNARR_BIND z.B.). README/.env.example. docker compose config pruefen, kurz hochfahren.
+
+2026-09-30 04:54 Done. docker-compose.yml: knarr loses env_file: .env and gets an explicit environment list of value-less names (every non-TEST engine_catalog key, all 14 KNARR_* the code reads, LANGFUSE_PUBLIC_KEY/SECRET_KEY/TRACE_NAME, LANGFUSE_URL fixed); compose resolves each from .env or the shell, and a name set in neither stays unset in the container. Chosen over a second env file because users keep one .env (also used by docker run --env-file) and interpolation for langfuse/db keeps reading .env unchanged. Ports: knarr '${KNARR_BIND:+${KNARR_BIND}:}8080:8080' (unset = exactly the old all-interfaces publish incl. IPv6), langfuse '${LANGFUSE_BIND:-127.0.0.1}:3000:3000'. README Compose section + .env.example updated. Evidence: docker compose config (clean env, scratch .env with all 4 secrets) -> knarr env has only the set allowlisted vars, no secret names, no env_file; langfuse/db still get DATABASE_URL/NEXTAUTH_SECRET/SALT/INIT_USER_PASSWORD/POSTGRES_PASSWORD; ports *:8080,*:11434, 127.0.0.1:3000; KNARR_BIND=127.0.0.1/LANGFUSE_BIND=0.0.0.0 honoured. Live: knarr service with a busybox stand-in (no knarr image locally; override in scratch), docker compose exec knarr env shows exactly the 7 set vars, 0 secrets; torn down. Langfuse not started (image not local, not pulled). New t/99_compose_knarr_env.t guards the list against engine_catalog and the $ENV{KNARR_*|LANGFUSE_*} the code reads, and the loopback default; fails on the old compose file. prove -l t/ green. Behaviour change: a listed variable exported in the shell now reaches knarr (shell wins over .env, as for interpolation); a custom api_key_env name needs its own line.
+
+Committed 011a20b
