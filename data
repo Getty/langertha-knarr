@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-30T05:39:56Z
+claimed_by: k65-langfuse-cache
+class: standard
+completed: 2026-09-30T05:39:56Z
+created: 2026-09-30T03:52:40Z
+id: 65
+priority: high
+started: 2026-09-30T05:08:33Z
+status: done
+tags:
+- tracing
+- langfuse
+- bug
+title: 'Langfuse-Usage: Cache-Tokens fehlen (Anthropic cache_read/creation), unbekannte
+  Usage wird zu 0/0/0'
+updated: 2026-09-30T05:39:56Z
+---
+
+Review 2, bestaetigt (/tmp/claude-1000/-home-getty-dev-langertha-knarr/28faadf7-1903-4e64-96db-cf9b279f9efc/scratchpad/review2/usage_map.pl): Tracing.pm _usage_hash geht ueber Langertha::Usage->from_hash, das Cache-Felder verwirft. Anthropic input_tokens:12 + cache_read_input_tokens:50000 + cache_creation_input_tokens:2000 -> input 12. Fix: Cache-Tokens in input einrechnen UND als eigene usageDetails-Keys (Langfuse-Konvention pruefen: input_cache_read / input_cache_creation o.ae.) senden, fuer ingestion und otel Transport; OpenAI prompt_tokens_details.cached_tokens (ist bereits in prompt_tokens enthalten -> nur Detail, nicht doppelt zaehlen). Hash ohne bekannte Count-Keys -> keine Usage (POD verspricht 'never zeroed'). Tests.
+
+2026-09-30 05:12 Research: Langfuse usage_details keys are mutually exclusive buckets (docs token-and-cost-tracking#usage-details-contract): input excludes input_*; total = sum. Flat usageDetails and langfuse.observation.usage_details are stored unchanged, so Knarr must send exclusive counts. Langfuse's own normalizer (OtelIngestionProcessor, AI SDK path) names cache reads input_cached_tokens and writes input_cache_creation (+ _5m/_1h tiers); default-model-prices.json prices those keys for every OpenAI/Anthropic/Gemini model that has any cache price. So: NOT 'fold cache into input AND send details' (that double-counts cost) -- input = uncached input, cache as input_cached_tokens / input_cache_creation. Legacy v2 usage keeps inclusive input; v3 overlays usageDetails keys over usage (IngestionService), so v3 sees exclusive. Paths: routed Response/Stream usage = Langertha::Usage from_hash with raw provider hash (0.503 has no cache accessors, dev core does); PassthroughUsage keeps provider hash verbatim incl. cache keys (merge over message_start).
+
+2026-09-30: Worker gestoppt (Uebergabe an anderen Bearbeiter), noch keine Code-Aenderungen im Tree. Repro aus Review: usage_map.pl -- Anthropic input_tokens exkl. cache_read/cache_creation; Tracing._usage_hash via Langertha::Usage->from_hash verwirft Cache-Felder; Hash ohne bekannte Count-Keys -> 0/0/0.
+
+2026-09-30 05:27 Worktree war 36 Commits hinter main (kein PassthroughUsage/otel) -> ff-only auf main eb3bf7f. Repro-Tests geschrieben: t/99_langfuse_usage_keys.t, t/99_langfuse_otel_transport.t, t/99_raw_passthrough_usage.t (Cache-Buckets input/input_cached_tokens/input_cache_creation, v2 usage inklusiv; Hash ohne Counts -> keine Usage). Fix in Tracing._usage_hash folgt.
+
+2026-09-30 05:38 Done: Tracing._usage_hash sends Langfuse's exclusive buckets (usageDetails / otel usage_details): input = uncached, input_cached_tokens, input_cache_creation (only when >0), output, total = sum. OpenAI prompt_tokens_details.cached_tokens/cache_write_tokens are taken out of input; Anthropic cache_* are added beside it. v2 'usage' keeps the whole input (_legacy_usage). If the core has uncached_input_tokens (dev core) its accessors are used; otherwise (0.503) the counts are read from Usage->raw, copied out so the provider hash isn't autovivified. A usage that counts no tokens ({error}, from_hash of junk) -> no usage. Provider total is now always the sum of the buckets. Tests: t/99_langfuse_usage_keys.t, t/99_langfuse_otel_transport.t, t/99_raw_passthrough_usage.t (cache in the passthrough fixtures, native+psgi, sync+stream). Red against old Tracing.pm, green against 0.503 and the dev core (-I ~/dev/langertha/lib); also green: 00,33,44,46,47,73,77,78,79,86,89,94_discovered_401_fallback. Changes entry written. Worktree was 36 commits behind main -> ff-only to eb3bf7f (no own commit). Also found: RequestLog._usage_hash (JSONL) uses to_hash and drops cache counts too; that's for the karr board of this repo, not fixed here.
+
+2026-09-30 05:39 Committed as 67fbc2c
