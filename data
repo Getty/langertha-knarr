@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-30T05:08:08Z
+claimed_by: knarr-worker-otel
+class: standard
+completed: 2026-09-30T05:08:04Z
+created: 2026-09-30T02:40:04Z
+id: 62
+priority: medium
+started: 2026-09-30T02:40:21Z
+status: done
+tags:
+- tracing
+- langfuse
+- otel
+- feature
+title: 'Langfuse: OpenTelemetry-Transport (OTLP/HTTP) zusaetzlich, per Config umschaltbar'
+updated: 2026-09-30T05:08:08Z
+---
+
+Maintainer-Entscheidung 2026-09-30: /api/public/ingestion ist laut Langfuse deprecated (Cloud-v4-Cutover aus, self-hosted v4 default aus). Neu: OTLP/HTTP-Exporter an Langfuses OTel-Endpoint (/api/public/otel/v1/traces, Basic Auth pk:sk), Traces/Generations als Spans mit Langfuses OTel-Attribut-Mapping (langfuse.observation.type=generation, gen_ai.* usage/model, input/output). Config: langfuse.transport: ingestion|otel (+ Env KNARR_LANGFUSE_TRANSPORT oder LANGFUSE_TRANSPORT nach Config-Konvention), Default ingestion. Async Flush via Net::Async::HTTP wie heute, JSON-Encoding von OTLP (kein protobuf-Zwang). Doku von Langfuse OTel pruefen (context7/Langfuse-Docs). Test mit Fake-Endpoint, der den OTLP-JSON-Payload prueft. Doku README/Config POD/CLAUDE.md/example-config.
+
+2026-09-30 02:44 Research: Langfuse OTLP endpoint /api/public/otel/v1/traces accepts HTTP/JSON and HTTP/protobuf (gRPC not) -> JSON, no new dep. Headers: Basic pk:sk + x-langfuse-ingestion-version: 4. v4 rule: export each span once after it ends -> OTel spans are built at end_trace, start_trace only records state. Plan: root span (trace name/tags/metadata/io) + child generation span; langfuse.observation.usage_details wins over gen_ai.usage.* server-side. Config: langfuse.transport / KNARR_LANGFUSE_TRANSPORT.
+
+2026-09-30 02:50 Implemented: Config langfuse_transport (langfuse.transport / KNARR_LANGFUSE_TRANSPORT, validate + croak), Tracing transport strategy (otel: start_trace records, end_trace builds root SERVER span + proxy-request CLIENT generation span, flush posts OTLP JSON with x-langfuse-ingestion-version 4). New t/99_langfuse_otel_transport.t green (9 subtests). Full suite pending a loadguard slot.
+
+2026-09-30 03:22 Done, uncommitted in worktree .claude/worktrees/agent-a56030c6548b970c1 (branch worktree-agent-a56030c6548b970c1, rebased onto main 0f67aaf). langfuse.transport ingestion|otel (+KNARR_LANGFUSE_TRANSPORT, validate/croak, default ingestion unchanged). otel: OTLP/HTTP JSON to /api/public/otel/v1/traces, Basic pk:sk, x-langfuse-ingestion-version 4; root SERVER span (trace name/tags/metadata/io) + proxy-request CLIENT generation span (model, io, usage_details in Langfuse keys, completion_start_time, metadata, ERROR status). start_trace/end_trace/flush API unchanged; k61 raw-passthrough usage+model verified through otel. Verified: new t/99_langfuse_otel_transport.t; prove -l t/ 68 files 3555 tests PASS (65_manifest skipped: unreleased core, pre-existing); streaming live 40/41 PASS. Docs: Tracing/Config POD, README, CLAUDE.md, example-config, .env.example; knarr start/check show the transport.
+
+2026-09-30 05:04 Follow-ups done on main 011a20b (rebased twice, uncommitted): root span ERROR level/status_message/status 2 on error; langfuse.timeout / KNARR_LANGFUSE_TIMEOUT (default 15 s, 0 = none, validate/croak) for both transports; knarr init shows transport + timeout commented; OTel carries k66 start_hires + passthrough_fallback, k70 configured_model, k69 stream usage/model; compose knarr env lists KNARR_LANGFUSE_TRANSPORT/TIMEOUT. prove -l t/ 72 files 4049 tests PASS (65_manifest skipped, pre-existing); streaming live 40/41 PASS.
+
+2026-09-30 05:08 Committed eb3bf7f on main; full prove -l t/ passes (72 files, 4049 tests)
