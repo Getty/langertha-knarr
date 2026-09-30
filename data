@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-30T05:41:54Z
+claimed_by: k65-langfuse-cache
+class: standard
+completed: 2026-09-30T05:41:54Z
+created: 2026-09-30T05:39:44Z
+id: 71
+priority: medium
+started: 2026-09-30T05:41:17Z
+status: done
+tags:
+- logging
+- bug
+title: RequestLog::_usage_hash (to_hash) verwirft Cache-Token im JSONL-Log
+updated: 2026-09-30T05:41:54Z
+---
+
+RequestLog::_usage_hash reduces usage via to_hash and drops the prompt-cache tokens (cache read / cache creation), so the JSONL log lacks them. Found while doing k65 (Langfuse cache buckets).
+
+2026-09-30 05:41 RequestLog::_usage_hash: usage objects get cached_tokens/cache_write_tokens (nonzero only, via Tracing::_usage_hash buckets), canonical fields unchanged, empty usage -> null. Test t/99_requestlog_cache_usage.t (fails on old code); t/74, t/33 pass. POD + Changes done.
+
+2026-09-30 05:41 Committed as 51cbb08
