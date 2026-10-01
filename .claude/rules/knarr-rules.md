@@ -84,7 +84,7 @@ user explicitly says to handle a specific item, and every write is confirmed fir
 
 `dzil build` / `dzil test` are fine anytime. `dzil release` is STRICTLY forbidden without
 the maintainer's explicit go-ahead — and here it is bigger than CPAN: the
-`run_after_release` chain also creates a GitHub release, and `docker_image` (bundle →
+bundle also creates a GitHub release (`GitHub::CreateRelease`), and `docker_image` (bundle →
 `Dist::Zilla::Plugin::Docker::API`) pushes three Docker tags to
 `raudssus/langertha-knarr` on Docker Hub. Same lock applies to standalone `docker push`
 and `gh release`. For anything heading toward release: stop and ask.

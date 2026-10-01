@@ -7,6 +7,10 @@ Revision history for Langertha-Knarr
       container engine's HTTP API instead of shelling out to docker build /
       docker push, so a release works against rootless Podman.
       KNARR_DOCKER_BUILD_ARGS is gone.
+    - The GitHub release is published by the bundle's GitHub::CreateRelease
+      after the tag is pushed, with the Changes section as release notes. The
+      gh calls in run_after_release are gone: they ran before the tag existed,
+      so the release tag landed on the commit before the release commit.
 
 1.102     2026-10-01 17:35:07Z
 

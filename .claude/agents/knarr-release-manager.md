@@ -27,14 +27,15 @@ code goes back to the worker as a note on its card, not as your own fix. **Never
    whenever Knarr starts using a new Langertha feature. Exception you WILL meet: a
    coordinated release stages a floor pointing at a Langertha version released minutes ago
    and not yet on the CPAN mirror — that is staging, not an error; flag it as info only.
-2. **dist.ini** — `[@Author::GETTY]` bundle. Two pieces beyond CPAN: the
-   `run_after_release` lines create the GitHub release and upload the tarball
-   (`Getty/langertha-knarr`); `docker_image` + `docker_tags = latest %V %v` make the
-   bundle add `Dist::Zilla::Plugin::Docker::API`, which builds the image over the Engine
-   HTTP API at `DOCKER_HOST` (rootless Podman works) and on release pushes three tags to
-   `raudssus/langertha-knarr` (latest, major, %v). No build arguments are passed
-   (`KNARR_DOCKER_BUILD_ARGS`/`LANGERTHA_SRC` are gone). The push runs after
-   `UploadToCPAN` and before every git step — a failed push is fatal in between.
+2. **dist.ini** — `[@Author::GETTY]` bundle, and nothing beyond it: no `run_after_release`
+   lines. Two pieces beyond CPAN, both from the bundle: `docker_image` +
+   `docker_tags = latest %V %v` make it add `Dist::Zilla::Plugin::Docker::API`, which builds
+   the image over the Engine HTTP API at `DOCKER_HOST` (rootless Podman works) and on
+   release pushes three tags to `raudssus/langertha-knarr` (latest, major, %v). No build
+   arguments are passed (`KNARR_DOCKER_BUILD_ARGS`/`LANGERTHA_SRC` are gone). The push runs
+   after `UploadToCPAN` and before every git step — a failed push is fatal in between.
+   `GitHub::CreateRelease` then publishes the GitHub release after `Git::Push` (Changes
+   section as notes, tarball attached); that release fires `release-binaries.yml`.
 3. **`dzil build`** — runs clean: no missing files, no warnings, Dockerfile included in
    the built dist (the image is built from the built dist dir, in every build;
    `DZIL_DOCKER_API_SKIP=1` skips it for build/test, never for release).
