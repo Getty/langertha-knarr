@@ -1,6 +1,6 @@
 package Langertha::Knarr::PSGI;
 # ABSTRACT: PSGI adapter for Langertha::Knarr (buffered, no streaming)
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 use Moose;
 use Future;
 use JSON::MaybeXS;

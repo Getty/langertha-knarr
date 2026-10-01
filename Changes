@@ -1,5 +1,7 @@
 Revision history for Langertha-Knarr
 
+{{$NEXT}}
+
 1.102     2026-10-01 17:35:07Z
 
     - The JSONL request log (logging.file / logging.dir) now carries

@@ -1,6 +1,6 @@
 package Langertha::Knarr::Stream;
 # ABSTRACT: Async chunk iterator returned by streaming Knarr handlers
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 use Moose;
 use Future;
 use Scalar::Util qw( blessed weaken );

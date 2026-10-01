@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Models;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: List configured models and their backends
 use Moo;
 with 'Langertha::Knarr::CLI::Role::GlobalOptions';

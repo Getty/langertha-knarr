@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Start;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: Start the Knarr proxy server
 use Moo;
 with 'Langertha::Knarr::CLI::Role::GlobalOptions';

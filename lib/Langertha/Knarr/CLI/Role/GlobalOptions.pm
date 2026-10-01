@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Role::GlobalOptions;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: Accept knarr's global -c/-v options after the subcommand too
 use Moo::Role;
 use MooX::Options;

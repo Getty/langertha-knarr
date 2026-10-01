@@ -43,7 +43,7 @@ card to advertise specific skills, version, etc. (L</agent_name> and
 L</agent_description> are then not used).
 
 =cut
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 use Moose;
 use JSON::MaybeXS;
 use Data::UUID;

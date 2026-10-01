@@ -1,5 +1,5 @@
 package Langertha::Knarr::CLI::Cmd::Check;
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 # ABSTRACT: Validate Knarr configuration file
 use Moo;
 with 'Langertha::Knarr::CLI::Role::GlobalOptions';

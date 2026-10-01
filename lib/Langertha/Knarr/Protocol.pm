@@ -1,6 +1,6 @@
 package Langertha::Knarr::Protocol;
 # ABSTRACT: Role for Knarr wire protocols (OpenAI, Anthropic, Ollama, A2A, ACP, AG-UI)
-our $VERSION = '1.102';
+our $VERSION = '1.103';
 use Moose::Role;
 use JSON::MaybeXS ();
 use Scalar::Util ();
