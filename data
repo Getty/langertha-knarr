@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-10-01T22:12:13Z
+claimed_by: knarr-worker
+class: standard
+completed: 2026-10-01T22:12:08Z
+created: 2026-10-01T21:45:24Z
+id: 72
+priority: high
+started: 2026-10-01T22:00:04Z
+status: done
+tags:
+- release
+- docker
+title: Docker image via bundle docker_image instead of run_after_release
+updated: 2026-10-01T22:12:13Z
+---
+
+dist.ini still shells out to docker build / docker push in four run_after_release lines. With DOCKER_HOST on the rootless Podman socket that build dies in buildx and takes the git release steps with it (happened on the Skeid 0.003 release). Replace the lines with docker_image = raudssus/langertha-knarr (Author::GETTY 0.326, Docker::API 0.104), keep the gh release lines, keep a way to pass LANGERTHA_SRC at release time (today KNARR_DOCKER_BUILD_ARGS). Same change as skeid k89; take over what was found there.
+
+Orchestrator: Dockerfile has no ARG LANGERTHA_SRC since 3715f45 (Dockerfile rewrite), so KNARR_DOCKER_BUILD_ARGS/LANGERTHA_SRC is already a no-op in knarr. From skeid k89: Docker::API build_arg templates expand dist variables only, no env expansion; bundle auto-default passes no build_arg. Base change (docker_image + docker_tags = latest %V %v, gh lines kept) goes to knarr-worker; LANGERTHA_SRC question goes to the maintainer.
+
+Maintainer decision: drop LANGERTHA_SRC / KNARR_DOCKER_BUILD_ARGS without replacement (no ARG in the Dockerfile, no build_arg subsection).
+
+2026-10-01 22:10 dist.ini: four docker run_after_release lines replaced by docker_image = raudssus/langertha-knarr + docker_tags = latest %V %v; gh release lines unchanged; header comment rewritten. README Docker Build: one paragraph on the release path. Verified: dzil build against Podman 5.8.4 socket builds the image and tags latest/1/1.103; DZIL_DOCKER_API_SKIP=1 dzil build with a dead DOCKER_HOST exits 0; prove -lr t/ PASS (73 files, 4479 tests). The card's 'keep a way to pass LANGERTHA_SRC' is NOT done on the dispatcher's instruction: the Dockerfile has no ARG LANGERTHA_SRC since 3715f45, no build_arg subsection added; open with the maintainer.
+Also found (outside scope): (1) Docker::API sends the built dist dir as context minus every path starting with '.', so .dockerignore is never sent and not honoured -- the image now carries t/, dist.ini, Dockerfile, docker-compose.yml, CLAUDE.md, README, Makefile.PL, META.*, misc/ under /opt/knarr/src (the old docker CLI build from %d honoured .dockerignore). (2) Release order is UploadToCPAN -> Docker::API tag+push -> AfterRelease (gh lines, git tag/bump/push); a failed push is fatal after the CPAN upload and before every git step. before_build prechecks engine and registry credentials under DZIL_RELEASING. (3) The built dist/CPAN tarball ships .claude/ (51 entries, same in 1.102) and CLAUDE.md -- skeid excludes these via gather_exclude_match. (4) Bundle already has GitHub::CreateRelease in AfterRelease next to the two gh run_after_release lines.
+
+2026-10-01 22:10 Done: dist.ini uses bundle docker_image/docker_tags instead of docker build/push run_after_release; README paragraph added. Verified with dzil build on the Podman socket (image tagged latest/1/1.103), DZIL_DOCKER_API_SKIP=1 build with dead socket, prove -lr t/ PASS. Tree commit-ready (dist.ini, README.md); no release, no push, no gh, no commit. LANGERTHA_SRC override intentionally not restored -- see note.
+
+2026-10-01 22:12 Committed 7c70d02: dist.ini docker_image + docker_tags, README, Changes, rules/agent docs. KNARR_DOCKER_BUILD_ARGS / LANGERTHA_SRC dropped without replacement per maintainer decision (no ARG in Dockerfile since 3715f45); the body's 'keep a way to pass LANGERTHA_SRC' is superseded.
