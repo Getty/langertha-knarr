@@ -2,6 +2,12 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - The release builds, tags and pushes the Docker image through
+      Dist::Zilla::Plugin::Docker::API (docker_image in dist.ini) over the
+      container engine's HTTP API instead of shelling out to docker build /
+      docker push, so a release works against rootless Podman.
+      KNARR_DOCKER_BUILD_ARGS is gone.
+
 1.102     2026-10-01 17:35:07Z
 
     - The JSONL request log (logging.file / logging.dir) now carries

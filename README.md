@@ -174,6 +174,14 @@ docker build -t raudssus/langertha-knarr .
 
 Dependencies are installed via `cpm` from the `cpanfile` using MetaCPAN.
 
+`dzil release` builds, tags and pushes the image itself (`latest`, `<major>`,
+`<version>`) through `Dist::Zilla::Plugin::Docker::API`, which `docker_image`
+in `dist.ini` switches on. It talks to the container engine at `DOCKER_HOST`
+over the Engine HTTP API, so rootless Podman works and no `docker` binary is
+needed. The image is built in every `dzil build` and `dzil test` as well;
+`DZIL_DOCKER_API_SKIP=1` skips that for those two, and `dzil release` refuses
+to run with it.
+
 ## Docker Compose
 
 The included `docker-compose.yml` starts Knarr with Langfuse tracing
