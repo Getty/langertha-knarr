@@ -1,5 +1,5 @@
 package Langertha::Knarr;
-# ABSTRACT: Universal LLM hub — proxy, server, and translator across OpenAI/Anthropic/Ollama/A2A/ACP/AG-UI
+# ABSTRACT: Universal LLM hub - proxy, server, and translator across OpenAI/Anthropic/Ollama/A2A/ACP/AG-UI
 our $VERSION = '1.103';
 use Moose;
 use Future;
@@ -56,12 +56,6 @@ the raw passthrough, the tracing and request-log decorators, the proxy key
 and the other settings of L<Langertha::Knarr::Config>.
 
 =head1 DESCRIPTION
-
-=begin html
-
-<p><img src="/assets/github.jpg" alt="Langertha Knarr" width="100%"></p>
-
-=end html
 
 Langertha::Knarr is a universal LLM hub that exposes any backend — a
 L<Langertha::Raider>, a raw L<Langertha::Engine>, a remote A2A or ACP
