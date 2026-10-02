@@ -1,13 +1,6 @@
 # Knarr — Universal Langertha LLM Hub
 
-```
-         .  *  .
-        . _/|_ .          KNARR
-     .  /|    |\ .        Universal LLM Hub
-   ~~~~~|______|~~~~~
-   ~~ ~~~~~~~~~~~~~ ~~    Cargo transport for any LLM protocol
-   ~~~~~~~~~~~~~~~~~~~~
-```
+![Langertha Knarr — cargo transport for any LLM protocol](assets/github.jpg)
 
 A universal hub that exposes any backend — a `Langertha::Raider`, a raw
 `Langertha::Engine`, a remote A2A or ACP agent, or your own custom logic —
@@ -69,20 +62,11 @@ gets a `404` in the client protocol's own error shape. With a config file,
 passthrough is off until you add a `passthrough:` section (see
 [Passthrough Mode](#passthrough-mode)).
 
-```
-Claude Code / OpenAI SDK / Open WebUI / A2A, ACP, AG-UI agents
-    │
-    ▼
-  Knarr ─┬─ unknown model, or one discovered from that upstream
-         │  with the client's own key, passthrough upstream for the protocol
-         │     └── raw bytes 1:1 ──► api.anthropic.com / api.openai.com
-         │                           (Langfuse trace)
-         │
-         └─ everything else ──► RequestLog ──► Tracing ──► Handler::Router
-                                (JSONL)        (Langfuse)       │
-                        configured / discovered model ──► Langertha engine
-                        unknown model ──► default engine (else 404)
-```
+![Knarr request flow: passthrough to the upstream API, or routed through request log, tracing and router to a Langertha engine](assets/request-flow.jpg)
+
+A passthrough request still gets a Langfuse trace. A routed one passes the request log
+(JSONL) and tracing (Langfuse) before `Handler::Router` picks the engine: the configured
+or discovered model's engine, else the default engine, else `404`.
 
 For explicit routing (send "gpt-4o" requests to OpenAI, "cheap" to
 Groq), configure models in a YAML file or let `knarr init` scan your

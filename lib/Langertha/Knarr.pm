@@ -57,6 +57,12 @@ and the other settings of L<Langertha::Knarr::Config>.
 
 =head1 DESCRIPTION
 
+=begin html
+
+<p><img src="/assets/github.jpg" alt="Langertha Knarr" width="100%"></p>
+
+=end html
+
 Langertha::Knarr is a universal LLM hub that exposes any backend — a
 L<Langertha::Raider>, a raw L<Langertha::Engine>, a remote A2A or ACP
 agent, or any custom L<Langertha::Knarr::Handler> — over the standard
