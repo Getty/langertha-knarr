@@ -2,6 +2,10 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - Handler::Passthrough's streaming path fails on a non-2xx upstream
+      answer (status line plus the upstream's error text, cut) like the
+      non-streaming path, instead of ending as an empty, successful stream
+      on a 401, 429 or 5xx (k74).
     - An empty proxy_api_key / KNARR_API_KEY no longer counts as a configured
       key: has_proxy_api_key is false, so start, check and the manifest agree
       the proxy is open, and knarr start warns instead of logging
