@@ -1,0 +1,46 @@
+---
+claimed_at: 2026-10-14T01:28:23Z
+claimed_by: k73-k74
+class: standard
+completed: 2026-10-14T03:54:55Z
+created: 2026-10-06T19:39:46Z
+id: 73
+priority: medium
+started: 2026-10-14T01:26:20Z
+status: done
+tags:
+- bug
+- auth
+- security
+- review-2026-10-06
+title: 'Leerer proxy_api_key / KNARR_API_KEY: Start meldet ''Proxy auth: enabled'',
+  der Proxy ist aber offen'
+updated: 2026-10-14T03:54:55Z
+---
+
+`Config::has_proxy_api_key` prüft nur `defined` (`lib/Langertha/Knarr/Config.pm:467-470`), der Builder nimmt `$self->data->{proxy_api_key} // $ENV{KNARR_API_KEY}` (`Config.pm:462-465`). Ein **leerer** Wert -- `proxy_api_key: ""` in der Config oder ein gesetztes, aber leeres `KNARR_API_KEY` -- gilt damit als 'Schlüssel vorhanden'. `docker-compose.yml:18` reicht `KNARR_API_KEY` aus der Umgebung durch; eine `.env` mit `KNARR_API_KEY=` erzeugt genau diesen Fall.
+
+Folge in `knarr start`:
+
+- `lib/Langertha/Knarr/CLI/Cmd/Start.pm:215-216` loggt `Proxy auth: enabled (KNARR_API_KEY)`;
+- `Start.pm:289` übergibt `auth_token => ''`;
+- `Knarr::_check_auth` (`lib/Langertha/Knarr.pm:886-888`) lässt bei leerem Token **alles** durch (`return 1 unless defined ... && length ...`).
+
+Der Proxy läuft also offen, während das Startlog Authentifizierung behauptet. `knarr check` macht es richtig (`CLI/Cmd/Check.pm:62` prüft `has_proxy_api_key && proxy_api_key` -> 'disabled'), ebenso das Manifest (`Manifest.pm:100` prüft `length`). Die drei Stellen widersprechen sich.
+
+**Nachstellen**
+
+```
+KNARR_API_KEY= perl -Ilib -MLangertha::Knarr::Config -e \
+  'my $c=Langertha::Knarr::Config->new(data=>{}); print "has=",($c->has_proxy_api_key?1:0)," value=[",$c->proxy_api_key,"]\n"'
+# has=1 value=[]
+```
+
+**Fertig, wenn** `has_proxy_api_key` nur bei nicht-leerem Schlüssel wahr ist (eine Definition für Start, Check und Manifest) und ein explizit gesetzter leerer Schlüssel beim Start mindestens als Warnung auffällt ('KNARR_API_KEY ist leer, Proxy ist offen'). Test: `t/10-config.t` um den Leerfall erweitern; `t/76_auth_psgi_parity.t` zeigt, wo die Auth-Erwartungen liegen.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-14 01:28 Commit auf worktree-k73-k74, Tests grün
+
+2026-10-14 01:28 Umgesetzt im Worktree .claude/worktrees/k73-k74, Branch worktree-k73-k74, Commit 1e751f9 (Config::has_proxy_api_key nur bei nicht-leerem Key; Start warnt bei leerem Key; t/10-config.t +3 Tests, rot gegen altes Config.pm, grün neu; t/10+t/76 PASS). knarr-worker nicht startbar (briefing-Hook: unbekannte Skills), daher direkt umgesetzt. Folge in anderen Repos: keine.
