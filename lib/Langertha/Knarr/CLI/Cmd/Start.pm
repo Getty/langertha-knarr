@@ -214,6 +214,8 @@ sub execute {
   # Proxy auth status
   if ($config->has_proxy_api_key) {
     _log("Proxy auth: enabled (KNARR_API_KEY)");
+  } elsif (defined $config->proxy_api_key) {
+    _log("WARNING: proxy_api_key / KNARR_API_KEY is empty, proxy is OPEN (no authentication)");
   } else {
     _log("Proxy auth: open (set KNARR_API_KEY to require authentication)");
   }

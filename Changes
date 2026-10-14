@@ -2,6 +2,10 @@ Revision history for Langertha-Knarr
 
 {{$NEXT}}
 
+    - An empty proxy_api_key / KNARR_API_KEY no longer counts as a configured
+      key: has_proxy_api_key is false, so start, check and the manifest agree
+      the proxy is open, and knarr start warns instead of logging
+      'Proxy auth: enabled' (k73).
     - The release builds, tags and pushes the Docker image through
       Dist::Zilla::Plugin::Docker::API (docker_image in dist.ini) over the
       container engine's HTTP API instead of shelling out to docker build /

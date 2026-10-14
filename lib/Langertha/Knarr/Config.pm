@@ -454,7 +454,8 @@ has proxy_api_key => (
 
 Optional shared secret that clients must present in the C<Authorization: Bearer>
 or C<x-api-key> header. Falls back to the C<KNARR_API_KEY> environment variable.
-When not set, the proxy is open (no auth required). It is never forwarded to a
+When not set -- or set to an empty string -- the proxy is open (no auth
+required); C<knarr start> warns about an explicitly empty key. It is never forwarded to a
 passthrough upstream; see L<Langertha::Knarr/auth_token>.
 
 =cut
@@ -466,7 +467,8 @@ sub _build_proxy_api_key {
 
 sub has_proxy_api_key {
   my ($self) = @_;
-  return defined $self->proxy_api_key;
+  my $key = $self->proxy_api_key;
+  return defined $key && length $key ? 1 : 0;
 }
 
 has public_url => (
