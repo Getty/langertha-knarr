@@ -1,0 +1,43 @@
+---
+claimed_at: 2026-10-14T01:29:55Z
+claimed_by: k73-k74
+class: standard
+completed: 2026-10-14T03:55:00Z
+created: 2026-10-06T19:39:52Z
+id: 74
+priority: medium
+started: 2026-10-14T01:28:14Z
+status: done
+tags:
+- bug
+- streaming
+- passthrough
+- error-handling
+- review-2026-10-06
+title: 'Handler::Passthrough: Streaming ignoriert den Upstream-Status -- 401/429/500
+  kommen als leere, erfolgreiche Antwort an'
+updated: 2026-10-14T03:55:00Z
+---
+
+`Langertha::Knarr::Handler::Passthrough` behandelt denselben Upstream-Fehler auf seinen zwei Pfaden verschieden:
+
+- `handle_chat_f` stirbt bei Nicht-2xx: `die "Passthrough upstream failed: " . $resp->status_line` (`lib/Langertha/Knarr/Handler/Passthrough.pm:288`).
+- `handle_stream_f` sieht sich den Status nie an: der `on_header`-Callback (`:409-431`) bekommt die Antwort `$r`, benutzt sie nicht und parst den Body als SSE/NDJSON. Ein Fehler-Body ist JSON ohne `data:`-Frames, `$extract_chunk` liefert nichts, der Stream endet regulär mit `undef`.
+
+Folge: ein 401 (falscher Schlüssel), 429 (Rate-Limit) oder 5xx des Upstreams erreicht den Client als erfolgreicher, leerer Stream -- kein Fehler, kein Text, und im Trace steht ein leeres, 'gelungenes' Generation-Event. Betroffen ist der Chain-Pfad (`Handler::Router` mit `passthrough =>`-Fallback, `lib/Langertha/Knarr/Handler/Router.pm:96-120`, sowie jede eigene Kette/PSGI-Einbettung); der Raw-Passthrough von `knarr start` reicht Status und Body durch und ist nicht betroffen.
+
+**Nachstellen:** lokaler `Net::Async::HTTP::Server`, der jede Anfrage mit `401` + JSON-Fehler beantwortet, davor `Handler::Passthrough->new(upstreams => { openai => "http://127.0.0.1:$port" })`:
+
+```
+non-stream: died: Passthrough upstream failed: 401 Unauthorized
+stream:     chunks=0 error=none        # next_chunk_f liefert sofort undef
+```
+
+**Fertig, wenn** `handle_stream_f` bei Nicht-2xx den Body einsammelt und den Stream mit demselben Fehler scheitern lässt wie der nicht-streamende Pfad (Statuszeile plus Upstream-Fehlertext, gekürzt), sodass `next_chunk_f` fehlschlägt statt `undef` zu liefern. Test neben `t/70_passthrough.t`: gestreamte Anfrage gegen einen 401/429-Upstream muss als Fehler enden.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
+
+2026-10-14 01:29 Umgesetzt: Worktree .claude/worktrees/k73-k74, Branch worktree-k73-k74, Commit 77178c5. Passthrough on_header: Nicht-2xx Body sammeln, Stream scheitert mit Statuszeile plus Upstream-Text (500 Zeichen). Neuer Test t/70_passthrough_stream_status.t (3 Protokolle x 401/429/500): rot gegen altes lib/, grün neu; t/70, t/71, t/40, t/41 PASS. knarr-worker nicht startbar (briefing-Hook), daher direkt umgesetzt. Folge in anderen Repos: keine.
+
+2026-10-14 01:29 Commit 77178c5 auf worktree-k73-k74, Tests grün
