@@ -29,6 +29,15 @@ then forks N workers that accept on the same sockets, and supervises them
 Sessions (a Raider conversation) live in one worker and are not routed
 back to it. See L<Langertha::Knarr/workers> and L<Langertha::Knarr/run>.
 
+C<--ram-only> (else the config's C<ram_only:> or C<KNARR_RAM_ONLY>) starts
+without a routing setup: no config file is needed, C<--from-env> is ignored,
+and every request but the admin routes answers C<503> until the setup
+arrives by C<PUT /knarr/admin/config> (see L<Langertha::Knarr::Admin>). It
+needs C<KNARR_ADMIN_KEY> (or C<admin_key:>); a config file may then hold only
+process settings. With an admin key set the admin routes are on, and the
+worker count is set to C<1> with a warning: a push reaches the memory of one
+process only.
+
 See L<knarr> for the full option reference and L<Langertha::Knarr::Config>
 for the configuration file format.
 
@@ -74,6 +83,12 @@ option from_env => (
   default => 0,
 );
 
+option ram_only => (
+  is      => 'ro',
+  doc     => 'Start without models and take the routing setup only from PUT /knarr/admin/config, held in memory (needs KNARR_ADMIN_KEY; or ram_only: / KNARR_RAM_ONLY)',
+  default => 0,
+);
+
 option trace_name => (
   is      => 'ro',
   format  => 's',
@@ -106,9 +121,13 @@ sub execute {
 
   my $config_file = $self->config_file($chain);
   my $config;
+  # KNARR_RAM_ONLY, read the way the config reads it (k75).
+  my $ram_only_requested = $self->ram_only
+    || Langertha::Knarr::Config->new( data => {} )->ram_only;
 
   if (-f $config_file) {
     $config = Langertha::Knarr::Config->new(file => $config_file);
+    $config->data->{ram_only} = 1 if $self->ram_only;
     my @errors = $config->validate;
     if (@errors) {
       _err("Configuration errors:");
@@ -116,9 +135,27 @@ sub execute {
       exit 1;
     }
     _log("Config: loaded from $config_file");
+  } elsif ($ram_only_requested) {
+    # The setup arrives by admin push; nothing to read, not even the
+    # environment's provider keys (--from-env is the Docker default).
+    $config = Langertha::Knarr::Config->new( data => { ram_only => 1 } );
+    my @errors = $config->validate;
+    if (@errors) {
+      _err("Configuration errors:");
+      _err("  - $_") for @errors;
+      exit 1;
+    }
+    _log("Config: RAM only, no config file" . ( $self->from_env ? " (--from-env ignored)" : '' ));
   } elsif ($self->from_env) {
     _log("Config: auto-detecting from environment variables");
     $config = Langertha::Knarr::Config->from_env(include_test => 0);
+    # Not validated as a whole (no keys found is passthrough-only mode),
+    # but an admin key must still hold (k75).
+    if ( my @errors = $config->admin_errors ) {
+      _err("Configuration errors:");
+      _err("  - $_") for @errors;
+      exit 1;
+    }
   } else {
     print STDERR "Config file not found: $config_file\n";
     print STDERR "\n";
@@ -129,6 +166,13 @@ sub execute {
   }
 
   my $workers = $self->_workers($config);
+  my $ram_only = $config->ram_only;
+  my $admin_on = $config->has_admin_key;
+  if ( $admin_on && $workers > 1 ) {
+    _log("WARNING: workers forced to 1 (was $workers): the admin routes keep the"
+      . " delivered setup in this process's memory, a push would reach one worker only");
+    $workers = 1;
+  }
 
   # Inject CLI trace_name into config
   if ($self->has_trace_name) {
@@ -163,7 +207,9 @@ sub execute {
   # Log discovered engines and models
   my $models = $config->models;
   my $model_count = scalar keys %$models;
-  if ($model_count) {
+  if ($ram_only) {
+    _log("Engines: none yet (RAM only: requests answer 503 until PUT /knarr/admin/config)");
+  } elsif ($model_count) {
     _log("Engines: $model_count provider(s) configured");
     _log("");
     for my $name (sort keys %$models) {
@@ -220,6 +266,13 @@ sub execute {
     _log("Proxy auth: open (set KNARR_API_KEY to require authentication)");
   }
 
+  # Admin routes status; never the key itself
+  if ($admin_on) {
+    _log("Admin routes: enabled under /knarr/admin/ (admin key set)");
+  } else {
+    _log("Admin routes: off (set KNARR_ADMIN_KEY to enable)");
+  }
+
   # Request logging status
   my $log_file = $config->log_file;
   my $log_dir  = $config->log_dir;
@@ -236,59 +289,44 @@ sub execute {
 
   # Build server
   require Langertha::Knarr;
-  require Langertha::Knarr::Router;
-  require Langertha::Knarr::Handler::Router;
+  require Langertha::Knarr::Stack;
+  require Langertha::Knarr::Tracing;
+  require Langertha::Knarr::RequestLog;
   require IO::Async::Loop;
 
   my $loop = IO::Async::Loop->new;
-  my $router = Langertha::Knarr::Router->new( config => $config );
+  my $tracing = Langertha::Knarr::Tracing->new( config => $config );
+  my $rlog = Langertha::Knarr::RequestLog->new( config => $config );
 
-  my $passthrough;
-  if ( my $upstreams = $config->passthrough ) {
-    if ( %$upstreams ) {
-      require Langertha::Knarr::Handler::Passthrough;
-      $passthrough = Langertha::Knarr::Handler::Passthrough->new(
-        upstreams     => $upstreams,
-        loop          => $loop,
-        timeout       => $config->upstream_timeout,
-        stall_timeout => $config->upstream_stall_timeout,
-      );
-    }
-  }
-
-  my $handler = Langertha::Knarr::Handler::Router->new(
-    router => $router,
-    ( $passthrough ? ( passthrough => $passthrough ) : () ),
+  # Router, passthrough, handler chain and proxy key from the config; an
+  # admin push builds the next one the same way (k75).
+  my $stack = Langertha::Knarr::Stack->new(
+    config      => $config,
+    loop        => $loop,
+    tracing     => $tracing->_enabled ? $tracing : undef,
+    request_log => $rlog->_enabled ? $rlog : undef,
   );
 
-  require Langertha::Knarr::Tracing;
-  my $tracing = Langertha::Knarr::Tracing->new( config => $config );
-  if ( $tracing->_enabled ) {
-    require Langertha::Knarr::Handler::Tracing;
-    $handler = Langertha::Knarr::Handler::Tracing->new(
-      wrapped => $handler,
-      tracing => $tracing,
+  my $admin;
+  if ($admin_on) {
+    require Langertha::Knarr::Admin;
+    $admin = Langertha::Knarr::Admin->new(
+      key      => $config->admin_key,
+      stack    => $stack,
+      ram_only => $ram_only,
     );
   }
 
-  require Langertha::Knarr::RequestLog;
-  my $rlog = Langertha::Knarr::RequestLog->new( config => $config );
-  if ( $rlog->_enabled ) {
-    require Langertha::Knarr::Handler::RequestLog;
-    $handler = Langertha::Knarr::Handler::RequestLog->new(
-      wrapped     => $handler,
-      request_log => $rlog,
-    );
-  }
-
+  my $passthrough = $stack->raw_passthrough;
   my $knarr = Langertha::Knarr->new(
-    handler => $handler,
+    handler => $stack->handler,
     loop    => $loop,
     listen  => $listen_addrs,
-    router  => $router,
+    router  => $stack->router,
     ( $passthrough ? ( raw_passthrough => $passthrough ) : () ),
     ( $tracing->_enabled ? ( tracing => $tracing ) : () ),
-    ( $config->has_proxy_api_key ? ( auth_token => $config->proxy_api_key ) : () ),
+    ( defined $stack->auth_token ? ( auth_token => $stack->auth_token ) : () ),
+    ( $admin ? ( admin => $admin ) : () ),
     ( defined $config->public_url ? ( public_url => $config->public_url ) : () ),
     ( defined $config->ollama_compat_version
       ? ( ollama_compat_version => $config->ollama_compat_version ) : () ),

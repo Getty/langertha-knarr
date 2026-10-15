@@ -55,6 +55,16 @@ L<Langertha::Knarr/auth_token> set, every route except the A2A agent card
 needs the key as C<Authorization: Bearer> or C<x-api-key>, and a missing
 or wrong key gets the same C<401> JSON error.
 
+The admin routes (see L<Langertha::Knarr/ADMIN ROUTES> and
+L<Langertha::Knarr::Admin>) work as on the native server, with one more
+rule each: the request body is read only once the admin key was checked and
+the C<Content-Length> is within the limit, and under a PSGI server that
+sets C<psgi.multiprocess> (a prefork server such as Starman) every admin
+route answers C<501> -- each of its processes would hold a setup of its
+own, and a push would reach one of them. Run such a Knarr on a
+single-process server. Without a delivered setup, every other route answers
+C<503> as on the native server.
+
 =attr knarr
 
 Required. The L<Langertha::Knarr> instance to expose.
@@ -117,12 +127,34 @@ sub _handle_psgi {
 
   my $proto = $route->{protocol};
   my $action = $route->{action};
+  my $fake_http = Langertha::Knarr::PSGI::FakeReq->new( $env );
+
+  # The admin routes, answered by the same admin as on the native server
+  # (k75). The body is read only once the key was checked and its
+  # Content-Length is within the limit; a prefork server gets 501, as each
+  # of its processes would hold a setup of its own.
+  if ( $route->{admin} ) {
+    my ($status, $ctype, $body, $headers) = $sb->admin->handle(
+      knarr          => $sb,
+      action         => $action,
+      request        => $fake_http,
+      content_length => $env->{CONTENT_LENGTH} // 0,
+      body           => sub { $self->_read_body($env) },
+      peer           => $env->{REMOTE_ADDR},
+      multiprocess   => $env->{'psgi.multiprocess'} ? 1 : 0,
+    );
+    return [ $status, [ 'Content-Type' => $ctype, map { @$_ } @{ $headers // [] } ], [ $body ] ];
+  }
 
   # Same auth decision and 401 as the native server (k25), before any
   # handler work, so a rejected streaming request never starts its stream.
-  my $fake_http = Langertha::Knarr::PSGI::FakeReq->new( $env );
   unless ( $sb->_check_auth( $fake_http, $action ) ) {
     my ($status, $ctype, $body) = $sb->_unauthorized;
+    return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
+  }
+
+  # No setup delivered yet (ram_only): 503, as on the native server (k75).
+  if ( my ($status, $ctype, $body) = $sb->_not_configured_answer($proto) ) {
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 

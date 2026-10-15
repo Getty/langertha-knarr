@@ -468,7 +468,7 @@ sub _build_proxy_api_key {
 sub has_proxy_api_key {
   my ($self) = @_;
   my $key = $self->proxy_api_key;
-  return defined $key && length $key ? 1 : 0;
+  return defined $key && !ref $key && length $key ? 1 : 0;
 }
 
 has public_url => (
@@ -495,6 +495,131 @@ sub _build_public_url {
     if ($config->has_proxy_api_key) { ... }
 
 Returns true when a L</proxy_api_key> is configured.
+
+=cut
+
+has admin_key => (
+  is      => 'lazy',
+  builder => '_build_admin_key',
+);
+
+=attr admin_key
+
+Optional secret for Knarr's admin routes under C</knarr/admin/> (see
+L<Langertha::Knarr::Admin>): the only key they accept, and a key no other
+route accepts. Falls back to the C<KNARR_ADMIN_KEY> environment variable.
+Unset or empty: the admin routes do not exist (C<404>). It must be at least
+L</admin_key_min_length> characters and differ from L</proxy_api_key>;
+L</validate> reports either. Prefer the environment variable: a key in the
+config file sits on disk.
+
+=cut
+
+sub _build_admin_key {
+  my ($self) = @_;
+  return $self->data->{admin_key} // $ENV{KNARR_ADMIN_KEY} // undef;
+}
+
+sub has_admin_key {
+  my ($self) = @_;
+  my $key = $self->admin_key;
+  return defined $key && !ref $key && length $key ? 1 : 0;
+}
+
+=method has_admin_key
+
+    if ($config->has_admin_key) { ... }
+
+True when a non-empty L</admin_key> is set.
+
+=cut
+
+sub admin_key_min_length { 16 }
+
+=method admin_key_min_length
+
+The shortest L</admin_key> Knarr accepts: C<16> characters.
+
+=cut
+
+has ram_only => (
+  is      => 'lazy',
+  builder => '_build_ram_only',
+);
+
+=attr ram_only
+
+Boolean, default C<0>. When true, Knarr takes its routing setup (the
+L</runtime_keys>) only from C<PUT /knarr/admin/config> and holds it in
+memory: it starts without models and answers every other request with C<503>
+until the setup arrives, and a restart forgets it. Needs an L</admin_key>.
+The config file, if any, may then only hold process settings (C<listen>,
+C<logging>, C<langfuse>, ...); L</validate> reports a runtime key in it.
+Falls back to C<KNARR_RAM_ONLY>; C<knarr start --ram-only> sets it too.
+
+=cut
+
+sub _build_ram_only {
+  my ($self) = @_;
+  my $value = $self->data->{ram_only};
+  $value = _strip_quotes($ENV{KNARR_RAM_ONLY}) unless defined $value;
+  return 0 unless defined $value && length $value;
+  return !$value || $value =~ /\A(?:false|no|off)\z/i ? 0 : 1;
+}
+
+# What an admin push may set (k75): the routing setup. Everything else is
+# bound when the process starts.
+my @RUNTIME_KEYS = qw(
+  models default passthrough auto_discover proxy_api_key
+  upstream_timeout upstream_stall_timeout probe_capabilities probe_timeout
+);
+
+sub runtime_keys { @RUNTIME_KEYS }
+
+=method runtime_keys
+
+    my @keys = Langertha::Knarr::Config->runtime_keys;
+
+The top-level keys an admin push (C<PUT /knarr/admin/config>) may set:
+C<models>, C<default>, C<passthrough>, C<auto_discover>, C<proxy_api_key>,
+C<upstream_timeout>, C<upstream_stall_timeout>, C<probe_capabilities> and
+C<probe_timeout>. Every other key takes effect only at start.
+
+=cut
+
+sub admin_errors {
+  my ($self) = @_;
+  my @errors;
+  my $min = $self->admin_key_min_length;
+  if ( $self->has_admin_key ) {
+    push @errors, "admin_key must be at least $min characters"
+      if length $self->admin_key < $min;
+    push @errors, "admin_key must differ from proxy_api_key"
+      if $self->has_proxy_api_key && $self->proxy_api_key eq $self->admin_key;
+  }
+  elsif ( defined $self->admin_key && ref $self->admin_key ) {
+    push @errors, "admin_key must be a string";
+  }
+  return @errors unless $self->ram_only;
+  push @errors, "ram_only needs an admin_key (or KNARR_ADMIN_KEY): without one"
+    . " the setup can never be delivered" unless $self->has_admin_key;
+  if ( $self->has_file ) {
+    my @set = grep { exists $self->data->{$_} } @RUNTIME_KEYS;
+    push @errors, "ram_only: ".join( ', ', @set )." must not be in the config file;"
+      . " the setup comes from PUT /knarr/admin/config" if @set;
+  }
+  return @errors;
+}
+
+=method admin_errors
+
+    my @errors = $config->admin_errors;
+
+The part of L</validate> about L</admin_key> and L</ram_only>: the key's
+length, that it differs from L</proxy_api_key>, that L</ram_only> has a key,
+and that a config file under L</ram_only> holds none of the
+L</runtime_keys>. The messages never contain a key. C<knarr start> runs it
+for every config, also one built by C<--from-env>.
 
 =cut
 
@@ -835,13 +960,14 @@ and C<listen> when it is not a string or a list of strings: reading such a
 section croaks. Otherwise it checks that every model entry is a
 mapping with an
 C<engine> key, that the default engine (if set) has an C<engine> key,
-that at least one model or default engine is configured, that a model's
+that at least one model or default engine is configured (not under
+L</ram_only>), that a model's
 C<context_size> (and the default engine's), when set, is a positive integer, and its
 C<user_agent_timeout> a non-negative number, and that
 L</ollama_compat_version>, when set, is three dot-separated numbers, and that
 L</upstream_timeout>, L</upstream_stall_timeout> and L</probe_timeout> are
 non-negative numbers, and that L</workers> is a whole number of C<1> or
-more.
+more, plus everything L</admin_errors> checks.
 
 =cut
 
@@ -877,6 +1003,7 @@ sub validate {
     unless ( eval { _seconds( user_agent_timeout => $def->{user_agent_timeout}, 0 ); 1 } ) {
       push @errors, "Model '$name': user_agent_timeout must be a number of seconds";
     }
+    push @errors, "Model '$name': api_key must be a string" if ref $def->{api_key};
   }
 
   if (my $default = $self->default_engine) {
@@ -889,9 +1016,11 @@ sub validate {
     unless ( eval { _seconds( user_agent_timeout => $default->{user_agent_timeout}, 0 ); 1 } ) {
       push @errors, "Default: user_agent_timeout must be a number of seconds";
     }
+    push @errors, "Default: api_key must be a string" if ref $default->{api_key};
   }
 
-  unless (keys %$models || $self->default_engine) {
+  # Under ram_only the models arrive later, by admin push (k75).
+  unless (keys %$models || $self->default_engine || $self->ram_only) {
     push @errors, "No models configured and no default engine set";
   }
 
@@ -899,6 +1028,11 @@ sub validate {
     next if eval { $self->$attr; 1 };
     push @errors, $self->_error_text($@);
   }
+
+  push @errors, "proxy_api_key must be a string"
+    if ref $self->proxy_api_key;
+
+  push @errors, $self->admin_errors;
 
   return @errors;
 }

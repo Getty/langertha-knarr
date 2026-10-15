@@ -83,6 +83,10 @@ C<GET /api/version>, C<POST /api/show>
 
 =item * Knarr's own C<GET /.well-known/langertha.json> (see L</MANIFEST>)
 
+=item * With an L</admin>: C<GET /knarr/admin/status>,
+C<PUT>/C<DELETE /knarr/admin/config>, C<PATCH /knarr/admin/keys> (see
+L</ADMIN ROUTES>)
+
 =back
 
 Knarr is built on L<IO::Async> and L<Net::Async::HTTP::Server>
@@ -107,6 +111,28 @@ class or passthrough target.
 
 The manifest needs a Langertha that ships L<Langertha::Manifest::Builder>;
 with an older one the route answers C<404> with a JSON error.
+
+=head1 ADMIN ROUTES
+
+With an L</admin> (C<knarr start> with C<KNARR_ADMIN_KEY>), a central
+service can deliver the routing setup -- models, default engine,
+passthrough upstreams, proxy key and provider keys -- as JSON, swap keys,
+read the status and drop the setup again, all under C</knarr/admin/> and
+only with the admin key. What arrives is held in memory only. Without an
+admin these paths do not exist (C<404>). The routes, their answers and
+their limits are described in L<Langertha::Knarr::Admin>.
+
+The admin key opens only the admin routes: a request that presents it to
+any other route gets C<401>, so it never reaches a handler or an upstream;
+L</auth_token> in turn never opens an admin route. While the admin has no
+setup (L<Langertha::Knarr::Config/ram_only> before the first push), every
+other route answers C<503> (C<not configured>) in its protocol's error
+shape, after the L</auth_token> check.
+
+A delivered setup replaces L</handler>, L</router>, L</raw_passthrough>
+and L</auth_token> in one step. Requests already running, streams
+included, finish with what they started with; the provider manifest and
+the capability probe start over with the new router.
 
 =head1 ARCHITECTURE
 
@@ -152,7 +178,16 @@ app (buffered — see its docs for the streaming caveat).
 
 =attr handler
 
-Required. An object consuming L<Langertha::Knarr::Handler>.
+Required, unless an L</admin> is given. An object consuming
+L<Langertha::Knarr::Handler>.
+
+=attr admin
+
+Optional L<Langertha::Knarr::Admin>. Enables the L</ADMIN ROUTES>. Its
+stack then supplies L</handler>, L</router>, L</raw_passthrough> and
+L</auth_token> (given values are replaced), and each admin push replaces
+them. Croaks with L</workers> above C<1>: every process would hold a setup
+of its own.
 
 =attr listen
 
@@ -178,9 +213,10 @@ the calling process, nothing is forked. With more, L</run> binds the listen
 sockets, runs auto-discovery and the capability probe once (see L</run>),
 then forks that many workers that all accept on the same sockets, and stays
 behind as their supervisor, serving no request itself. Must be C<1> or more;
-anything else croaks at construction. C<knarr start> sets it from C<-w N>,
+anything else croaks at construction, and so does more than C<1> together
+with an L</admin>. C<knarr start> sets it from C<-w N>,
 else from L<Langertha::Knarr::Config/workers> (C<workers:> or
-C<KNARR_WORKERS>).
+C<KNARR_WORKERS>), and to C<1> with a warning when the admin key is set.
 
 Every worker has its own state: L<Langertha::Knarr::Session>s (so a
 L<Langertha::Knarr::Handler::Raider> conversation is only continued when
@@ -416,9 +452,12 @@ L<Langertha::Knarr::PSGI>.
 =cut
 
 
+# Required, unless an admin brings it with its stack (k75). Replaced as a
+# whole by _apply_stack.
 has handler => (
   is => 'ro',
-  required => 1,
+  writer => '_set_handler',
+  predicate => '_has_handler',
 );
 
 has host => (
@@ -485,12 +524,14 @@ has router => (
   is => 'ro',
   isa => 'Maybe[Object]',
   default => sub { undef },
+  writer => '_set_router',
 );
 
 has raw_passthrough => (
   is => 'ro',
   isa => 'Maybe[Object]',
   default => sub { undef },
+  writer => '_set_raw_passthrough',
 );
 
 has tracing => (
@@ -502,6 +543,14 @@ has tracing => (
 has auth_token => (
   is => 'ro',
   isa => 'Maybe[Str]',
+  default => sub { undef },
+  writer => '_set_auth_token',
+);
+
+# Admin routes and the setup they deliver (k75): a Langertha::Knarr::Admin.
+has admin => (
+  is => 'ro',
+  isa => 'Maybe[Object]',
   default => sub { undef },
 );
 
@@ -534,6 +583,7 @@ has _manifest => (
   is => 'ro',
   lazy => 1,
   default => sub { Langertha::Knarr::Manifest->new( knarr => $_[0] ) },
+  clearer => '_clear_manifest',
 );
 
 has _protocol_objects => (
@@ -577,6 +627,40 @@ has _servers => (
   default => sub { [] },
 );
 
+sub BUILD {
+  my ($self) = @_;
+  if ( my $admin = $self->admin ) {
+    # Every process holds its own delivered setup: a push would reach one
+    # worker of several (k75).
+    Carp::croak( "workers '".$self->workers."' cannot be combined with admin routes:"
+      . " each worker would hold its own setup" ) if $self->workers > 1;
+    $self->_apply_stack( $admin->stack );
+  }
+  Carp::croak( 'Attribute (handler) is required' ) unless $self->_has_handler;
+}
+
+# The parts of a Langertha::Knarr::Stack that serve requests, swapped in at
+# once (k75): no event loop turn between them, so a request sees either the
+# old parts or the new ones. A request already running keeps the objects it
+# holds -- a stream goes on with its engine. The manifest and the capability
+# probe belong to the router and start over with the new one.
+sub _apply_stack {
+  my ($self, $stack) = @_;
+  $self->_set_handler( $stack->handler );
+  $self->_set_router( $stack->router );
+  $self->_set_raw_passthrough( $stack->raw_passthrough );
+  $self->_set_auth_token( $stack->auth_token );
+  $self->_clear_manifest;
+  if ( $self->_server ) {
+    if ( my $probe = $self->_capability_probe ) {
+      $probe->cancel unless $probe->is_ready;
+    }
+    $self->_capability_probe(undef);
+    $self->_start_capability_probe;
+  }
+  return;
+}
+
 sub _build_protocol_objects {
   my ($self) = @_;
   my @objs;
@@ -599,6 +683,11 @@ sub _build_routes {
   # Knarr's own route, not a protocol's (k14).
   push @routes, { method => 'GET', path => '/.well-known/langertha.json',
     action => 'manifest', protocol => undef };
+  # The admin routes exist only with an admin (k75): without one they are a
+  # path like any unknown one.
+  if ( my $admin = $self->admin ) {
+    push @routes, map { { %$_, protocol => undef, admin => 1 } } $admin->routes;
+  }
   return \@routes;
 }
 
@@ -885,6 +974,9 @@ sub _match_route {
 
 sub _check_auth {
   my ($self, $req, $action) = @_;
+  # The admin key opens the admin routes and nothing else: it must never
+  # reach a handler or an upstream (k75).
+  return 0 if $self->_presents_admin_key($req);
   return 1 unless defined $self->auth_token && length $self->auth_token;
   # Discovery endpoints stay anonymous so clients can introspect.
   return 1 if $action eq 'a2a_card';
@@ -901,6 +993,51 @@ sub _check_auth {
     }
   }
   return 0;
+}
+
+# True when any element of Authorization or x-api-key is the admin key.
+sub _presents_admin_key {
+  my ($self, $req) = @_;
+  my $admin = $self->admin or return 0;
+  for my $name ( 'Authorization', 'x-api-key' ) {
+    my $value = scalar $req->header($name);
+    next unless defined $value;
+    for my $element ( split /,/, $value ) {
+      $element =~ s/\A\s+|\s+\z//g;
+      $element =~ s/\ABearer\s+//i;
+      return 1 if $admin->is_key($element);
+    }
+  }
+  return 0;
+}
+
+# The answer to every route but the admin routes while an admin has no
+# setup to serve from (ram_only before the first push, k75): 503 in the
+# protocol's error shape. Empty when Knarr can serve.
+sub _not_configured_answer {
+  my ($self, $proto) = @_;
+  my $admin = $self->admin or return;
+  return if $admin->configured;
+  my $message = 'not configured: Knarr has no setup yet';
+  return ( 503, 'application/json',
+    $self->_json->encode({ error => { message => $message } }) ) unless $proto;
+  my ($status, $headers, $body) = $proto->format_error_response( 503, $message );
+  return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
+}
+
+# An admin request, answered by the admin for both transports (k75).
+sub _dispatch_admin {
+  my ($self, $req, $action) = @_;
+  my $body = $req->body;
+  my $peer = eval { $req->stream->read_handle->peerhost };
+  return $self->_send_simple( $req, $self->admin->handle(
+    knarr          => $self,
+    action         => $action,
+    request        => $req,
+    content_length => length( $body // '' ),
+    body           => sub { $body },
+    peer           => $peer,
+  ) );
 }
 
 # Headers Knarr reads its own key (auth_token) from.
@@ -970,10 +1107,14 @@ sub _dispatch {
       $self->_json->encode({ error => { message => "no route for $method $path" } }) );
   }
   my $action = $route->{action};
+  return $self->_dispatch_admin( $req, $action ) if $route->{admin};
   unless ( $self->_check_auth( $req, $action ) ) {
     return $self->_send_simple( $req, $self->_unauthorized );
   }
   my $proto  = $route->{protocol};
+  if ( my @answer = $self->_not_configured_answer($proto) ) {
+    return $self->_send_simple( $req, @answer );
+  }
   my $simple = $self->_simple_action($action);
   my $code = $simple ? undef : $self->can("_action_$action");
   unless ( $simple || $code ) {

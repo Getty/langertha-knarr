@@ -491,6 +491,63 @@ sends its own provider key in the other one — with the proxy key in
 `Authorization: Bearer`; with the proxy key as `Authorization: Bearer`, the
 Anthropic key in `x-api-key`.
 
+## Admin API: setup and keys in memory only
+
+A central service can hand Knarr its whole routing setup — models, default
+engine, passthrough upstreams, proxy key and provider keys — as JSON, swap
+keys later and take the setup back. Knarr keeps it in memory only: nothing
+is written to a file, a cache or a log. If Knarr restarts, the setup is
+gone and the central service delivers it again.
+
+```bash
+# .env -- a separate key, at least 16 characters, not the proxy key
+KNARR_ADMIN_KEY=$(openssl rand -hex 32)
+KNARR_RAM_ONLY=1        # optional: start with no setup at all
+```
+
+With `KNARR_RAM_ONLY=1` (or `knarr start --ram-only`, `ram_only: true`)
+Knarr starts without models, needs no config file and ignores
+`--from-env`; every request answers `503` ("not configured") until the
+first delivery. Without it, Knarr starts from its config file or
+environment as usual and a delivery replaces that.
+
+| Route | Does |
+|---|---|
+| `PUT /knarr/admin/config` | replaces the setup: `models`, `default`, `passthrough`, `auto_discover`, `proxy_api_key`, `upstream_timeout`, `upstream_stall_timeout`, `probe_capabilities`, `probe_timeout`, structured as in `knarr.yaml` |
+| `PATCH /knarr/admin/keys` | swaps keys only: `{"<model name>": "<key>", "default": "<key>"}` |
+| `GET /knarr/admin/status` | generation, time, source (`ram`, `file`, `env`, `none`), model names — never a key |
+| `DELETE /knarr/admin/config` | drops the delivered setup: back to the start setup, or to none under RAM-only |
+
+```bash
+curl -X PUT http://knarr:8080/knarr/admin/config \
+  -H "Authorization: Bearer $KNARR_ADMIN_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"models":{"gpt-4o":{"engine":"OpenAI","api_key":"sk-..."}},
+       "proxy_api_key":"client-key-..."}'
+
+curl -X PATCH http://knarr:8080/knarr/admin/keys \
+  -H "Authorization: Bearer $KNARR_ADMIN_KEY" -d '{"gpt-4o":"sk-new-..."}'
+```
+
+- A delivery is checked like a config file, and every engine is built,
+  before anything changes; a broken one answers `400` and the running setup
+  stays as it was. A good one goes live in one step, under the next
+  generation, with a fresh engine cache; requests and streams already
+  running finish with their old engine.
+- Settings that bind at start (`listen`, `workers`, `logging`, `langfuse`,
+  `admin_key`, …) cannot be delivered.
+- The admin key opens only these routes (as `Authorization: Bearer`, compared
+  in constant time); the proxy key never opens them, and a request that
+  shows the admin key anywhere else gets `401`. Without `KNARR_ADMIN_KEY`
+  the routes do not exist (`404`).
+- After two wrong keys in a row, each further one locks the client address
+  out for 1, 2, 4 … up to 300 seconds (`429` with `Retry-After`). Bodies are
+  limited to 1 MiB (`413`). Errors never echo what was sent.
+- The setup lives in one process: with the admin key set, `knarr start`
+  runs one worker (`-w` is set to 1 with a warning), and under a prefork
+  PSGI server the admin routes answer `501`.
+- The routes appear in no manifest or model list.
+
 ## API Formats
 
 Knarr speaks **six** wire protocols on every listening port. The

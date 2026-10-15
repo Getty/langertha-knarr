@@ -60,6 +60,9 @@ sub execute {
   print "  Default engine: ", ($config->default_engine ? $config->default_engine->{engine} : 'none'), "\n";
   print "  Auto-discover: ", ($config->auto_discover ? 'enabled' : 'disabled'), "\n";
   print "  Proxy auth: ", ($config->has_proxy_api_key && $config->proxy_api_key ? 'enabled' : 'disabled'), "\n";
+  # Whether, never which key (k75)
+  print "  Admin routes: ", ($config->has_admin_key ? 'enabled' : 'disabled'), "\n";
+  print "  RAM only: ", ($config->ram_only ? 'yes (setup by PUT /knarr/admin/config)' : 'no'), "\n";
 
   # Check Langfuse
   my $lf = $config->langfuse;
