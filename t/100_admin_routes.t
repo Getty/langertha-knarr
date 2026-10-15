@@ -225,6 +225,9 @@ my $setup = {
     [ 'a models section that is no mapping', { models => 'nope' }, qr/models/ ],
     [ 'logging', { %$setup, logging => { file => '/tmp/x.jsonl' } }, qr/logging take effect only at start/ ],
     [ 'a bad langfuse transport', { %$setup, langfuse => { transport => 'smtp' } }, qr/langfuse\.transport/ ],
+    [ 'a langfuse url (the trace sink stays with the file)',
+      { %$setup, langfuse => { public_key => 'pk', secret_key => 'sk', url => 'http://evil.example' } },
+      qr/langfuse\.url is not accepted/ ],
     [ 'a langfuse section that is no mapping', { %$setup, langfuse => $KEY_NEW }, qr/langfuse/ ],
     [ 'a process setting', { %$setup, listen => [ '0.0.0.0:1' ], workers => 3 },
       qr/listen, workers take effect only at start/ ],
@@ -405,7 +408,7 @@ my $setup = {
       shared => { engine => 'TestKnarrAdmin', model => 'shared-file', api_key => $KEY_ONE },
     },
     default => { engine => 'TestKnarrAdmin', model => 'default-file', api_key => $KEY_ONE },
-    langfuse => { trace_name => 'from-file' },
+    langfuse => { trace_name => 'from-file', url => 'http://127.0.0.1:1' },
   );
   my ( $lk, $lport ) = knarr_for( data => { %file }, remote_config => 1 );
   my $ls = decode( send_req( $lport, GET => '/knarr/admin/status', bearer => $ADMIN_KEY ) );
@@ -418,7 +421,7 @@ my $setup = {
       shared => { engine => 'TestKnarrAdmin', model => 'shared-push', api_key => $KEY_TWO },
       extra  => { engine => 'TestKnarrAdmin', model => 'extra-push',  api_key => $KEY_TWO },
     },
-    langfuse => { public_key => 'pk-lf-layer-test', secret_key => 'sk-lf-layer-test', url => 'http://127.0.0.1:1' },
+    langfuse => { public_key => 'pk-lf-layer-test', secret_key => 'sk-lf-layer-test' },
   } );
   is( $resp->code, 200, "PUT over a file setup: 200" ) or diag $resp->decoded_content;
   my $s = decode($resp);

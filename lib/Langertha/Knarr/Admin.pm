@@ -106,6 +106,7 @@ C<url>. The layered setup is checked like a config file
 default engine, is built before anything changes; any problem answers
 C<400> and the running setup stays exactly as it was. A pushed C<langfuse>
 section with keys switches tracing on (or to the pushed Langfuse); its
+C<url> is refused (the sink's address stays with the config file) and its
 keys never appear in an answer or the log. On success: C<200> with the
 status above, under the next generation.
 
@@ -491,6 +492,12 @@ sub _admin_put_config {
   if ( my @env = $self->_env_key_refs($doc) ) {
     return $self->_refuse( 'api_key_env is not accepted in a delivered setup ('
       . join( ', ', @env ) . '); deliver the key itself as api_key' );
+  }
+  # Where traces (prompts) go stays with the file: a pushed langfuse section
+  # brings keys, never an address.
+  if ( ref $doc->{langfuse} eq 'HASH' && exists $doc->{langfuse}{url} ) {
+    return $self->_refuse('langfuse.url is not accepted in a delivered setup;'
+      . ' the address of the trace sink comes from the config file' );
   }
   my %runtime = map { $_ => 1 } $self->config_class->runtime_keys;
   if ( my @other = grep { !$runtime{$_} } sort keys %$doc ) {
