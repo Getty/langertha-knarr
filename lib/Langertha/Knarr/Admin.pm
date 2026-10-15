@@ -71,7 +71,10 @@ C<passthrough>, C<auto_discover>, C<proxy_api_key>, the upstream timeouts
 and the capability probe settings), structured as in the YAML config. A key
 it leaves out is unset, not kept. The process settings (C<listen>,
 C<workers>, C<logging>, C<langfuse>, C<admin_key>, C<ram_only>, ...) stay
-as they were at the start; a body that names one is refused. The new setup
+as they were at the start; a body that names one is refused. Keys arrive
+literally as C<api_key>: an C<api_key_env> in a model or the default is
+refused, because the start environment's secrets must not follow a pushed
+C<url>. The new setup
 is checked like a config file (L<Langertha::Knarr::Config/validate>) and
 every model's engine, and the default engine, is built before anything
 changes; any problem answers C<400> and the running setup stays exactly as
@@ -433,6 +436,12 @@ sub _admin_put_config {
   my ( $doc, $error ) = $self->_decode($body);
   return $self->_refuse($error) unless $doc;
   return $self->_refuse('the setup must be a JSON object') unless ref $doc eq 'HASH';
+  # A pushed setup carries its keys literally. An api_key_env would hand the
+  # start environment's secrets to whatever url the same push names.
+  if ( my @env = $self->_env_key_refs($doc) ) {
+    return $self->_refuse( 'api_key_env is not accepted in a delivered setup ('
+      . join( ', ', @env ) . '); deliver the key itself as api_key' );
+  }
   my %runtime = map { $_ => 1 } $self->config_class->runtime_keys;
   if ( my @other = grep { !$runtime{$_} } sort keys %$doc ) {
     my %process = map { $_ => 1 } @PROCESS_KEYS;
@@ -444,6 +453,19 @@ sub _admin_put_config {
       . ( $unknown ? "; $unknown unknown key(s)" : '' ) );
   }
   return $self->_install_runtime( $knarr, $doc, 'replaced' );
+}
+
+# Names of the model/default entries of a pushed setup that carry api_key_env.
+sub _env_key_refs {
+  my ($self, $doc) = @_;
+  my @found;
+  my $models = ref $doc->{models} eq 'HASH' ? $doc->{models} : {};
+  for my $name ( sort keys %$models ) {
+    my $def = $models->{$name};
+    push @found, "models.$name" if ref $def eq 'HASH' && exists $def->{api_key_env};
+  }
+  push @found, 'default' if ref $doc->{default} eq 'HASH' && exists $doc->{default}{api_key_env};
+  return @found;
 }
 
 sub _admin_patch_keys {

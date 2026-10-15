@@ -9,6 +9,7 @@ Revision history for Langertha-Knarr
       /knarr/admin/keys swaps API keys per model name, GET
       /knarr/admin/status reports generation, time, source and model names
       (never a key), DELETE /knarr/admin/config drops the delivered setup.
+      A pushed setup may not use api_key_env (400): keys come literally.
       A delivery is validated and every engine built before anything
       changes; a broken one answers 400 and the running setup stays. The new
       setup goes live in one step with a fresh engine cache; running streams

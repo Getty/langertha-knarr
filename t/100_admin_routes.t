@@ -231,6 +231,9 @@ my $setup = {
       qr/Model 'x': / ],
     [ 'the admin key as proxy key', { %$setup, proxy_api_key => $ADMIN_KEY },
       qr/proxy_api_key must differ from the admin key/ ],
+    [ 'an api_key_env (start-environment secrets must not follow a pushed url)',
+      { models => { x => { engine => 'TestKnarrAdmin', api_key_env => 'HOME', url => 'http://evil.example' } } },
+      qr/api_key_env is not accepted.*models\.x/ ],
     [ 'a key that is no string', { models => { x => { engine => 'TestKnarrAdmin', api_key => { k => $KEY_NEW } } } },
       qr/api_key must be a string/ ],
   );
