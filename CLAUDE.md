@@ -75,9 +75,11 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Admin routes** (k75, only with `admin_key`): `PUT`/`DELETE /knarr/admin/config`,
   `PATCH /knarr/admin/keys`, `GET /knarr/admin/status`, answered before the proxy-key
   check by `Admin::handle` (native + PSGI). A push = runtime keys only
-  (`Config->runtime_keys`) on top of the start's process settings → validate → build
+  (`Config->runtime_keys`, incl. `langfuse`) layered over the start config → validate → build
   Stack + every engine → `_apply_stack` in one step; invalid → 400, nothing changed.
-  Admin key on any other route → 401. `ram_only` + no setup → every other route 503.
+  Admin key on any other route → 401. `remote_config` + no setup → every other route 503. The push is a layer over
+  the start config (file/env): models merged by name, other keys push-wins,
+  `langfuse` key-wise; PUT replaces the push layer, DELETE drops it (k75).
 - No model in the request (A2A always, ACP w/o `agent_name`) → default engine with its
   own `model:` (k42). Nothing can serve → 404 in the protocol's error shape.
 - Request fields on the routed path: tools/tool_choice, response_format, temperature,
@@ -102,7 +104,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Langertha::Knarr::Image** — face image parts (OpenAI image_url, Anthropic image blocks, Ollama images) → core `Langertha::Content::Image`; no-op on a core that cannot write every content format
 - **Langertha::Knarr::Manifest** — `/.well-known/langertha.json` provider manifest from the exposed model surface (needs core `Langertha::Manifest::Builder`, else 404)
 - **Langertha::Knarr::Stack** — router + passthrough + handler chain + proxy key built from one Config (what `knarr start` builds; `with_config` for the next)
-- **Langertha::Knarr::Admin** — `/knarr/admin/` routes (k75): PUT/DELETE config, PATCH keys, GET status; own key (SHA-256 digest, constant-time), per-peer lockout, 1 MiB body limit, setup in RAM only; swaps the Stack via `Knarr::_apply_stack`
+- **Langertha::Knarr::Admin** — `/knarr/admin/` routes (k75): PUT/DELETE config, PATCH keys, GET status; own key (SHA-256 digest, constant-time), per-peer lockout, 1 MiB body limit, pushed layer over the start config, in RAM only; swaps the Stack via `Knarr::_apply_stack`
 - **Langertha::Knarr::Protocol** — Moose role for all wire protocols
 - **Langertha::Knarr::Protocol::OpenAI** — `/v1/chat/completions`, `/v1/models`
 - **Langertha::Knarr::Protocol::Anthropic** — `/v1/messages`
@@ -180,7 +182,7 @@ passthrough:                       # or: true (openai + anthropic)
   openai: https://api.openai.com
 proxy_api_key: ${KNARR_API_KEY}
 admin_key: ${KNARR_ADMIN_KEY}      # /knarr/admin/ routes; >= 16 chars, != proxy key; forces workers 1
-ram_only: false                    # KNARR_RAM_ONLY / --ram-only: no setup until PUT /knarr/admin/config (503)
+remote_config: false               # KNARR_REMOTE_CONFIG / --remote-config: start without models, 503 until PUT /knarr/admin/config
 public_url: https://knarr.example  # manifest base URL
 langfuse: { url: "http://localhost:3000", public_key: pk-lf-x, secret_key: sk-lf-x, trace_name: knarr-proxy, transport: ingestion, timeout: 15 }  # or otel (OTLP/HTTP JSON)
 logging: { file: requests.jsonl, dir: requests/ }
@@ -209,7 +211,7 @@ knarr start --from-env                     # Auto-detect config from ENV
 knarr start --from-env -p 8080 -p 11434   # ENV config, custom ports
 knarr start -p 9090                        # Single port on 0.0.0.0 (-H to change)
 knarr start --log-file x.jsonl -n my-trace # Dashed or underscored long options, any position
-knarr start --ram-only                     # No setup until PUT /knarr/admin/config (needs KNARR_ADMIN_KEY)
+knarr start --remote-config                # Start without models until PUT /knarr/admin/config (needs KNARR_ADMIN_KEY)
 knarr models                               # List models
 knarr models --format json                 # JSON output
 knarr check                                # Validate config
@@ -227,7 +229,7 @@ per worker.
 
 - `KNARR_DEBUG=1` — Enable verbose logging (same as `--verbose`)
 - `KNARR_API_KEY` (proxy_api_key), `KNARR_PUBLIC_URL` (public_url)
-- `KNARR_ADMIN_KEY` (admin_key), `KNARR_RAM_ONLY` (ram_only)
+- `KNARR_ADMIN_KEY` (admin_key), `KNARR_REMOTE_CONFIG` (remote_config)
 - `KNARR_LOG_FILE`, `KNARR_LOG_DIR` (logging.file / logging.dir)
 - `KNARR_TRACE_NAME`, `LANGFUSE_TRACE_NAME`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_URL` / `LANGFUSE_BASE_URL`
 - `KNARR_LANGFUSE_TRANSPORT` (langfuse.transport: `ingestion` default, `otel`), `KNARR_LANGFUSE_TIMEOUT` (langfuse.timeout, default 15 s, 0 = none)

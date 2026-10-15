@@ -2,13 +2,13 @@ use strict;
 use warnings;
 use Test2::V0;
 
-# k75 under Plack: the admin routes, their key, the RAM-only 503 and the
+# k75 under Plack: the admin routes, their key, the not-configured 503 and the
 # limits work through Langertha::Knarr::PSGI as on the native server; the
 # body is read only after the key and the Content-Length passed, and a
 # prefork PSGI server (psgi.multiprocess) gets 501 instead of a push that
 # would reach one process.
 
-BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_RAM_ONLY )} }
+BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_REMOTE_CONFIG )} }
 
 BEGIN {
   eval { require Plack::Test; 1 }
@@ -60,7 +60,7 @@ sub app_for {
     router  => $stack->router,
     ( defined $stack->auth_token ? ( auth_token => $stack->auth_token ) : () ),
     ( $opt{no_admin} ? () : ( admin => Langertha::Knarr::Admin->new(
-      key => $ADMIN_KEY, stack => $stack, ram_only => $opt{ram_only} // 0 ) ) ),
+      key => $ADMIN_KEY, stack => $stack, remote_config => $opt{remote_config} // 0 ) ) ),
   );
   my $psgi = Langertha::Knarr::PSGI->new( knarr => $knarr );
   return ( $knarr, $psgi );
@@ -135,16 +135,17 @@ is( decode( chat( $app, 'alpha', bearer => $PROXY_KEY ) )->{choices}[0]{message}
   is( $res->code, 200, 'PSGI PUT: 200' );
   is( decode($res)->{generation}, 1, '... generation 1' );
   no_secret_in( $res->decoded_content, '... the answer' );
-  is( decode( chat( $app, 'beta' ) )->{choices}[0]{message}{content}, 'from beta-up',
-    'PSGI: the pushed setup serves, open without a pushed proxy key' );
+  is( chat( $app, 'beta' )->code, 401, 'PSGI: the start layer proxy key still applies' );
+  is( decode( chat( $app, 'beta', bearer => $PROXY_KEY ) )->{choices}[0]{message}{content}, 'from beta-up',
+    'PSGI: the pushed setup serves, next to the start model' );
 
   $res = send_req( $app, PATCH => '/knarr/admin/keys', bearer => $ADMIN_KEY, body => { beta => $KEY_ONE } );
   is( $res->code, 200, 'PSGI PATCH keys: 200' );
-  chat( $app, 'beta' );
+  chat( $app, 'beta', bearer => $PROXY_KEY );
   is( $LangerthaX::Engine::TestKnarrAdminPSGI::chats[-1]{api_key}, $KEY_ONE, '... beta uses the new key' );
 
   $res = send_req( $app, DELETE => '/knarr/admin/config', bearer => $ADMIN_KEY );
-  is( [ @{ decode($res) }{qw( generation source )} ], [ 3, 'env' ], 'PSGI DELETE: back to the start setup' );
+  is( [ @{ decode($res) }{qw( generation layers )} ], [ 3, ['env'] ], 'PSGI DELETE: back to the start setup' );
   is( chat( $app, 'beta', bearer => $PROXY_KEY )->code, 404, '... beta is gone' );
 }
 
@@ -197,12 +198,12 @@ is( decode( chat( $app, 'alpha', bearer => $PROXY_KEY ) )->{choices}[0]{message}
   is( send_req( $app, GET => '/knarr/admin/status', bearer => $ADMIN_KEY )->code, 200, '... until the wait is over' );
 }
 
-# --- RAM only ---
+# --- remote_config without a start setup ---
 {
-  my ( undef, $ram ) = app_for( data => {}, ram_only => 1 );
+  my ( undef, $ram ) = app_for( data => {}, remote_config => 1 );
   my $rapp = $ram->to_app;
   my $res = chat( $rapp, 'beta' );
-  is( $res->code, 503, 'PSGI RAM only, no setup: 503' );
+  is( $res->code, 503, 'PSGI remote_config, no setup: 503' );
   like( decode($res)->{error}{message}, qr/not configured/, '... not configured' );
   is( send_req( $rapp, GET => '/api/tags' )->code, 503, '... Ollama model list too' );
   is( send_req( $rapp, PUT => '/knarr/admin/config', bearer => $ADMIN_KEY,

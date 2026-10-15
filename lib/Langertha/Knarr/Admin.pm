@@ -1,5 +1,5 @@
 package Langertha::Knarr::Admin;
-# ABSTRACT: Admin routes that deliver, rotate and drop Knarr's routing setup at runtime, in memory only
+# ABSTRACT: Admin routes that deliver, rotate and drop a routing setup layered over Knarr's own, in memory only
 our $VERSION = '1.103';
 use Moose;
 use Carp qw( croak );
@@ -10,6 +10,7 @@ use POSIX ();
 use Storable qw( dclone );
 use Try::Tiny;
 use Langertha::Knarr::Config;
+use Langertha::Knarr::Tracing;
 
 =head1 SYNOPSIS
 
@@ -23,7 +24,7 @@ use Langertha::Knarr::Config;
         admin => Langertha::Knarr::Admin->new(
             key      => $ENV{KNARR_ADMIN_KEY},
             stack    => $stack,
-            ram_only => 1,
+            remote_config => 1,
         ),
     );
 
@@ -37,13 +38,39 @@ use Langertha::Knarr::Config;
 =head1 DESCRIPTION
 
 The admin routes let a central service hand a running Knarr its routing
-setup -- the models, the default engine, the passthrough upstreams and the
-keys -- as JSON, rotate the keys, and take the setup back. What arrives is
-held in memory only: nothing is written to a file, a cache or a log, and a
-restarted Knarr has forgotten it, so the central service delivers it again.
+setup -- the models, the default engine, the passthrough upstreams, the
+keys, the Langfuse section -- as JSON, rotate the keys, and take the setup
+back. What arrives is held in memory only: nothing is written to a file, a
+cache or a log, and a restarted Knarr has forgotten it, so the central
+service delivers it again.
 C<knarr start> enables the routes when L<Langertha::Knarr::Config/admin_key>
-(C<KNARR_ADMIN_KEY>) is set; L<Langertha::Knarr::Config/ram_only> starts
-Knarr with no setup at all.
+(C<KNARR_ADMIN_KEY>) is set; L<Langertha::Knarr::Config/remote_config>
+lets Knarr start without any model.
+
+=head2 Layers
+
+What Knarr started with (the config file, or the environment's config) is
+the I<start layer> and is always in effect. A delivered setup is the
+I<push layer> and lies over it:
+
+=over
+
+=item * C<models> are merged by name: a model of the push replaces the
+start model of the same name, start models without a namesake stay.
+
+=item * C<default>, C<passthrough> and the scalar keys
+(C<proxy_api_key>, C<auto_discover>, the timeouts, the probe settings):
+the pushed value wins, else the start layer's.
+
+=item * C<langfuse> is merged key by key (the pushed C<public_key> and
+C<secret_key> over a start C<trace_name>, say).
+
+=back
+
+A C<PUT> replaces the whole push layer, never the start layer; C<DELETE>
+drops the push layer and falls back to the start layer alone. Keys of
+the start layer that no push can touch (C<listen>, C<logging>, C<workers>,
+...) stay.
 
 =head2 Routes
 
@@ -56,45 +83,48 @@ ever contains a key.
 
 C<200> with C<generation> (how many changes since the start, C<0> before the
 first), C<applied_at> (ISO 8601, UTC) and C<applied_at_epoch> (when the
-current state took effect), C<source> (C<ram> after a push; at start
-C<file>, C<env> for a config not read from a file -- C<--from-env> or the
-Perl API --, or C<none> under L</ram_only>), C<configured>, C<ram_only>,
-C<models> (the names under C<models:>), C<default_engine> (whether there is
-one) and C<passthrough> (the protocols with an upstream, without their
-URLs).
+current state took effect), C<layers> (the layers in effect: C<file> or
+C<env> for the start layer, when it holds anything, then C<push>),
+C<configured>, C<remote_config>, C<models> (the names under C<models:>, both
+layers), C<default_engine> (whether there is one) and C<passthrough> (the
+protocols with an upstream, without their URLs).
 
 =item C<PUT /knarr/admin/config>
 
-Replaces the running setup with the JSON object in the body: the keys of
+Sets the push layer to the JSON object in the body: the keys of
 L<Langertha::Knarr::Config/runtime_keys> (C<models>, C<default>,
-C<passthrough>, C<auto_discover>, C<proxy_api_key>, the upstream timeouts
-and the capability probe settings), structured as in the YAML config. A key
-it leaves out is unset, not kept. The process settings (C<listen>,
-C<workers>, C<logging>, C<langfuse>, C<admin_key>, C<ram_only>, ...) stay
-as they were at the start; a body that names one is refused. Keys arrive
+C<passthrough>, C<auto_discover>, C<proxy_api_key>, the upstream timeouts,
+the capability probe settings and C<langfuse>), structured as in the YAML
+config. A key it leaves out is not set by the push (the start layer's value
+applies). The process settings (C<listen>, C<workers>, C<logging>,
+C<admin_key>, C<remote_config>, C<public_url>, C<a2a>, ...) stay as they
+were at the start; a body that names one is refused. Keys arrive
 literally as C<api_key>: an C<api_key_env> in a model or the default is
 refused, because the start environment's secrets must not follow a pushed
-C<url>. The new setup
-is checked like a config file (L<Langertha::Knarr::Config/validate>) and
-every model's engine, and the default engine, is built before anything
-changes; any problem answers C<400> and the running setup stays exactly as
-it was. On success: C<200> with the status above, under the next
-generation.
+C<url>. The layered setup is checked like a config file
+(L<Langertha::Knarr::Config/validate>) and every model's engine, and the
+default engine, is built before anything changes; any problem answers
+C<400> and the running setup stays exactly as it was. A pushed C<langfuse>
+section with keys switches tracing on (or to the pushed Langfuse); its
+keys never appear in an answer or the log. On success: C<200> with the
+status above, under the next generation.
 
 =item C<PATCH /knarr/admin/keys>
 
 Swaps API keys only: a JSON object of name to key, where a name is a model
-under C<models:> or C<default> for the default engine (refused as ambiguous
+of either layer or C<default> for the default engine (refused as ambiguous
 when a model is called C<default> too). The key becomes that entry's
-C<api_key>, and its C<api_key_env> is dropped. All names must be known and
-every key a non-empty string, or nothing changes (C<400>). C<409> when
-there is no setup yet. Applied like a C<PUT> of the patched setup.
+C<api_key> in the push layer (a start model is copied there with the new
+key; the start layer itself is never changed) and its C<api_key_env> is
+dropped. All names must be known and every key a non-empty string, or
+nothing changes (C<400>). C<409> when there is no setup yet. Applied like a
+C<PUT> of the patched push layer.
 
 =item C<DELETE /knarr/admin/config>
 
-Drops what was delivered: back to the setup Knarr started with (its config
-file or environment), or under L</ram_only> back to no setup, where every
-other request answers C<503>.
+Drops the push layer: back to the start layer alone, or, when it holds no
+routing setup (C<remote_config> with a start of no models), to no setup,
+where every other request answers C<503>.
 
 =back
 
@@ -154,15 +184,16 @@ is kept.
 Required. The L<Langertha::Knarr::Stack> Knarr starts with; afterwards the
 one currently installed.
 
-=attr ram_only
+=attr remote_config
 
-Boolean, default C<0>. Start without a setup (L</configured> false) and go
-back to none on C<DELETE>.
+Boolean, default C<0>. A start layer without any routing setup (no models,
+no default engine, no passthrough) is allowed: L</configured> is false until
+the first push, and again after a C<DELETE>.
 
 =attr configured
 
-False while there is no setup to serve from (L</ram_only> before the first
-push, or after a C<DELETE>). L<Langertha::Knarr> answers every route but the
+False while there is no setup to serve from (L</remote_config> with an empty
+start layer, before the first push, or after a C<DELETE>). L<Langertha::Knarr> answers every route but the
 admin routes with C<503> then.
 
 =attr generation
@@ -225,7 +256,7 @@ my @ROUTES = (
 # Config keys that only take effect at start, named in a refusal; any other
 # key a push may not set is counted, not echoed.
 my @PROCESS_KEYS = qw(
-  listen workers logging langfuse admin_key ram_only public_url
+  listen workers logging admin_key remote_config public_url
   ollama_compat_version a2a
 );
 
@@ -260,7 +291,7 @@ has _boot_stack => (
   writer   => '_set_boot_stack',
 );
 
-has ram_only => (
+has remote_config => (
   is      => 'ro',
   isa     => 'Bool',
   default => 0,
@@ -285,10 +316,11 @@ has applied_at => (
   writer   => '_set_applied_at',
 );
 
-has source => (
+# The delivered layer (a HashRef of runtime keys) or undef: only in RAM.
+has _push => (
   is       => 'ro',
   init_arg => undef,
-  writer   => '_set_source',
+  writer   => '_set_push',
 );
 
 has max_body => (
@@ -323,8 +355,7 @@ has _json => (
 sub BUILD {
   my ($self) = @_;
   $self->_set_boot_stack( $self->stack );
-  $self->_set_configured( $self->ram_only ? 0 : 1 );
-  $self->_set_source( $self->_boot_source );
+  $self->_set_configured( $self->_boot_configured );
   $self->_set_applied_at( $self->_now );
 }
 
@@ -340,11 +371,29 @@ sub _bytes {
   return $string;
 }
 
-sub _boot_source {
+# Whether the start layer alone can serve: it holds a routing setup, or
+# remote_config is off (a config that must name its models).
+sub _boot_configured {
   my ($self) = @_;
-  return 'none' if $self->ram_only;
+  return 1 unless $self->remote_config;
+  return $self->_boot_routable ? 1 : 0;
+}
+
+sub _boot_routable {
+  my ($self) = @_;
   my $config = $self->_boot_stack->config;
-  return $config->can('has_file') && $config->has_file ? 'file' : 'env';
+  return 1 if eval { %{ $config->models } };
+  return 1 if eval { $config->default_engine };
+  return 1 if eval { %{ $config->passthrough } };
+  return 0;
+}
+
+# 'file', 'env' (a config not read from a file) or undef: no start layer.
+sub _boot_layer {
+  my ($self) = @_;
+  my $config = $self->_boot_stack->config;
+  return 'file' if $config->can('has_file') && $config->has_file;
+  return $self->_boot_routable ? 'env' : undef;
 }
 
 sub is_key {
@@ -411,13 +460,14 @@ sub status {
   my $default = $configured ? eval { $config->default_engine } : undef;
   my $upstreams = $configured ? eval { $config->passthrough } || {} : {};
   my $at = $self->applied_at;
+  my $base = $self->_boot_layer;
   return {
     generation       => $self->generation + 0,
     applied_at       => POSIX::strftime( '%Y-%m-%dT%H:%M:%SZ', gmtime $at ),
     applied_at_epoch => $at + 0,
-    source           => $self->source,
+    layers           => [ ( $base ? ($base) : () ), ( $self->_push ? ('push') : () ) ],
     configured       => $configured ? JSON::MaybeXS->true : JSON::MaybeXS->false,
-    ram_only         => $self->ram_only ? JSON::MaybeXS->true : JSON::MaybeXS->false,
+    remote_config    => $self->remote_config ? JSON::MaybeXS->true : JSON::MaybeXS->false,
     models           => [ sort keys %$models ],
     default_engine   => $default ? JSON::MaybeXS->true : JSON::MaybeXS->false,
     passthrough      => [ sort keys %$upstreams ],
@@ -452,7 +502,7 @@ sub _admin_put_config {
       . ( @named ? '; '.join( ', ', @named ).' take effect only at start' : '' )
       . ( $unknown ? "; $unknown unknown key(s)" : '' ) );
   }
-  return $self->_install_runtime( $knarr, $doc, 'replaced' );
+  return $self->_install_runtime( $knarr, dclone($doc), 'replaced' );
 }
 
 # Names of the model/default entries of a pushed setup that carry api_key_env.
@@ -477,28 +527,34 @@ sub _admin_patch_keys {
   return $self->_refuse('the body must be a JSON object of name: key pairs')
     unless ref $doc eq 'HASH' && %$doc;
 
-  my $runtime = dclone( $self->_runtime_data( $self->stack->config ) );
-  my $models = ref $runtime->{models} eq 'HASH' ? $runtime->{models} : {};
-  my $default = ref $runtime->{default} eq 'HASH' ? $runtime->{default} : undef;
+  # Names are looked up in both layers; the key lands in the push layer.
+  my $push = dclone( $self->_push // {} );
+  my $seen = $self->_layered($push);
+  my $models = ref $seen->{models} eq 'HASH' ? $seen->{models} : {};
+  my $default = ref $seen->{default} eq 'HASH' ? $seen->{default} : undef;
   my ( $bad, $unknown, $ambiguous ) = ( 0, 0, 0 );
   for my $name ( sort keys %$doc ) {
     my $key = $doc->{$name};
     unless ( defined $key && !ref $key && length $key ) { $bad++; next }
     my $def = ref $models->{$name} eq 'HASH' ? $models->{$name} : undef;
+    my $is_default = 0;
     if ( $name eq 'default' && $default ) {
       if ($def) { $ambiguous++; next }
-      $def = $default;
+      ( $def, $is_default ) = ( $default, 1 );
     }
     unless ($def) { $unknown++; next }
-    $def->{api_key} = $key;
-    delete $def->{api_key_env};
+    my $copy = dclone($def);
+    $copy->{api_key} = $key;
+    delete $copy->{api_key_env};
+    if ($is_default) { $push->{default} = $copy }
+    else             { $push->{models}{$name} = $copy }
   }
   my @problems;
   push @problems, "$bad key(s) not a non-empty string" if $bad;
   push @problems, "$unknown name(s) neither a model under models: nor default" if $unknown;
   push @problems, "'default' names both a model and the default engine" if $ambiguous;
   return $self->_refuse( 'no key changed: '.join( '; ', @problems ) ) if @problems;
-  return $self->_install_runtime( $knarr, $runtime, 'keys changed' );
+  return $self->_install_runtime( $knarr, $push, 'keys changed' );
 }
 
 sub _admin_delete_config {
@@ -506,51 +562,65 @@ sub _admin_delete_config {
   my $boot = $self->_boot_stack;
   my $stack = $boot->with_config( $boot->config )->build;
   $self->_install( $knarr, $stack,
-    source     => $self->_boot_source,
-    configured => $self->ram_only ? 0 : 1,
+    push       => undef,
+    configured => $self->_boot_configured,
   );
   $log->infof( "Admin: delivered setup dropped, generation %d, %s",
-    $self->generation, $self->ram_only ? 'no setup (RAM only)' : 'back to the start setup' );
+    $self->generation, $self->configured ? 'back to the start setup' : 'no setup' );
   return $self->_answer( 200, $self->status );
 }
 
 #### Applying
 
-# The runtime part of a config's data: the keys a push may set.
-sub _runtime_data {
-  my ($self, $config) = @_;
-  my $data = $config->data;
-  return { map { exists $data->{$_} ? ( $_ => $data->{$_} ) : () }
-    $self->config_class->runtime_keys };
+# The start layer's data with the push layer over it (see Layers). Nothing
+# of either is modified.
+sub _layered {
+  my ($self, $push) = @_;
+  my %data = %{ $self->_boot_stack->config->data };
+  # remote_config describes how this process started, not the layered setup:
+  # that one is checked like any config that must name its models.
+  $data{remote_config} = 0;
+  for my $key ( sort keys %{ $push || {} } ) {
+    my ( $mine, $theirs ) = ( $data{$key}, $push->{$key} );
+    if ( ( $key eq 'models' || $key eq 'langfuse' )
+        && ref $mine eq 'HASH' && ref $theirs eq 'HASH' ) {
+      $data{$key} = { %$mine, %$theirs };
+    }
+    else {
+      $data{$key} = $theirs;
+    }
+  }
+  return \%data;
 }
 
-# A pushed (or patched) routing setup on top of the process settings Knarr
-# started with: validated, built and installed, or refused with 400 and
-# nothing changed.
+sub tracing_class { 'Langertha::Knarr::Tracing' }
+
+# A pushed (or patched) push layer on top of the start layer: validated,
+# built and installed, or refused with 400 and nothing changed.
 sub _install_runtime {
-  my ($self, $knarr, $runtime, $what) = @_;
-  my $boot = $self->_boot_stack->config->data;
-  my %runtime_key = map { $_ => 1 } $self->config_class->runtime_keys;
-  # ram_only describes how this process started, not the delivered setup:
-  # the setup is checked like any config that must name its models.
-  my %data = (
-    ( map { $_ => $boot->{$_} } grep { !$runtime_key{$_} && $_ ne 'ram_only' } keys %$boot ),
-    %$runtime,
-    ram_only => 0,
-  );
-  my $config = $self->config_class->new( data => \%data );
+  my ($self, $knarr, $push, $what) = @_;
+  my $config = $self->config_class->new( data => $self->_layered($push) );
 
   my @errors = eval { $config->validate };
   push @errors, $self->_first_line($@) if $@;
   push @errors, 'proxy_api_key must differ from the admin key'
     if !@errors && $config->has_proxy_api_key && $self->is_key( $config->proxy_api_key );
-  return $self->_refuse( join( '; ', @errors ), $runtime ) if @errors;
+  return $self->_refuse( join( '; ', @errors ), $push ) if @errors;
 
-  my $stack = $self->_boot_stack->with_config($config);
+  # A delivered langfuse section brings its own tracing; without one the
+  # start layer's tracing stays.
+  my @over;
+  if ( exists $push->{langfuse} ) {
+    my $tracing = eval { $self->tracing_class->new( config => $config ) };
+    return $self->_refuse( 'langfuse: '.$self->_first_line($@), $push ) unless $tracing;
+    @over = ( tracing => $tracing->_enabled ? $tracing : undef );
+  }
+
+  my $stack = $self->_boot_stack->with_config( $config, @over );
   @errors = $self->_build_errors($stack);
-  return $self->_refuse( join( '; ', @errors ), $runtime ) if @errors;
+  return $self->_refuse( join( '; ', @errors ), $push ) if @errors;
 
-  $self->_install( $knarr, $stack, source => 'ram', configured => 1 );
+  $self->_install( $knarr, $stack, push => $push, configured => 1 );
   $log->infof( "Admin: setup %s, generation %d, %d model(s)%s", $what,
     $self->generation, scalar keys %{ $config->models },
     $config->default_engine ? ' and a default engine' : '' );
@@ -584,7 +654,7 @@ sub _install {
   $knarr->_apply_stack($stack) if $knarr;
   $self->_set_stack($stack);
   $self->_set_configured( $meta{configured} ? 1 : 0 );
-  $self->_set_source( $meta{source} );
+  $self->_set_push( $meta{push} );
   $self->_set_generation( $self->generation + 1 );
   $self->_set_applied_at( $self->_now );
   return;

@@ -29,12 +29,14 @@ then forks N workers that accept on the same sockets, and supervises them
 Sessions (a Raider conversation) live in one worker and are not routed
 back to it. See L<Langertha::Knarr/workers> and L<Langertha::Knarr/run>.
 
-C<--ram-only> (else the config's C<ram_only:> or C<KNARR_RAM_ONLY>) starts
-without a routing setup: no config file is needed, C<--from-env> is ignored,
-and every request but the admin routes answers C<503> until the setup
-arrives by C<PUT /knarr/admin/config> (see L<Langertha::Knarr::Admin>). It
-needs C<KNARR_ADMIN_KEY> (or C<admin_key:>); a config file may then hold only
-process settings. With an admin key set the admin routes are on, and the
+C<--remote-config> (else the config's C<remote_config:> or
+C<KNARR_REMOTE_CONFIG>) allows a start without any model: no config file is
+needed (C<--from-env> is then ignored), and every request but the admin
+routes answers C<503> until the setup arrives by C<PUT /knarr/admin/config>
+(see L<Langertha::Knarr::Admin>). A config file may hold models and the rest
+of a setup as well: it is always in effect, and a delivered setup lies over
+it, in memory only. It needs C<KNARR_ADMIN_KEY> (or C<admin_key:>). With an
+admin key set the admin routes are on, and the
 worker count is set to C<1> with a warning: a push reaches the memory of one
 process only.
 
@@ -83,9 +85,9 @@ option from_env => (
   default => 0,
 );
 
-option ram_only => (
+option remote_config => (
   is      => 'ro',
-  doc     => 'Start without models and take the routing setup only from PUT /knarr/admin/config, held in memory (needs KNARR_ADMIN_KEY; or ram_only: / KNARR_RAM_ONLY)',
+  doc     => 'Allow a start without models; the routing setup comes from PUT /knarr/admin/config, layered over the config file, held in memory (needs KNARR_ADMIN_KEY; or remote_config: / KNARR_REMOTE_CONFIG)',
   default => 0,
 );
 
@@ -121,13 +123,13 @@ sub execute {
 
   my $config_file = $self->config_file($chain);
   my $config;
-  # KNARR_RAM_ONLY, read the way the config reads it (k75).
-  my $ram_only_requested = $self->ram_only
-    || Langertha::Knarr::Config->new( data => {} )->ram_only;
+  # KNARR_REMOTE_CONFIG, read the way the config reads it (k75).
+  my $remote_config_requested = $self->remote_config
+    || Langertha::Knarr::Config->new( data => {} )->remote_config;
 
   if (-f $config_file) {
     $config = Langertha::Knarr::Config->new(file => $config_file);
-    $config->data->{ram_only} = 1 if $self->ram_only;
+    $config->data->{remote_config} = 1 if $self->remote_config;
     my @errors = $config->validate;
     if (@errors) {
       _err("Configuration errors:");
@@ -135,17 +137,17 @@ sub execute {
       exit 1;
     }
     _log("Config: loaded from $config_file");
-  } elsif ($ram_only_requested) {
+  } elsif ($remote_config_requested) {
     # The setup arrives by admin push; nothing to read, not even the
     # environment's provider keys (--from-env is the Docker default).
-    $config = Langertha::Knarr::Config->new( data => { ram_only => 1 } );
+    $config = Langertha::Knarr::Config->new( data => { remote_config => 1 } );
     my @errors = $config->validate;
     if (@errors) {
       _err("Configuration errors:");
       _err("  - $_") for @errors;
       exit 1;
     }
-    _log("Config: RAM only, no config file" . ( $self->from_env ? " (--from-env ignored)" : '' ));
+    _log("Config: remote config, no config file" . ( $self->from_env ? " (--from-env ignored)" : '' ));
   } elsif ($self->from_env) {
     _log("Config: auto-detecting from environment variables");
     $config = Langertha::Knarr::Config->from_env(include_test => 0);
@@ -166,7 +168,7 @@ sub execute {
   }
 
   my $workers = $self->_workers($config);
-  my $ram_only = $config->ram_only;
+  my $remote_config = $config->remote_config;
   my $admin_on = $config->has_admin_key;
   if ( $admin_on && $workers > 1 ) {
     _log("WARNING: workers forced to 1 (was $workers): the admin routes keep the"
@@ -207,8 +209,8 @@ sub execute {
   # Log discovered engines and models
   my $models = $config->models;
   my $model_count = scalar keys %$models;
-  if ($ram_only) {
-    _log("Engines: none yet (RAM only: requests answer 503 until PUT /knarr/admin/config)");
+  if ( $remote_config && !$model_count && !$config->default_engine && !keys %{ $config->passthrough } ) {
+    _log("Engines: none yet (remote config: requests answer 503 until PUT /knarr/admin/config)");
   } elsif ($model_count) {
     _log("Engines: $model_count provider(s) configured");
     _log("");
@@ -273,6 +275,9 @@ sub execute {
     _log("Admin routes: off (set KNARR_ADMIN_KEY to enable)");
   }
 
+  _log("Remote config: on (PUT /knarr/admin/config lays a setup over this one, in memory only)")
+    if $remote_config && $admin_on;
+
   # Request logging status
   my $log_file = $config->log_file;
   my $log_dir  = $config->log_dir;
@@ -313,7 +318,7 @@ sub execute {
     $admin = Langertha::Knarr::Admin->new(
       key      => $config->admin_key,
       stack    => $stack,
-      ram_only => $ram_only,
+      remote_config => $remote_config,
     );
   }
 

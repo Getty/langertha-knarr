@@ -103,10 +103,10 @@ passthrough:
 # file; at least 16 characters, not the proxy key. With an admin key Knarr
 # runs one worker.
 # admin_key: ...
-# ram_only: true   # (or KNARR_RAM_ONLY / --ram-only) start with no setup, 503
-#                  # until PUT /knarr/admin/config; this file may then hold
-#                  # only process settings (no models, default, passthrough,
-#                  # proxy_api_key, ...)
+# remote_config: true   # (or KNARR_REMOTE_CONFIG / --remote-config) a start
+#                       # without models is allowed: 503 until PUT
+#                       # /knarr/admin/config. What this file holds is always
+#                       # in effect; a delivered setup lies over it, in RAM.
 
 # Optional: public base URL for /.well-known/langertha.json (or
 # KNARR_PUBLIC_URL); default: taken from each request

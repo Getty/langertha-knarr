@@ -4,10 +4,10 @@ use Test2::V0;
 use Path::Tiny;
 use YAML::PP;
 
-# k75: admin_key / KNARR_ADMIN_KEY and ram_only / KNARR_RAM_ONLY in the
+# k75: admin_key / KNARR_ADMIN_KEY and remote_config / KNARR_REMOTE_CONFIG in the
 # config, and what validate says about them -- never the key itself.
 
-BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_RAM_ONLY )} }
+BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_REMOTE_CONFIG )} }
 
 use Langertha::Knarr::Config;
 
@@ -39,43 +39,45 @@ my %model = ( engine => 'OpenAI', api_key => 'sk-config-model-key' );
 ok( !Langertha::Knarr::Config->new( data => {} )->has_admin_key, 'no key by default' );
 is( Langertha::Knarr::Config->admin_key_min_length, 16, 'at least 16 characters' );
 
-# --- ram_only ---
+# --- remote_config ---
 {
-  is( Langertha::Knarr::Config->new( data => {} )->ram_only, 0, 'ram_only is off by default' );
-  is( Langertha::Knarr::Config->new( data => { ram_only => 1 } )->ram_only, 1, 'ram_only: 1' );
-  is( Langertha::Knarr::Config->new( data => { ram_only => 'false' } )->ram_only, 0, "ram_only: 'false'" );
+  is( Langertha::Knarr::Config->new( data => {} )->remote_config, 0, 'remote_config is off by default' );
+  is( Langertha::Knarr::Config->new( data => { remote_config => 1 } )->remote_config, 1, 'remote_config: 1' );
+  is( Langertha::Knarr::Config->new( data => { remote_config => 'false' } )->remote_config, 0, "remote_config: 'false'" );
   for my $case ( [ '1', 1 ], [ 'true', 1 ], [ '0', 0 ], [ 'off', 0 ], [ 'no', 0 ], [ '', 0 ] ) {
-    local $ENV{KNARR_RAM_ONLY} = $case->[0];
-    is( Langertha::Knarr::Config->new( data => {} )->ram_only, $case->[1], "KNARR_RAM_ONLY='$case->[0]'" );
+    local $ENV{KNARR_REMOTE_CONFIG} = $case->[0];
+    is( Langertha::Knarr::Config->new( data => {} )->remote_config, $case->[1], "KNARR_REMOTE_CONFIG='$case->[0]'" );
   }
-  local $ENV{KNARR_RAM_ONLY} = '1';
-  is( Langertha::Knarr::Config->new( data => { ram_only => 0 } )->ram_only, 0, 'the config wins over the environment' );
+  local $ENV{KNARR_REMOTE_CONFIG} = '1';
+  is( Langertha::Knarr::Config->new( data => { remote_config => 0 } )->remote_config, 0, 'the config wins over the environment' );
 }
 
 is( [ Langertha::Knarr::Config->runtime_keys ],
   [ qw( models default passthrough auto_discover proxy_api_key
-        upstream_timeout upstream_stall_timeout probe_capabilities probe_timeout ) ],
+        upstream_timeout upstream_stall_timeout probe_capabilities probe_timeout
+        langfuse ) ],
   'the keys an admin push may set' );
 
 # --- validate ---
 sub errors_of { [ $_[0]->validate ] }
 
-is( errors_of( file_config({ ram_only => 1, admin_key => $ADMIN, listen => [ '127.0.0.1:1' ] }) ), [],
-  'ram_only without models is valid' );
-is( errors_of( Langertha::Knarr::Config->new( data => { ram_only => 1, admin_key => $ADMIN } ) ), [],
+is( errors_of( file_config({ remote_config => 1, admin_key => $ADMIN, listen => [ '127.0.0.1:1' ] }) ), [],
+  'remote_config without models is valid' );
+is( errors_of( Langertha::Knarr::Config->new( data => { remote_config => 1, admin_key => $ADMIN } ) ), [],
   '... also without a file' );
 like( errors_of( file_config({ admin_key => $ADMIN }) ), [ qr/No models configured/ ],
-  'without ram_only models are still needed' );
-like( errors_of( file_config({ ram_only => 1 }) ), [ qr/ram_only needs an admin_key/ ],
-  'ram_only needs an admin key' );
+  'without remote_config models are still needed' );
+like( errors_of( file_config({ remote_config => 1 }) ), [ qr/remote_config needs an admin_key/ ],
+  'remote_config needs an admin key' );
 {
   local $ENV{KNARR_ADMIN_KEY} = $ADMIN;
-  is( errors_of( file_config({ ram_only => 1 }) ), [], '... KNARR_ADMIN_KEY will do' );
+  is( errors_of( file_config({ remote_config => 1 }) ), [], '... KNARR_ADMIN_KEY will do' );
 }
-like( errors_of( file_config({ ram_only => 1, admin_key => $ADMIN, models => { m => {%model} },
-    proxy_api_key => 'proxy-in-file-key' }) ),
-  [ qr/\Aram_only: models, proxy_api_key must not be in the config file/ ],
-  'ram_only: runtime keys in the file are refused' );
+is( errors_of( file_config({ remote_config => 1, admin_key => $ADMIN, models => { m => {%model} },
+    proxy_api_key => 'proxy-in-file-key' }) ), [],
+  'remote_config: the file may hold models and a proxy key, they are always in effect' );
+is( errors_of( file_config({ remote_config => 1, admin_key => $ADMIN, passthrough => { openai => 'https://api.openai.com' } }) ), [],
+  '... or just a passthrough' );
 
 {
   my $short = 'short-admin';

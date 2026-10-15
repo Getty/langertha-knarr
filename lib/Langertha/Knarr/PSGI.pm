@@ -153,7 +153,7 @@ sub _handle_psgi {
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 
-  # No setup delivered yet (ram_only): 503, as on the native server (k75).
+  # No setup delivered yet (remote_config): 503, as on the native server (k75).
   if ( my ($status, $ctype, $body) = $sb->_not_configured_answer($proto) ) {
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }

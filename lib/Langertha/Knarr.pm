@@ -116,21 +116,25 @@ with an older one the route answers C<404> with a JSON error.
 
 With an L</admin> (C<knarr start> with C<KNARR_ADMIN_KEY>), a central
 service can deliver the routing setup -- models, default engine,
-passthrough upstreams, proxy key and provider keys -- as JSON, swap keys,
-read the status and drop the setup again, all under C</knarr/admin/> and
-only with the admin key. What arrives is held in memory only. Without an
+passthrough upstreams, proxy key, provider keys and the Langfuse section --
+as JSON, swap keys, read the status and drop the delivered setup again, all
+under C</knarr/admin/> and only with the admin key. What arrives lies as a
+layer over the start setup (config file) and is held in memory only.
+Without an
 admin these paths do not exist (C<404>). The routes, their answers and
 their limits are described in L<Langertha::Knarr::Admin>.
 
 The admin key opens only the admin routes: a request that presents it to
 any other route gets C<401>, so it never reaches a handler or an upstream;
 L</auth_token> in turn never opens an admin route. While the admin has no
-setup (L<Langertha::Knarr::Config/ram_only> before the first push), every
+setup (L<Langertha::Knarr::Config/remote_config> without a start setup,
+before the first push), every
 other route answers C<503> (C<not configured>) in its protocol's error
 shape, after the L</auth_token> check.
 
-A delivered setup replaces L</handler>, L</router>, L</raw_passthrough>
-and L</auth_token> in one step. Requests already running, streams
+A delivered setup replaces L</handler>, L</router>, L</raw_passthrough>,
+L</auth_token> and, with a delivered C<langfuse> section, L</tracing> in one
+step. Requests already running, streams
 included, finish with what they started with; the provider manifest and
 the capability probe start over with the new router.
 
@@ -538,6 +542,7 @@ has tracing => (
   is => 'ro',
   isa => 'Maybe[Object]',
   default => sub { undef },
+  writer => '_set_tracing',
 );
 
 has auth_token => (
@@ -634,7 +639,10 @@ sub BUILD {
     # worker of several (k75).
     Carp::croak( "workers '".$self->workers."' cannot be combined with admin routes:"
       . " each worker would hold its own setup" ) if $self->workers > 1;
+    # A tracing given to the constructor stays when the stack has none.
+    my $tracing = $self->tracing;
     $self->_apply_stack( $admin->stack );
+    $self->_set_tracing($tracing) if $tracing && !$admin->stack->tracing;
   }
   Carp::croak( 'Attribute (handler) is required' ) unless $self->_has_handler;
 }
@@ -650,6 +658,8 @@ sub _apply_stack {
   $self->_set_router( $stack->router );
   $self->_set_raw_passthrough( $stack->raw_passthrough );
   $self->_set_auth_token( $stack->auth_token );
+  # A delivered langfuse section brings its own tracing (k75).
+  $self->_set_tracing( $stack->tracing );
   $self->_clear_manifest;
   if ( $self->_server ) {
     if ( my $probe = $self->_capability_probe ) {
@@ -1012,7 +1022,7 @@ sub _presents_admin_key {
 }
 
 # The answer to every route but the admin routes while an admin has no
-# setup to serve from (ram_only before the first push, k75): 503 in the
+# setup to serve from (remote_config without a start setup, before the first push, k75): 503 in the
 # protocol's error shape. Empty when Knarr can serve.
 sub _not_configured_answer {
   my ($self, $proto) = @_;

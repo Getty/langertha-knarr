@@ -114,14 +114,15 @@ nothing guarantees. With the admin key set (C<KNARR_ADMIN_KEY>) the
 count is set to C<1> with a warning: a delivered setup lives in one
 process's memory.
 
-=item B<--ram-only>
+=item B<--remote-config>
 
-Start without models and take the routing setup only from
-C<PUT /knarr/admin/config>, held in memory and gone on restart (see
-L<Langertha::Knarr::Admin>). Until it arrives, every other request answers
-C<503>. Needs C<KNARR_ADMIN_KEY> (or C<admin_key:>); no config file is
-needed, a config file may hold only process settings, and C<--from-env> is
-ignored. Same as C<ram_only: true> or C<KNARR_RAM_ONLY=1>.
+Allow a start without models; take the routing setup from
+C<PUT /knarr/admin/config>, laid over the config file's setup and held in
+memory only, gone on restart (see L<Langertha::Knarr::Admin>). Until a setup
+is there (config file or push), every other request answers C<503>. Needs
+C<KNARR_ADMIN_KEY> (or C<admin_key:>); no config file is needed, and
+C<--from-env> is then ignored. Same as C<remote_config: true> or
+C<KNARR_REMOTE_CONFIG=1>.
 
 =item B<-n>, B<--trace-name> I<name>
 

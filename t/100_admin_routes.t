@@ -8,7 +8,7 @@ use Test2::V0;
 # LangerthaX fakes that record the key they were built with.
 
 # The host shell may carry Knarr's own variables; none of them may leak in.
-BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_RAM_ONLY )} }
+BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_REMOTE_CONFIG LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_URL LANGFUSE_BASE_URL KNARR_LANGFUSE_TRANSPORT )} }
 
 BEGIN {
   package LangerthaX::Engine::TestKnarrAdmin;
@@ -72,7 +72,7 @@ sub knarr_for {
   my $config = Langertha::Knarr::Config->new( data => $opt{data} // {} );
   my $stack = Langertha::Knarr::Stack->new( config => $config, loop => $loop );
   my $admin = $opt{no_admin} ? undef : Langertha::Knarr::Admin->new(
-    key => $ADMIN_KEY, stack => $stack, ram_only => $opt{ram_only} // 0,
+    key => $ADMIN_KEY, stack => $stack, remote_config => $opt{remote_config} // 0,
     %{ $opt{admin_args} // {} } );
   my $knarr = Langertha::Knarr->new(
     loop   => $loop,
@@ -152,16 +152,16 @@ my $admin = $knarr->admin;
   my $s = decode($resp);
   is( $s, hash {
     field generation       => 0;
-    field source           => 'env';
+    field layers           => ['env'];
     field configured       => T();
-    field ram_only         => F();
+    field remote_config         => F();
     field models           => [ 'alpha' ];
     field default_engine   => F();
     field passthrough      => [];
     field applied_at       => match qr/\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\z/;
     field applied_at_epoch => match qr/\A\d+\z/;
     end;
-  }, 'status: generation, time, source, model names' );
+  }, 'status: generation, time, layers, model names' );
   no_secret_in( $resp->decoded_content, 'the status' );
 }
 
@@ -178,7 +178,7 @@ my $admin = $knarr->admin;
   is( decode($resp)->{choices}[0]{message}{content}, 'from alpha-up', '... from the file setup' );
 }
 
-# --- PUT replaces the setup ---
+# --- PUT lays a setup over the start setup ---
 my $setup = {
   proxy_api_key => $PUSH_PROXY,
   models => {
@@ -193,12 +193,12 @@ my $setup = {
   is( $resp->code, 200, 'PUT config: 200' );
   my $s = decode($resp);
   is( $s->{generation}, 1, 'generation 1' );
-  is( $s->{source}, 'ram', 'source ram' );
-  is( $s->{models}, [ 'beta', 'gamma' ], 'the pushed models' );
+  is( $s->{layers}, [ 'env', 'push' ], 'layers: the start setup and the push' );
+  is( $s->{models}, [ 'alpha', 'beta', 'gamma' ], 'the pushed models next to the start models' );
   ok( $s->{default_engine}, 'with a default engine' );
   no_secret_in( $resp->decoded_content, 'the PUT answer' );
-  is( scalar @LangerthaX::Engine::TestKnarrAdmin::built, 3,
-    'every engine of the setup was built before it went live' );
+  is( scalar @LangerthaX::Engine::TestKnarrAdmin::built, 4,
+    'every engine of the layered setup was built before it went live' );
 
   $resp = chat( $port, 'beta', bearer => $PROXY_KEY );
   is( $resp->code, 401, 'the old proxy key is gone with the old setup' );
@@ -207,8 +207,9 @@ my $setup = {
   is( decode($resp)->{choices}[0]{message}{content}, 'from beta-up', 'routed by the pushed setup' );
   is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{api_key}, $KEY_TWO, 'with the pushed key' );
   $resp = chat( $port, 'alpha', bearer => $PUSH_PROXY );
-  is( decode($resp)->{choices}[0]{message}{content}, 'from alpha',
-    'a model of the old setup goes to the pushed default engine' );
+  is( decode($resp)->{choices}[0]{message}{content}, 'from alpha-up',
+    'a start model without a pushed namesake stays' );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{api_key}, $KEY_ONE, '... with its own key' );
 }
 
 # --- Invalid deliveries change nothing ---
@@ -221,7 +222,10 @@ my $setup = {
     [ 'a JSON array', '[1,2]', qr/JSON object/ ],
     [ 'a model without engine', { models => { x => { api_key => $KEY_NEW } } },
       qr/Model 'x': missing 'engine' key/ ],
-    [ 'no model at all', { proxy_api_key => $PUSH_PROXY }, qr/No models configured/ ],
+    [ 'a models section that is no mapping', { models => 'nope' }, qr/models/ ],
+    [ 'logging', { %$setup, logging => { file => '/tmp/x.jsonl' } }, qr/logging take effect only at start/ ],
+    [ 'a bad langfuse transport', { %$setup, langfuse => { transport => 'smtp' } }, qr/langfuse\.transport/ ],
+    [ 'a langfuse section that is no mapping', { %$setup, langfuse => $KEY_NEW }, qr/langfuse/ ],
     [ 'a process setting', { %$setup, listen => [ '0.0.0.0:1' ], workers => 3 },
       qr/listen, workers take effect only at start/ ],
     [ 'an unknown key', { %$setup, $KEY_NEW => 1 }, qr/1 unknown key/ ],
@@ -319,10 +323,11 @@ my $setup = {
   like( $got, qr/part1.*part2/s, 'the stream got the rest from its engine' );
   like( $got, qr/data: \[DONE\]/, '... and its end marker' );
 
-  $resp = chat( $port, 'beta' );
-  is( $resp->code, 404, 'a new request for the old model finds no route' );
-  $resp = chat( $port, 'delta' );
-  is( decode($resp)->{choices}[0]{message}{content}, 'from delta-up', 'the new setup serves, open (no proxy key pushed)' );
+  $resp = chat( $port, 'beta', bearer => $PROXY_KEY );
+  is( $resp->code, 404, 'a new request for the replaced pushed model finds no route' );
+  $resp = chat( $port, 'delta', bearer => $PROXY_KEY );
+  is( decode($resp)->{choices}[0]{message}{content}, 'from delta-up',
+    'the new push serves; the pushed proxy key went with the old push, the start key applies again' );
 }
 
 # --- DELETE goes back to the start setup ---
@@ -330,7 +335,7 @@ my $setup = {
   my $resp = send_req( $port, DELETE => '/knarr/admin/config', bearer => $ADMIN_KEY );
   is( $resp->code, 200, 'DELETE config: 200' );
   my $s = decode($resp);
-  is( [ @{$s}{qw( generation source )} ], [ 4, 'env' ], 'generation 4, back to the start source' );
+  is( [ @{$s}{qw( generation layers )} ], [ 4, ['env'] ], 'generation 4, the push layer is gone' );
   is( $s->{models}, [ 'alpha' ], 'the start models' );
   $resp = chat( $port, 'alpha', bearer => $PROXY_KEY );
   is( decode($resp)->{choices}[0]{message}{content}, 'from alpha-up', 'the start setup serves again' );
@@ -358,11 +363,11 @@ my $setup = {
   is( send_req( $port, GET => '/knarr/admin/status', bearer => $ADMIN_KEY )->code, 200, '... no lockout' );
 }
 
-# --- RAM only: nothing served before the first push ---
+# --- remote_config without a start setup: nothing served before the first push ---
 {
-  my ( $ram, $rport ) = knarr_for( data => {}, ram_only => 1 );
+  my ( $ram, $rport ) = knarr_for( data => {}, remote_config => 1 );
   my $resp = chat( $rport, 'beta' );
-  is( $resp->code, 503, 'RAM only, no setup: chat answers 503' );
+  is( $resp->code, 503, 'remote_config, no setup: chat answers 503' );
   like( decode($resp)->{error}{message}, qr/not configured/, '... not configured' );
   is( send_req( $rport, POST => '/v1/messages',
     body => { model => 'beta', max_tokens => 5, messages => [ { role => 'user', content => 'hi' } ] } )->code,
@@ -371,8 +376,11 @@ my $setup = {
   is( send_req( $rport, GET => '/.well-known/langertha.json' )->code, 503, '... and the manifest' );
 
   my $s = decode( send_req( $rport, GET => '/knarr/admin/status', bearer => $ADMIN_KEY ) );
-  is( [ @{$s}{qw( generation source models )} ], [ 0, 'none', [] ], 'status: generation 0, source none' );
-  ok( !$s->{configured} && $s->{ram_only}, '... not configured, RAM only' );
+  is( [ @{$s}{qw( generation layers models )} ], [ 0, [], [] ], 'status: generation 0, no layer' );
+  ok( !$s->{configured} && $s->{remote_config}, '... not configured, remote_config' );
+  ok( !exists $s->{ram_only} && !exists $s->{source}, '... the old field names are gone' );
+  is( send_req( $rport, PUT => '/knarr/admin/config', bearer => $ADMIN_KEY, body => { proxy_api_key => $PUSH_PROXY } )->code,
+    400, 'a push without any model and no start setup: 400' );
 
   is( send_req( $rport, PATCH => '/knarr/admin/keys', bearer => $ADMIN_KEY, body => { beta => $KEY_ONE } )->code,
     409, 'PATCH before any setup: 409' );
@@ -384,8 +392,80 @@ my $setup = {
   is( decode($resp)->{choices}[0]{message}{content}, 'from beta-up', 'now it serves' );
 
   $resp = send_req( $rport, DELETE => '/knarr/admin/config', bearer => $ADMIN_KEY );
-  is( decode($resp)->{configured}, F(), 'DELETE under RAM only: not configured again' );
+  is( decode($resp)->{configured}, F(), 'DELETE without a start setup: not configured again' );
   is( chat( $rport, 'beta' )->code, 503, '... and chat answers 503 again' );
+}
+
+# --- Layers: the file is always there, the push lies over it ---
+{
+  my %file = (
+    proxy_api_key => $PROXY_KEY,
+    models => {
+      alpha  => { engine => 'TestKnarrAdmin', model => 'alpha-up',  api_key => $KEY_ONE },
+      shared => { engine => 'TestKnarrAdmin', model => 'shared-file', api_key => $KEY_ONE },
+    },
+    default => { engine => 'TestKnarrAdmin', model => 'default-file', api_key => $KEY_ONE },
+    langfuse => { trace_name => 'from-file' },
+  );
+  my ( $lk, $lport ) = knarr_for( data => { %file }, remote_config => 1 );
+  my $ls = decode( send_req( $lport, GET => '/knarr/admin/status', bearer => $ADMIN_KEY ) );
+  ok( $ls->{configured} && $ls->{remote_config}, 'remote_config with a file setup: configured from the start' );
+  is( $ls->{layers}, ['env'], '... one layer' );
+  ok( !$lk->tracing, '... no tracing' );
+
+  my $resp = send_req( $lport, PUT => '/knarr/admin/config', bearer => $ADMIN_KEY, body => {
+    models => {
+      shared => { engine => 'TestKnarrAdmin', model => 'shared-push', api_key => $KEY_TWO },
+      extra  => { engine => 'TestKnarrAdmin', model => 'extra-push',  api_key => $KEY_TWO },
+    },
+    langfuse => { public_key => 'pk-lf-layer-test', secret_key => 'sk-lf-layer-test', url => 'http://127.0.0.1:1' },
+  } );
+  is( $resp->code, 200, "PUT over a file setup: 200" ) or diag $resp->decoded_content;
+  my $s = decode($resp);
+  is( $s->{layers}, [ 'env', 'push' ], 'both layers' );
+  is( $s->{models}, [ 'alpha', 'extra', 'shared' ], 'file models without a namesake stay, pushed ones join' );
+  ok( $s->{default_engine}, 'the file default engine stays' );
+  no_secret_in( $resp->decoded_content, 'the status' );
+  unlike( $resp->decoded_content, qr/pk-lf-layer-test|sk-lf-layer-test/, '... no Langfuse key either' );
+  ok( $lk->tracing, 'a pushed langfuse section switches tracing on' );
+  is( $lk->tracing->trace_name, 'from-file', '... the file langfuse keys it did not override stay' );
+
+  # The proxy key is the file's (the push did not set one).
+  chat( $lport, 'shared', bearer => $PROXY_KEY );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{model}, 'shared-push', 'the pushed model wins its name' );
+  chat( $lport, 'alpha', bearer => $PROXY_KEY );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{model}, 'alpha-up', 'the file model serves' );
+
+  # PATCH reaches file models; the key lands in the push layer.
+  $resp = send_req( $lport, PATCH => '/knarr/admin/keys', bearer => $ADMIN_KEY,
+    body => { alpha => $KEY_NEW } );
+  is( $resp->code, 200, 'PATCH a file model: 200' );
+  is( decode($resp)->{layers}, [ 'env', 'push' ], '... still two layers' );
+  no_secret_in( $resp->decoded_content, '... the answer' );
+  chat( $lport, 'alpha', bearer => $PROXY_KEY );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{api_key}, $KEY_NEW, '... alpha uses the patched key' );
+  is( $lk->admin->stack->config->data->{models}{alpha}{api_key}, $KEY_NEW, '... in the merged setup' );
+  is( $lk->admin->_boot_stack->config->data->{models}{alpha}{api_key}, $KEY_ONE, '... never in the file layer' );
+  chat( $lport, 'shared', bearer => $PROXY_KEY );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{model}, 'shared-push', '... and the push layer is kept' );
+
+  # A new PUT replaces the push layer, not the file.
+  $resp = send_req( $lport, PUT => '/knarr/admin/config', bearer => $ADMIN_KEY,
+    body => { models => { only => { engine => 'TestKnarrAdmin', model => 'only-push', api_key => $KEY_TWO } } } );
+  is( decode($resp)->{models}, [ 'alpha', 'only', 'shared' ], 'a second PUT replaces the first push, not the file' );
+  chat( $lport, 'alpha', bearer => $PROXY_KEY );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{api_key}, $KEY_ONE, '... alpha is back on the file key' );
+  ok( !$lk->tracing, '... and without langfuse in the push, tracing is the start one again' );
+
+  # DELETE drops the push layer, back to the file.
+  send_req( $lport, PUT => '/knarr/admin/config', bearer => $ADMIN_KEY, body => {
+    models => { extra => { engine => 'TestKnarrAdmin', model => 'extra-push', api_key => $KEY_TWO } } } );
+  $resp = send_req( $lport, DELETE => '/knarr/admin/config', bearer => $ADMIN_KEY );
+  $s = decode($resp);
+  is( [ $s->{layers}, $s->{models}, $s->{configured} ], [ ['env'], [ 'alpha', 'shared' ], T() ],
+    'DELETE: the file setup stays, configured' );
+  chat( $lport, 'shared', bearer => $PROXY_KEY );
+  is( $LangerthaX::Engine::TestKnarrAdmin::chats[-1]{model}, 'shared-file', '... the file model serves again' );
 }
 
 # --- The admin routes are not published ---

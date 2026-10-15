@@ -7,7 +7,7 @@ Revision history for Langertha-Knarr
       /knarr/admin/config replaces models, default, passthrough,
       proxy_api_key and the other runtime keys from a JSON body, PATCH
       /knarr/admin/keys swaps API keys per model name, GET
-      /knarr/admin/status reports generation, time, source and model names
+      /knarr/admin/status reports generation, time, layers and model names
       (never a key), DELETE /knarr/admin/config drops the delivered setup.
       A pushed setup may not use api_key_env (400): keys come literally.
       A delivery is validated and every engine built before anything
@@ -17,9 +17,12 @@ Revision history for Langertha-Knarr
       the proxy key) opens only these routes and is refused with 401 on every
       other; without it the routes are 404. Wrong keys lock the client
       address out with growing pauses (429), bodies are limited to 1 MiB
-      (413), error messages never echo what was sent. ram_only /
-      KNARR_RAM_ONLY / knarr start --ram-only starts without models and
-      answers 503 until the first delivery. With an admin key Knarr runs one
+      (413), error messages never echo what was sent. remote_config /
+      KNARR_REMOTE_CONFIG / knarr start --remote-config allows a start
+      without models: 503 until the first delivery. The config file is
+      always in effect and a delivered setup lies over it as a layer in
+      memory (same model name: the delivery wins; DELETE falls back to the
+      file); a delivered langfuse section is accepted, logging is not. With an admin key Knarr runs one
       worker (-w is set to 1 with a warning), and under a prefork PSGI server
       the admin routes answer 501. New modules Langertha::Knarr::Admin and
       Langertha::Knarr::Stack; knarr start builds its handler chain through

@@ -62,7 +62,7 @@ sub execute {
   print "  Proxy auth: ", ($config->has_proxy_api_key && $config->proxy_api_key ? 'enabled' : 'disabled'), "\n";
   # Whether, never which key (k75)
   print "  Admin routes: ", ($config->has_admin_key ? 'enabled' : 'disabled'), "\n";
-  print "  RAM only: ", ($config->ram_only ? 'yes (setup by PUT /knarr/admin/config)' : 'no'), "\n";
+  print "  Remote config: ", ($config->remote_config ? 'yes (a setup may arrive by PUT /knarr/admin/config)' : 'no'), "\n";
 
   # Check Langfuse
   my $lf = $config->langfuse;

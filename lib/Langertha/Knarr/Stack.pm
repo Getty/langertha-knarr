@@ -29,6 +29,7 @@ use Langertha::Knarr::Handler::RequestLog;
 
     # Same loop, tracing and request log, a new config, fresh engines:
     my $next = $stack->with_config($new_config);
+    my $lf   = $stack->with_config( $new_config, tracing => $other_tracing );
 
 =head1 DESCRIPTION
 
@@ -89,10 +90,12 @@ when none is set.
 =method with_config
 
     my $next = $stack->with_config($config);
+    my $next = $stack->with_config( $config, tracing => $tracing_or_undef );
 
 A new stack for C<$config> with the same L</loop>, L</tracing> and
 L</request_log>. Nothing of this stack's router, engines or passthrough is
-reused.
+reused. A C<tracing> argument (an enabled tracing, or C<undef> for none)
+replaces the tracing: a delivered C<langfuse> section brings its own.
 
 =method build
 
@@ -192,11 +195,11 @@ sub auth_token {
 }
 
 sub with_config {
-  my ($self, $config) = @_;
+  my ($self, $config, %over) = @_;
   return ref($self)->new(
     config      => $config,
     loop        => $self->loop,
-    tracing     => $self->tracing,
+    tracing     => ( exists $over{tracing} ? $over{tracing} : $self->tracing ),
     request_log => $self->request_log,
   );
 }

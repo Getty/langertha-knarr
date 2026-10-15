@@ -4,12 +4,12 @@ use Test2::V0;
 use Path::Tiny;
 use YAML::PP;
 
-# k75: knarr start --ram-only (and KNARR_RAM_ONLY) starts without a config
+# k75: knarr start --remote-config (and KNARR_REMOTE_CONFIG) starts without a config
 # file and without models, with the admin routes on; an admin key forces one
 # worker; the banner never shows a key. Knarr::run is replaced, so nothing
 # listens, and exit is turned into a die to see the refusals.
 
-BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_RAM_ONLY KNARR_WORKERS KNARR_LOG_FILE KNARR_LOG_DIR )} }
+BEGIN { delete @ENV{qw( KNARR_API_KEY KNARR_ADMIN_KEY KNARR_REMOTE_CONFIG KNARR_WORKERS KNARR_LOG_FILE KNARR_LOG_DIR )} }
 BEGIN { *CORE::GLOBAL::exit = sub { die "EXIT $_[0]\n" } }
 
 BEGIN {
@@ -48,37 +48,37 @@ sub start {
 
 my $missing = $tmp->child('none.yaml')->stringify;
 
-# --- --ram-only without a file ---
+# --- --remote-config without a file ---
 {
   local $ENV{KNARR_ADMIN_KEY} = $ADMIN;
-  my ( $err, $died ) = start( $missing, ram_only => 1 );
-  is( $died, '', 'knarr start --ram-only starts without a config file' );
+  my ( $err, $died ) = start( $missing, remote_config => 1 );
+  is( $died, '', 'knarr start --remote-config starts without a config file' );
   ok( $ran, '... and runs a Knarr' );
   ok( $ran->admin, '... with the admin routes' );
   ok( !$ran->admin->configured, '... and no setup' );
-  ok( $ran->admin->ram_only, '... RAM only' );
-  like( $err, qr/Config: RAM only, no config file/, 'the banner says RAM only' );
+  ok( $ran->admin->remote_config, '... remote_config' );
+  like( $err, qr/Config: remote config, no config file/, 'the banner says remote config' );
   like( $err, qr/Admin routes: enabled/, '... and that the admin routes are on' );
   unlike( $err, qr/\Q$ADMIN\E/, '... never the key' );
 }
 
-# --- KNARR_RAM_ONLY wins over --from-env (the Docker default) ---
+# --- KNARR_REMOTE_CONFIG wins over --from-env (the Docker default) ---
 {
   local $ENV{KNARR_ADMIN_KEY} = $ADMIN;
-  local $ENV{KNARR_RAM_ONLY}  = 1;
+  local $ENV{KNARR_REMOTE_CONFIG}  = 1;
   local $ENV{OPENAI_API_KEY}  = 'sk-from-env-not-used-0001';
   my ( $err, $died ) = start( $missing, from_env => 1 );
-  is( $died, '', 'KNARR_RAM_ONLY with --from-env starts' );
+  is( $died, '', 'KNARR_REMOTE_CONFIG with --from-env starts' );
   like( $err, qr/--from-env ignored/, '... saying --from-env is ignored' );
   is( $ran->router->config->models, {}, '... with no models from the environment' );
   unlike( $err, qr/sk-from-env-not-used/, '... and no key in the banner' );
 }
 
-# --- No admin key, no RAM only ---
+# --- No admin key, remote_config on ---
 {
-  my ( $err, $died ) = start( $missing, ram_only => 1 );
-  is( $died, "EXIT 1\n", 'RAM only without an admin key: refused' );
-  like( $err, qr/ram_only needs an admin_key/, '... saying why' );
+  my ( $err, $died ) = start( $missing, remote_config => 1 );
+  is( $died, "EXIT 1\n", 'remote_config without an admin key: refused' );
+  like( $err, qr/remote_config needs an admin_key/, '... saying why' );
   ok( !$ran, '... before anything runs' );
 }
 
@@ -92,19 +92,36 @@ my $missing = $tmp->child('none.yaml')->stringify;
   is( $ran->workers, 1, '... with one worker' );
   like( $err, qr/workers forced to 1 \(was 3\)/, '... saying so' );
   ok( $ran->admin->configured, '... configured from the file' );
-  is( $ran->admin->source, 'file', '... source file' );
+  is( $ran->admin->status->{layers}, ['file'], '... layer file' );
   unlike( $err, qr/\Q$ADMIN\E|sk-file-key/, 'no key in the banner' );
 }
 
-# --- A RAM-only config file must not carry the setup ---
+# --- remote_config with a config file that holds models: always in effect ---
 {
   local $ENV{KNARR_ADMIN_KEY} = $ADMIN;
   my $file = $tmp->child('r.yaml');
-  $file->spew_utf8( YAML::PP->new->dump_string({ ram_only => 1, models => { m => { engine => 'OpenAI', api_key => 'sk-file-key-000002' } } }) );
+  $file->spew_utf8( YAML::PP->new->dump_string({ remote_config => 1, proxy_api_key => 'proxy-from-file-0001',
+    models => { m => { engine => 'OpenAI', api_key => 'sk-file-key-000002' } } }) );
   my ( $err, $died ) = start("$file");
-  is( $died, "EXIT 1\n", 'ram_only with models in the file: refused' );
-  like( $err, qr/ram_only: models must not be in the config file/, '... saying why' );
-  unlike( $err, qr/sk-file-key/, '... without the key' );
+  is( $died, '', 'remote_config with models in the file: starts' );
+  ok( $ran->admin->configured, '... configured from the file at once' );
+  is( $ran->admin->status->{layers}, ['file'], '... the file is the only layer' );
+  is( $ran->admin->status->{models}, ['m'], '... with its model' );
+  ok( $ran->admin->remote_config, '... remote_config on' );
+  unlike( $err, qr/sk-file-key|proxy-from-file/, '... without a key in the banner' );
+  unlike( $err, qr/requests answer 503/, '... and no 503 notice' );
+  like( $err, qr/Remote config: on/, '... saying a push layers over the file' );
+}
+
+# --- remote_config, a file without models: 503 until the push ---
+{
+  local $ENV{KNARR_ADMIN_KEY} = $ADMIN;
+  my $file = $tmp->child('rn.yaml');
+  $file->spew_utf8( YAML::PP->new->dump_string({ remote_config => 1, listen => ['127.0.0.1:1'] }) );
+  my ( $err, $died ) = start("$file");
+  is( $died, '', 'remote_config, file without models: starts' );
+  ok( !$ran->admin->configured, '... not configured' );
+  is( $ran->admin->status->{layers}, ['file'], '... the file is a layer, holding no setup' );
 }
 
 # --- --from-env: the admin key is still checked ---

@@ -542,36 +542,39 @@ The shortest L</admin_key> Knarr accepts: C<16> characters.
 
 =cut
 
-has ram_only => (
+has remote_config => (
   is      => 'lazy',
-  builder => '_build_ram_only',
+  builder => '_build_remote_config',
 );
 
-=attr ram_only
+=attr remote_config
 
-Boolean, default C<0>. When true, Knarr takes its routing setup (the
-L</runtime_keys>) only from C<PUT /knarr/admin/config> and holds it in
-memory: it starts without models and answers every other request with C<503>
-until the setup arrives, and a restart forgets it. Needs an L</admin_key>.
-The config file, if any, may then only hold process settings (C<listen>,
-C<logging>, C<langfuse>, ...); L</validate> reports a runtime key in it.
-Falls back to C<KNARR_RAM_ONLY>; C<knarr start --ram-only> sets it too.
+Boolean, default C<0>. Lets Knarr start without any model: it then answers
+every request except the admin routes with C<503> (C<not configured>) until
+a central service delivers the routing setup with C<PUT
+/knarr/admin/config>. What is in the config file (models, default engine,
+passthrough, proxy key, ...) is always in effect, with or without
+C<remote_config>; a delivered setup lies as a layer over it (same model
+name: the delivered one wins) and is held in memory only, so a restart
+forgets it. Needs an L</admin_key>. Falls back to
+C<KNARR_REMOTE_CONFIG>; C<knarr start --remote-config> sets it too.
 
 =cut
 
-sub _build_ram_only {
+sub _build_remote_config {
   my ($self) = @_;
-  my $value = $self->data->{ram_only};
-  $value = _strip_quotes($ENV{KNARR_RAM_ONLY}) unless defined $value;
+  my $value = $self->data->{remote_config};
+  $value = _strip_quotes($ENV{KNARR_REMOTE_CONFIG}) unless defined $value;
   return 0 unless defined $value && length $value;
   return !$value || $value =~ /\A(?:false|no|off)\z/i ? 0 : 1;
 }
 
-# What an admin push may set (k75): the routing setup. Everything else is
-# bound when the process starts.
+# What an admin push may set (k75): the routing setup and the Langfuse
+# tracing. Everything else is bound when the process starts.
 my @RUNTIME_KEYS = qw(
   models default passthrough auto_discover proxy_api_key
   upstream_timeout upstream_stall_timeout probe_capabilities probe_timeout
+  langfuse
 );
 
 sub runtime_keys { @RUNTIME_KEYS }
@@ -582,8 +585,10 @@ sub runtime_keys { @RUNTIME_KEYS }
 
 The top-level keys an admin push (C<PUT /knarr/admin/config>) may set:
 C<models>, C<default>, C<passthrough>, C<auto_discover>, C<proxy_api_key>,
-C<upstream_timeout>, C<upstream_stall_timeout>, C<probe_capabilities> and
-C<probe_timeout>. Every other key takes effect only at start.
+C<upstream_timeout>, C<upstream_stall_timeout>, C<probe_capabilities>,
+C<probe_timeout> and C<langfuse> (validated like in the file). Every other
+key takes effect only at start; C<logging> in particular never arrives by
+push.
 
 =cut
 
@@ -600,14 +605,9 @@ sub admin_errors {
   elsif ( defined $self->admin_key && ref $self->admin_key ) {
     push @errors, "admin_key must be a string";
   }
-  return @errors unless $self->ram_only;
-  push @errors, "ram_only needs an admin_key (or KNARR_ADMIN_KEY): without one"
-    . " the setup can never be delivered" unless $self->has_admin_key;
-  if ( $self->has_file ) {
-    my @set = grep { exists $self->data->{$_} } @RUNTIME_KEYS;
-    push @errors, "ram_only: ".join( ', ', @set )." must not be in the config file;"
-      . " the setup comes from PUT /knarr/admin/config" if @set;
-  }
+  push @errors, "remote_config needs an admin_key (or KNARR_ADMIN_KEY): without one"
+    . " the setup can never be delivered"
+    if $self->remote_config && !$self->has_admin_key;
   return @errors;
 }
 
@@ -615,10 +615,9 @@ sub admin_errors {
 
     my @errors = $config->admin_errors;
 
-The part of L</validate> about L</admin_key> and L</ram_only>: the key's
-length, that it differs from L</proxy_api_key>, that L</ram_only> has a key,
-and that a config file under L</ram_only> holds none of the
-L</runtime_keys>. The messages never contain a key. C<knarr start> runs it
+The part of L</validate> about L</admin_key> and L</remote_config>: the
+key's length, that it differs from L</proxy_api_key>, and that
+L</remote_config> has a key. The messages never contain a key. C<knarr start> runs it
 for every config, also one built by C<--from-env>.
 
 =cut
@@ -961,7 +960,7 @@ section croaks. Otherwise it checks that every model entry is a
 mapping with an
 C<engine> key, that the default engine (if set) has an C<engine> key,
 that at least one model or default engine is configured (not under
-L</ram_only>), that a model's
+L</remote_config>), that a model's
 C<context_size> (and the default engine's), when set, is a positive integer, and its
 C<user_agent_timeout> a non-negative number, and that
 L</ollama_compat_version>, when set, is three dot-separated numbers, and that
@@ -1019,8 +1018,8 @@ sub validate {
     push @errors, "Default: api_key must be a string" if ref $default->{api_key};
   }
 
-  # Under ram_only the models arrive later, by admin push (k75).
-  unless (keys %$models || $self->default_engine || $self->ram_only) {
+  # Under remote_config the models may arrive later, by admin push (k75).
+  unless (keys %$models || $self->default_engine || $self->remote_config) {
     push @errors, "No models configured and no default engine set";
   }
 

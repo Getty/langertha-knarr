@@ -494,29 +494,37 @@ Anthropic key in `x-api-key`.
 ## Admin API: setup and keys in memory only
 
 A central service can hand Knarr its whole routing setup — models, default
-engine, passthrough upstreams, proxy key and provider keys — as JSON, swap
-keys later and take the setup back. Knarr keeps it in memory only: nothing
-is written to a file, a cache or a log. If Knarr restarts, the setup is
-gone and the central service delivers it again.
+engine, passthrough upstreams, proxy key, provider keys and the Langfuse
+section — as JSON, swap keys later and take the setup back. What arrives
+lies as a layer over Knarr's own setup (config file or environment) and is
+kept in memory only: nothing is written to a file, a cache or a log. If
+Knarr restarts, the delivered layer is gone and the central service
+delivers it again.
 
 ```bash
 # .env -- a separate key, at least 16 characters, not the proxy key
 KNARR_ADMIN_KEY=$(openssl rand -hex 32)
-KNARR_RAM_ONLY=1        # optional: start with no setup at all
+KNARR_REMOTE_CONFIG=1   # optional: allow a start without any model
 ```
 
-With `KNARR_RAM_ONLY=1` (or `knarr start --ram-only`, `ram_only: true`)
-Knarr starts without models, needs no config file and ignores
-`--from-env`; every request answers `503` ("not configured") until the
-first delivery. Without it, Knarr starts from its config file or
-environment as usual and a delivery replaces that.
+What the config file holds (models, default engine, passthrough, proxy key,
+…) is always in effect. A delivery lies over it: a pushed model replaces the
+file's model of the same name, the file's other models stay, and a pushed
+`default`, `passthrough` or plain key (`proxy_api_key`, …) wins over the
+file's. A new `PUT` replaces the previous delivery, never the file;
+`DELETE` drops the delivery and falls back to the file.
+
+With `KNARR_REMOTE_CONFIG=1` (or `knarr start --remote-config`,
+`remote_config: true`) Knarr may also start without any model, needs no
+config file and then ignores `--from-env`; every request answers `503`
+("not configured") until the first delivery.
 
 | Route | Does |
 |---|---|
-| `PUT /knarr/admin/config` | replaces the setup: `models`, `default`, `passthrough`, `auto_discover`, `proxy_api_key`, `upstream_timeout`, `upstream_stall_timeout`, `probe_capabilities`, `probe_timeout`, structured as in `knarr.yaml` |
-| `PATCH /knarr/admin/keys` | swaps keys only: `{"<model name>": "<key>", "default": "<key>"}` |
-| `GET /knarr/admin/status` | generation, time, source (`ram`, `file`, `env`, `none`), model names — never a key |
-| `DELETE /knarr/admin/config` | drops the delivered setup: back to the start setup, or to none under RAM-only |
+| `PUT /knarr/admin/config` | replaces the setup: `models`, `default`, `passthrough`, `auto_discover`, `proxy_api_key`, `upstream_timeout`, `upstream_stall_timeout`, `probe_capabilities`, `probe_timeout`, `langfuse`, structured as in `knarr.yaml`; sets the delivered layer |
+| `PATCH /knarr/admin/keys` | swaps keys only, for models of either layer: `{"<model name>": "<key>", "default": "<key>"}`; the key lands in the delivered layer, never the file's |
+| `GET /knarr/admin/status` | generation, time, layers (`file` or `env`, then `push`), model names — never a key |
+| `DELETE /knarr/admin/config` | drops the delivered layer: back to the start setup, or to none when that holds no models |
 
 ```bash
 curl -X PUT http://knarr:8080/knarr/admin/config \
@@ -534,8 +542,10 @@ curl -X PATCH http://knarr:8080/knarr/admin/keys \
   stays as it was. A good one goes live in one step, under the next
   generation, with a fresh engine cache; requests and streams already
   running finish with their old engine.
-- Settings that bind at start (`listen`, `workers`, `logging`, `langfuse`,
-  `admin_key`, …) cannot be delivered.
+- Settings that bind at start (`listen`, `workers`, `logging`, `public_url`,
+  `a2a`, `admin_key`, …) cannot be delivered. A delivered `langfuse`
+  section (keys never appear in an answer or the log) is merged key by key
+  over the file's; `api_key_env` is refused in a delivery.
 - The admin key opens only these routes (as `Authorization: Bearer`, compared
   in constant time); the proxy key never opens them, and a request that
   shows the admin key anywhere else gets `401`. Without `KNARR_ADMIN_KEY`
