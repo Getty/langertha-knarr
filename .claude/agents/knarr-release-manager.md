@@ -5,6 +5,7 @@ model: sonnet
 briefing:
   skills:
     - getty-git-commit-style
+    - getty-git-usage
     - getty-perl-release-author-getty
     - perl-release-dist-ini
     - kanban-issues-karr-ticket

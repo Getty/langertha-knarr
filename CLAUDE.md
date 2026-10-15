@@ -12,6 +12,7 @@ principle and lane are in `.claude/rules/knarr-rules.md`.
 | Task | Agent |
 |---|---|
 | Implement / refactor / debug behavior-relevant code | `knarr-worker` (default) |
+| CLI, Config, Router, Tracing, RequestLog (the Moo side) | `knarr-cli-worker` |
 | Write/extend tests | `knarr-test-writer` |
 | Commits, `Changes`, card → done, pre-release audit | `knarr-release-manager` |
 
