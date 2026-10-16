@@ -1,0 +1,31 @@
+title: Anthropic and Ollama clients get their own error shape on 401 and on a backend failure
+skip: >-
+  Knarr finding: the 401 (Knarr::_unauthorized, also used by PSGI) and the generic
+  500 of a failed backend (Knarr::_handle_chat on_fail, the sync catch, the stream
+  paths) are always {"error":{"message":...}}. Only 404/503/504 go through the
+  protocol's format_error_response. An Anthropic SDK reads error.type and gets undef;
+  an Ollama client expects "error" to be a string. Needs the protocol threaded into
+  _unauthorized and the 500 sites (native + PSGI), so it is a design decision, not a
+  one-line fix. Enable once Knarr answers 401/500 through the protocol.
+setup:
+  config:
+    proxy_api_key: sk-proxy-secret-0001
+    models:
+      broken: { engine: KnarrVirtual, model: v-broken }
+  backends:
+    v-broken:
+      rules:
+        "known": { answer: ok }
+steps:
+  - chat: { protocol: anthropic, model: broken, prompt: x }
+    expect:
+      status: 401
+      json: { type: error, 'error.type': authentication_error }
+  - chat: { protocol: anthropic, model: broken, prompt: unknown prompt, xkey: sk-proxy-secret-0001 }
+    expect:
+      status: 500
+      json: { type: error, 'error.type': api_error }
+  - chat: { protocol: ollama, model: broken, prompt: unknown prompt, bearer: sk-proxy-secret-0001 }
+    expect:
+      status: 500
+      body_like: '^\{"error":"'

@@ -1,0 +1,4 @@
+title: Token usage of the backend reaches the client answer and the request log
+skip: Langertha::Engine::Virtual answers chat completions without a usage block, so there is no usage to carry. Usage routing is covered with fakes in t/27_usage_routing.t and t/46_stream_usage.t; enable when Virtual can report usage.
+setup: {}
+steps: []

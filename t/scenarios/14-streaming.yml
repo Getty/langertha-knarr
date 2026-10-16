@@ -1,0 +1,4 @@
+title: Token-by-token streaming from the backend (OpenAI, Anthropic, Ollama end markers)
+skip: Langertha::Engine::Virtual cannot stream (no chat_stream_realtime_f), so the native streaming path of Handler::Router is not reachable with it. Covered with Handler::Code fakes in t/40_streaming_live.t and t/41_streaming_protocols_live.t; enable when Virtual streams.
+setup: {}
+steps: []

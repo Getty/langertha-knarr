@@ -1,6 +1,12 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Tests: core-feature scenario suite (t/200_core_scenarios.t,
+      t/scenarios/*.yml) running a real Knarr over loopback against
+      Langertha::Engine::Virtual: protocols, tool calls, routing, proxy key,
+      backend errors, admin remote_config, request log. Skips without
+      Langertha::Engine::Virtual.
+
     - Fix: the proxy key is compared in constant time (k76), as the admin key.
 
     - Admin routes to deliver the routing setup at runtime, held in memory
