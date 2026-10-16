@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-10-16T00:05:58Z
+claimed_by: ram-config
+class: standard
+completed: 2026-10-15T18:05:35Z
+created: 2026-10-15T04:25:53Z
+id: 75
+priority: high
+started: 2026-10-15T05:11:56Z
+status: done
+title: RAM-only-Konfiguration per Admin-Key (Zentrale liefert Setup/Keys per JSON)
+updated: 2026-10-16T00:05:58Z
+---
+
+2026-10-15 ENTSCHEIDUNG Getty (Runde 2, bindend): Admin-Key nicht per API rotierbar (Anmerkung: wichtig ist, dass der Admin-Key die API-Keys NICHT auslesen kann - kein Read-Endpunkt fuer Keys, status ohne Keys); RAM-only erzwingt workers=1 mit klarer Meldung; Start ohne Setup -> 503 not configured; zeitkonstanter Vergleich + Backoff nach Fehlversuchen.
+
+2026-10-15 05:11 Commit 7231fcf (ram-config, lokal, kein Push). Tests: Vollsuite 78 Dateien / 4714 Tests PASS; t/100-103 rot gegen altes lib. dzil build nicht gelaufen. Worker-Entscheidung: bei gesetztem Admin-Key workers=1 erzwungen (knarr start warnt; Knarr->new bricht bei admin + workers>1 ab; PSGI-multiprocess -> 501), auch im Datei-Modus; Grund: Push erreicht nur einen Prefork-Worker, Broadcast ueber den Supervisor waere eigenes Projekt. OFFEN an Getty: (1) Push-Whitelist models default passthrough auto_discover proxy_api_key upstream_timeout upstream_stall_timeout probe_capabilities probe_timeout; langfuse/listen/logging/public_url/a2a -> 400 - soll Zentrale Langfuse-Keys liefern duerfen? (2) ram_only + Config-Datei mit models/proxy_api_key: Start bricht ab oder ignorieren? (3) Admin-Key-Mindestlaenge 16. (4) PATCH keys: Name 'default' = Default-Engine, bei Modell gleichen Namens 400; Proxy-Key-Wechsel nur per PUT. (5) status.source ram/file/env/none; DELETE im Datei-Modus -> Startstand. (6) unkonfiguriert: alle Nicht-Admin-Routen 503 (auch Agent-Card, /api/version) nach Proxy-Key-Pruefung. (7) Sperre pro Peer-IP, X-Forwarded-For ignoriert -> hinter Reverse-Proxy sperrt Angreifer ggf. die Zentrale. (8) Admin-Key = volle Kontrolle (api_key_env/url im Push lenkt Env-Keys an beliebiges Ziel), api_key_env nicht verboten. Grenzen: Body-Limit nativ greift erst nach Einlesen (413 danach, alter Stand); kleines Notifier-Leck pro Push; Dumper des Knarr-Objekts zeigt auth_token/Provider-Keys (wie vorher).
+
+2026-10-15 05:11 Commit 7231fcf, im Review
+
+2026-10-15 Koordinator: gemerged (7231fcf + Fix: api_key_env im Push abgelehnt); Suite 78 Dateien/4717 gruen. OFFEN fuer Getty: (1) Whitelist pushbarer Keys: langfuse/listen/logging/public_url/a2a -> 400, soll Zentrale Langfuse-Keys liefern duerfen? (2) ram_only + Config-Datei mit models: abbrechen oder ignorieren? (7) Sperre pro Peer-IP, X-Forwarded-For ignoriert: hinter Reverse-Proxy kann ein Angreifer die Zentrale bis 300 s aussperren. Nicht verifiziert: dzil build, echter Mehrprozess-/Docker-Lauf.
+
+2026-10-15 ENTSCHEIDUNG Getty (Runde 3, bindend): (1) langfuse darf per Push kommen, logging NICHT. (2) Config-Datei mit Modellen neben Push ist normal: was in der Datei steht, ist immer da (ram_only hat damit nichts zu tun); der Push liegt als Schicht darueber (ergaenzt/ueberschreibt), nur im RAM. (3) Umbenennen: ram_only -> remote_config (KNARR_REMOTE_CONFIG, --remote-config) o.ae.; dass Gepushtes nur im RAM liegt ist immer so, nicht ein Modus.
+
+Committed 87cd026 on remote-config. prove -lr -j3 t: 78 files, 4764 tests, PASS. Decisions: configured = start layer has models/default/passthrough, or remote_config off; --from-env with remote_config and no file still ignored (Docker CMD); empty push with empty start layer -> 400; an old ram_only: in YAML is silently ignored; langfuse.url in a push can redirect traces to any target (under the admin key = full control); langfuse merged key by key, default/passthrough/scalars overwritten whole; PATCH copies the file model with the new api_key into the push layer (api_key_env dropped).
+
+2026-10-15 Koordinator: Runde 3 gemerged (87cd026), Suite 78 Dateien/4764 gruen. Hinweis: langfuse.url im Push lenkt Traces (Prompts) an ein beliebiges Ziel - unter dem Admin-Key Teil der vollen Kontrolle; falls unerwuenscht, url nur aus Datei zulassen.
+
+2026-10-16 ENTSCHEIDUNG Getty: langfuse.url im Push erlaubt, aber nur zusammen mit eigenen public_key/secret_key (sonst gingen Datei-Keys an die gepushte Adresse). Commit nach 9b61019, Suite 78 Dateien/4767 gruen.
