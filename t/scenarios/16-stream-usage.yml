@@ -1,0 +1,38 @@
+title: Token usage of a streamed backend answer reaches the client stream and the request log
+skip: >-
+  Knarr finding: a routed stream never asks the backend for its usage. The OpenAI
+  wire reports it only for stream_options.include_usage, and Handler::Engine
+  (Request::chat_f_args) does not send it, so the backend streams without usage
+  (Engine::Virtual, like OpenAI, then emits none): the client's stream carries 0 / no
+  usage chunk, Anthropic message_delta says output_tokens 0, the Ollama done line has no
+  counts, and the request log and Langfuse generation of a streamed request have no
+  usage -- even though Stream, the protocols and the decorators carry it correctly once
+  a chunk has it (t/46_stream_usage.t, with fakes that always send it). Needs
+  stream_options.include_usage on every routed stream to an OpenAI-wire engine
+  (capability-gated, and whether core chat_stream_request forwards it is a Langertha
+  question), so it is a design decision across both repos, not a one-line fix. Enable
+  once a routed stream carries the backend's usage.
+setup:
+  request_log: true
+  config:
+    models:
+      counted: { engine: KnarrVirtual, model: v-counted }
+  backends:
+    v-counted:
+      engine_args: { stream_chunk_size: 4 }
+      rules:
+        "Hello": { answer: "Hi there friend", usage: { prompt_tokens: 11, completion_tokens: 7 } }
+steps:
+  - chat: { protocol: openai, model: counted, prompt: Hello, stream: true, extra: { stream_options: { include_usage: true } } }
+    expect: { text: Hi there friend, ended: 1, usage: { input: 11, output: 7 } }
+  - chat: { protocol: anthropic, model: counted, prompt: Hello, stream: true }
+    expect: { text: Hi there friend, ended: 1, usage: { input: 11, output: 7 } }
+  - chat: { protocol: ollama, model: counted, prompt: Hello, stream: true }
+    expect:
+      text: Hi there friend
+      ended: 1
+      usage: { input: 11, output: 7 }
+      log:
+        - { model: counted, format: openai, stream: true, 'usage.input_tokens': 11, 'usage.output_tokens': 7 }
+        - { model: counted, format: anthropic, stream: true, 'usage.input_tokens': 11, 'usage.output_tokens': 7 }
+        - { model: counted, format: ollama, stream: true, 'usage.input_tokens': 11, 'usage.output_tokens': 7 }

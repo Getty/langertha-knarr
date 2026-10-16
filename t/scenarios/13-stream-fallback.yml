@@ -4,7 +4,7 @@ setup:
     models:
       plain: { engine: KnarrVirtual, model: v-plain }
   backends:
-    v-plain: { fallback: { answer: "whole answer" } }
+    v-plain: { engine_args: { no_streaming: 1 }, fallback: { answer: "whole answer" } }
 steps:
   - chat: { protocol: openai, model: plain, prompt: x, stream: true }
     expect:

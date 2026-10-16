@@ -39,7 +39,10 @@ C<LangerthaX::Engine::KnarrVirtual>, a L<Langertha::Engine::Virtual> that
 takes its rules from the C<backends> map by the model it was built for (the
 model the config names under C<model:>, else the name the client asked for;
 C<*> is the fallback entry). A backend entry is the rules-file format of the
-Virtual engine: C<rules>, C<after>, C<fallback> or C<script>. No network, no
+Virtual engine: C<rules>, C<after>, C<fallback> or C<script>, plus
+C<engine_args>, constructor arguments of the engine itself
+(C<stream_chunk_size>, C<default_usage>, C<no_streaming> for an engine that
+cannot stream). No network, no
 key. The C<engine:> of a model in the config is written C<KnarrVirtual>.
 
 =cut
@@ -59,10 +62,19 @@ if (virtual_available()) {
     my $model = $args->{model} // '*';
     my $spec  = $BACKENDS{$model} // $BACKENDS{'*'}
       or Carp::croak("Test::Knarr::Virtual: no backend for model '$model'");
+    $spec = { %$spec };
+    my $engine_args = delete $spec->{engine_args} // {};
     my $file = Path::Tiny->tempfile( SUFFIX => '.yml' );
     $file->spew_utf8( YAML::PP->new->dump_string($spec) );
     $Test::Knarr::Virtual::KEEP{ $file->stringify } = $file;
-    return $class->$orig( %$args, langfuse_enabled => 0, rules_file => $file->stringify );
+    return $class->$orig( %$engine_args, %$args, langfuse_enabled => 0, rules_file => $file->stringify );
+  };
+  # engine_args: { no_streaming: 1 } = an engine that cannot stream (supports('streaming') is false)
+  has no_streaming => ( is => 'ro', isa => 'Bool', default => 0 );
+  around supports => sub {
+    my ( $orig, $self, $cap, @rest ) = @_;
+    return 0 if $self->no_streaming && $cap eq 'streaming';
+    return $self->$orig( $cap, @rest );
   };
   after BUILD => sub { my ( $self, $args ) = @_; push @{ $ENGINES{ $args->{model} // '*' } }, $self };
   __PACKAGE__->meta->make_immutable;
@@ -180,6 +192,85 @@ sub _tools_for {
   } } @$tools ] );
 }
 
+# The token counts of an answer as { input, output }; undef when it has none.
+sub _usage {
+  my ( $u, $in, $out ) = @_;
+  return undef unless ref $u eq 'HASH' && ( defined $u->{$in} || defined $u->{$out} );
+  return { input => $u->{$in} // 0, output => $u->{$out} // 0 };
+}
+
+# A streamed answer read frame by frame: the text, the number of content
+# frames, the finish reason, the token usage if a frame carries one, and
+# whether the stream ends with the protocol's exact end marker.
+sub _sse_frames {
+  my ( $raw ) = @_;
+  return map {
+    my %f;
+    for my $line ( split /\n/ ) {
+      $f{event} = $1 if $line =~ /\Aevent: (.*)/;
+      $f{data} = ( $f{data} // '' ).$1 if $line =~ /\Adata: (.*)/;
+    }
+    \%f;
+  } grep { length } split /\n\n/, $raw;
+}
+
+my %STREAM_READ = (
+  openai => sub { my ( $raw ) = @_;
+    my @f = _sse_frames($raw);
+    my @calls;
+    my %r = ( text => '', chunks => 0, ended => ( @f && ( $f[-1]{data} // '' ) eq '[DONE]' && $raw =~ /data: \[DONE\]\n\n\z/ ? 1 : 0 ) );
+    for my $f ( grep { ( $_->{data} // '[DONE]' ) ne '[DONE]' } @f ) {
+      my $d = $json->decode( $f->{data} );
+      my $c = $d->{choices}[0] // {};
+      if ( length( $c->{delta}{content} // '' ) ) { $r{text} .= $c->{delta}{content}; $r{chunks}++ }
+      $r{finish_reason} = $c->{finish_reason} if defined $c->{finish_reason};
+      $r{usage} = _usage( $d->{usage}, qw( prompt_tokens completion_tokens ) ) if $d->{usage};
+      for my $t ( @{ $c->{delta}{tool_calls} // [] } ) {
+        my $call = $calls[ $t->{index} // 0 ] //= { name => '', json => '' };
+        $call->{name} .= $t->{function}{name} // '';
+        $call->{json} .= $t->{function}{arguments} // '';
+      }
+    }
+    $r{tool_calls} = [ map { { name => $_->{name}, args => $json->decode( $_->{json} ) } } @calls ];
+    return \%r },
+  anthropic => sub { my ( $raw ) = @_;
+    my @f = _sse_frames($raw);
+    my @calls;
+    my %r = ( text => '', chunks => 0, ended => ( @f && ( $f[-1]{event} // '' ) eq 'message_stop' && $raw =~ /event: message_stop\ndata: [^\n]*\n\n\z/ ? 1 : 0 ) );
+    for my $f (@f) {
+      my $d = $json->decode( $f->{data} // '{}' );
+      if ( ( $f->{event} // '' ) eq 'content_block_delta' && length( $d->{delta}{text} // '' ) ) {
+        $r{text} .= $d->{delta}{text}; $r{chunks}++;
+      }
+ push @calls, { name => $d->{content_block}{name}, json => '' }
+        if ( $f->{event} // '' ) eq 'content_block_start' && ( $d->{content_block}{type} // '' ) eq 'tool_use';
+      $calls[-1]{json} .= $d->{delta}{partial_json}
+        if ( $f->{event} // '' ) eq 'content_block_delta' && defined $d->{delta}{partial_json};
+      $r{finish_reason} = $d->{delta}{stop_reason} if ( $f->{event} // '' ) eq 'message_delta' && defined $d->{delta}{stop_reason};
+      if ( ( $f->{event} // '' ) =~ /\Amessage_(?:start|delta)\z/ ) {
+        my $u = $d->{usage} // $d->{message}{usage};
+        my $n = _usage( $u, qw( input_tokens output_tokens ) );
+        $r{usage} = $n if $n && ( $n->{input} || $n->{output} );
+      }
+    }
+    $r{tool_calls} = [ map { { name => $_->{name}, args => $json->decode( $_->{json} || '{}' ) } } @calls ];
+    return \%r },
+  ollama => sub { my ( $raw ) = @_;
+    my @l = map { $json->decode($_) } grep { length } split /\n/, $raw;
+    my %r = ( text => '', chunks => 0, ended => ( @l && $l[-1]{done} && $raw =~ /\n\z/ && !( grep { $_->{done} } @l[ 0 .. $#l - 1 ] ) ? 1 : 0 ) );
+    $r{tool_calls} = [];
+    for my $d (@l) {
+      if ( length( $d->{message}{content} // '' ) ) { $r{text} .= $d->{message}{content}; $r{chunks}++ }
+      push @{ $r{tool_calls} }, map { { name => $_->{function}{name}, args => $_->{function}{arguments} } }
+        @{ $d->{message}{tool_calls} // [] };
+      if ( $d->{done} ) {
+        $r{finish_reason} = $d->{done_reason};
+        $r{usage} = _usage( $d, qw( prompt_eval_count eval_count ) );
+      }
+    }
+    return \%r },
+);
+
 my %PROTOCOL = (
   openai => {
     path => '/v1/chat/completions',
@@ -191,6 +282,7 @@ my %PROTOCOL = (
       my $m = $b->{choices}[0]{message} // {};
       return {
         text => $m->{content}, finish_reason => $b->{choices}[0]{finish_reason}, model => $b->{model},
+        usage => _usage( $b->{usage}, qw( prompt_tokens completion_tokens ) ),
         tool_calls => [ map { { name => $_->{function}{name}, args => $json->decode( $_->{function}{arguments} ) } }
           @{ $m->{tool_calls} // [] } ],
       } },
@@ -207,6 +299,7 @@ my %PROTOCOL = (
       return {
         text => join( '', map { $_->{text} } grep { $_->{type} eq 'text' } @c ),
         finish_reason => $b->{stop_reason}, model => $b->{model},
+        usage => _usage( $b->{usage}, qw( input_tokens output_tokens ) ),
         tool_calls => [ map { { name => $_->{name}, args => $_->{input} } } grep { $_->{type} eq 'tool_use' } @c ],
       } },
   },
@@ -221,6 +314,7 @@ my %PROTOCOL = (
       my $m = $b->{message} // {};
       return {
         text => $m->{content}, finish_reason => $b->{done_reason}, model => $b->{model},
+        usage => _usage( $b, qw( prompt_eval_count eval_count ) ),
         tool_calls => [ map { { name => $_->{function}{name}, args => $_->{function}{arguments} } }
           @{ $m->{tool_calls} // [] } ],
       } },
@@ -256,7 +350,12 @@ my %PROTOCOL = (
 
 Sends one non-streaming chat in the protocol's own wire format and returns
 C<http> extended with C<text>, C<finish_reason>, C<model>, C<tool_calls>
-(C<< { name, args } >>) read from the answer when the status is 200.
+(C<< { name, args } >>) read from the answer when the status is 200, and
+C<usage> (C<< { input, output } >>, undef when the answer has none). A
+streamed answer (C<stream =E<gt> 1>; OpenAI, Anthropic, Ollama) is read frame
+by frame into C<text>, C<chunks> (content frames), C<tool_calls>, C<finish_reason>, C<usage>
+and C<ended> (1 when the stream ends with the protocol's exact end marker:
+C<data: [DONE]>, C<event: message_stop>, the C<done: true> line).
 
 =cut
 
@@ -269,6 +368,7 @@ sub chat {
   my $res = $self->http( POST => $p->{path}, ( map { $_ => $o{$_} } grep { defined $o{$_} } qw( bearer xkey ) ),
     body => $body );
   %$res = ( %$res, %{ $p->{read}->( $res->{body} ) } ) if $res->{status} == 200 && ref $res->{body} && !$o{stream};
+  %$res = ( %$res, %{ $STREAM_READ{$proto}->( $res->{raw} ) } ) if $res->{status} == 200 && $o{stream} && $STREAM_READ{$proto};
   return $res;
 }
 

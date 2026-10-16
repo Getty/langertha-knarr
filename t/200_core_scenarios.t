@@ -28,6 +28,7 @@ use Test::Knarr::Virtual qw( knarr_virtual );
 #     backends:      { upstream model => Virtual rules (rules / after / fallback / script) };
 #                    '*' answers models without an entry
 #     admin_key, remote_config, request_log: as for Test::Knarr::Virtual
+#     a backends entry may carry engine_args: { stream_chunk_size, default_usage }
 #   steps:   run in order, each one request:
 #     - chat: { protocol, model, prompt, tools, messages, bearer, xkey }
 #       or
@@ -37,6 +38,10 @@ use Test::Knarr::Virtual qw( knarr_virtual );
 #         text:          the answer's text, exactly
 #         text_like:     regex the text must match
 #         finish_reason, model, tool_calls: [ { name, args } ]
+#         usage:         { input, output } the answer reports (a stream: its last report)
+#         no_usage:      true = the answer reports no token usage
+#         chunks:        streamed answers: number of content frames
+#         ended:         streamed answers: 1 = the stream ends with the protocol's exact end marker
 #         body_like:     regex over the raw body
 #         json:          { 'dotted.path' => value } into the decoded body
 #         absent:        [ 'dotted.path' ] must not exist
@@ -88,6 +93,10 @@ for my $file (@files) {
       is( $res->{finish_reason}, $e->{finish_reason}, "$tag: finish_reason" ) if exists $e->{finish_reason};
       is( $res->{model}, $e->{model}, "$tag: model" ) if exists $e->{model};
       is( $res->{tool_calls}, $e->{tool_calls}, "$tag: tool calls" ) if exists $e->{tool_calls};
+      is( $res->{usage}, $e->{usage}, "$tag: usage" ) if exists $e->{usage};
+      is( $res->{usage}, undef, "$tag: no usage" ) if $e->{no_usage};
+      is( $res->{chunks}, $e->{chunks}, "$tag: content frames" ) if exists $e->{chunks};
+      is( $res->{ended}, $e->{ended}, "$tag: ends with the end marker" ) if exists $e->{ended};
       like( $res->{raw}, qr/$e->{body_like}/s, "$tag: body matches" ) if defined $e->{body_like};
       for my $path ( sort keys %{ $e->{json} // {} } ) {
         my ( $found, $v ) = dig( $res->{body}, $path );
