@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-10-16T00:26:18Z
+claimed_by: claude
+class: standard
+completed: 2026-10-16T00:26:18Z
+created: 2026-10-15T05:11:48Z
+id: 76
+priority: medium
+started: 2026-10-16T00:26:18Z
+status: done
+tags:
+- security
+- auth
+title: Compare proxy key in constant time in _check_auth
+updated: 2026-10-16T00:26:18Z
+---
+
+Found during k75: Knarr::_check_auth compares the proxy key with eq, not constant time. Use a constant-time compare (as the admin key does).
