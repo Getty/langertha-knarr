@@ -19,6 +19,8 @@ use Carp ();
 use POSIX ();
 use Socket ();
 use Log::Any qw( $log );
+use Digest::SHA qw( sha256 );
+use Encode ();
 use Langertha::Knarr::Session;
 use Langertha::Knarr::Manifest;
 use Langertha::Knarr::PassthroughUsage;
@@ -999,10 +1001,23 @@ sub _check_auth {
     for my $element ( split /,/, $value ) {
       $element =~ s/\A\s+|\s+\z//g;
       next if $bearer && $element !~ s/\ABearer\s+//i;
-      return 1 if $element eq $self->auth_token;
+      return 1 if _same_key( $element, $self->auth_token );
     }
   }
   return 0;
+}
+
+# Equal keys, compared without an early exit: both go through SHA-256 and the
+# digests are compared whole, so the time does not depend on how much of the
+# key was right (k76).
+sub _same_key {
+  my ($given, $want) = @_;
+  return 0 unless defined $given && defined $want;
+  my $g = sha256( utf8::is_utf8($given) ? Encode::encode( 'UTF-8', $given ) : $given );
+  my $w = sha256( utf8::is_utf8($want)  ? Encode::encode( 'UTF-8', $want )  : $want );
+  my $diff = 0;
+  $diff |= ord( substr $g, $_, 1 ) ^ ord( substr $w, $_, 1 ) for 0 .. 31;
+  return $diff ? 0 : 1;
 }
 
 # True when any element of Authorization or x-api-key is the admin key.

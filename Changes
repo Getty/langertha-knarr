@@ -1,6 +1,7 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Fix: the proxy key is compared in constant time (k76), as the admin key.
 
     - Admin routes to deliver the routing setup at runtime, held in memory
       only (k75): with admin_key / KNARR_ADMIN_KEY set, PUT
