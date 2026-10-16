@@ -106,7 +106,8 @@ C<url>. The layered setup is checked like a config file
 default engine, is built before anything changes; any problem answers
 C<400> and the running setup stays exactly as it was. A pushed C<langfuse>
 section with keys switches tracing on (or to the pushed Langfuse); its
-C<url> is refused (the sink's address stays with the config file) and its
+C<url> is accepted only together with its own C<public_key> and
+C<secret_key> (the file's Langfuse keys never go to a pushed address); its
 keys never appear in an answer or the log. On success: C<200> with the
 status above, under the next generation.
 
@@ -493,11 +494,14 @@ sub _admin_put_config {
     return $self->_refuse( 'api_key_env is not accepted in a delivered setup ('
       . join( ', ', @env ) . '); deliver the key itself as api_key' );
   }
-  # Where traces (prompts) go stays with the file: a pushed langfuse section
-  # brings keys, never an address.
+  # A pushed langfuse url travels with its own keys: merged key by key, a url
+  # alone would receive the config file's Langfuse keys (Basic auth).
   if ( ref $doc->{langfuse} eq 'HASH' && exists $doc->{langfuse}{url} ) {
-    return $self->_refuse('langfuse.url is not accepted in a delivered setup;'
-      . ' the address of the trace sink comes from the config file' );
+    my $lf = $doc->{langfuse};
+    return $self->_refuse('langfuse.url is accepted only together with'
+      . ' langfuse.public_key and langfuse.secret_key in the same push' )
+      unless defined $lf->{public_key} && length $lf->{public_key}
+          && defined $lf->{secret_key} && length $lf->{secret_key};
   }
   my %runtime = map { $_ => 1 } $self->config_class->runtime_keys;
   if ( my @other = grep { !$runtime{$_} } sort keys %$doc ) {
