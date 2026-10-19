@@ -1,6 +1,14 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Routed streams carry the backend's token usage (k77): the client's
+      stream (OpenAI usage chunk with include_usage, Anthropic message_delta,
+      Ollama done line), the request log and the Langfuse generation now
+      have the counts of a streamed answer from an OpenAI-wire engine.
+      Langertha asks the backend for it on engines that claim stream_usage;
+      needs a Langertha with Langertha::Role::StreamUsage. The scenario
+      runner skips a scenario whose needs: modules do not load.
+
     - Tests: core-feature scenario suite (t/200_core_scenarios.t,
       t/scenarios/*.yml) running a real Knarr over loopback against
       Langertha::Engine::Virtual: protocols, tool calls, routing, proxy key,

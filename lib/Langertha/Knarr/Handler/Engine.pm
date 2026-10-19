@@ -36,6 +36,17 @@ C<chat_stream_realtime_f> with the same capability-filtered generation
 parameters for native token-by-token delivery; engines that don't
 support streaming fall back to a single-chunk emission.
 
+The stream keeps what the engine's chunks carry besides text: finish
+reason, tool calls, the upstream's model and the token usage
+(L<Langertha::Knarr::Stream/usage>), which the protocols put on their
+terminal frames and the tracing and request-log decorators record. Whether
+a backend reports usage while it streams is the engine's business: on the
+OpenAI wire Langertha asks for it (C<stream_options.include_usage>) on
+engines that claim C<stream_usage>; Knarr passes no C<stream_options> of its
+own, nor the client's. That usage arrives as a content-less chunk after the
+finish chunk; it adds no text and leaves finish reason and tool calls as
+they were.
+
 For routing across multiple engines based on model name, use
 L<Langertha::Knarr::Handler::Router> with a L<Langertha::Knarr::Router>
 config instead.

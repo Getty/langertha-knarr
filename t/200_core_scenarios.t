@@ -22,6 +22,8 @@ use Test::Knarr::Virtual qw( knarr_virtual );
 #
 #   title:   what the scenario shows
 #   skip:    reason string; the scenario is skipped and stays visible
+#   needs:   { Module::Name: why } core modules the scenario needs; skipped
+#            with that reason when one does not load (an older Langertha)
 #   setup:
 #     config:        the Knarr config (models, default, proxy_api_key, ...);
 #                    a model's engine is written KnarrVirtual
@@ -72,6 +74,10 @@ for my $file (@files) {
   my $name = path($file)->basename;
   subtest "$name: " . ( $s->{title} // '' ) => sub {
     skip_all $s->{skip} if $s->{skip};
+    for my $module ( sort keys %{ $s->{needs} // {} } ) {
+      ( my $pm = "$module.pm" ) =~ s{::}{/}g;
+      skip_all "needs $module: $s->{needs}{$module}" unless eval { require $pm; 1 };
+    }
     my $kv = knarr_virtual( %{ $s->{setup} // {} } );
     my $n = 0;
     for my $step ( @{ $s->{steps} // [] } ) {
