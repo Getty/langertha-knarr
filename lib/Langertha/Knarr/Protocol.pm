@@ -87,7 +87,9 @@ asked for it with C<stream_options.include_usage>.
 An error answer in this protocol's shape. Default: the OpenAI wire's
 C<{"error":{"message":...}}>; Anthropic answers
 C<{"type":"error","error":{"type":...,"message":...}}>, Ollama a plain
-C<{"error":"..."}>.
+C<{"error":"..."}>. Knarr answers every error of its own through it, the
+C<401> and the C<500> of a failed backend included (see
+L<Langertha::Knarr/ERRORS>).
 
 =method format_stream_error
 

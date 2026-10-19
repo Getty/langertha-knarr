@@ -140,6 +140,27 @@ step. Requests already running, streams
 included, finish with what they started with; the provider manifest and
 the capability probe start over with the new router.
 
+=head1 ERRORS
+
+Every error Knarr answers itself -- C<401> for a missing or wrong
+L</auth_token>, C<404> for a model nothing serves, C<500> for a backend
+that failed, C<503> without a setup, C<502>/C<504> for an upstream that
+failed or timed out -- is in the error shape of the protocol the client
+spoke (L<Langertha::Knarr::Protocol/format_error_response>): Anthropic's
+C<{"type":"error","error":{"type":...,"message":...}}> with the error type
+of the status (C<authentication_error>, C<api_error>, ...), Ollama's
+C<{"error":"..."}>, the OpenAI wire's C<{"error":{"message":...}}> for
+OpenAI, A2A, ACP and AG-UI. Only an unknown path and Knarr's own manifest
+route, which have no protocol, answer in the OpenAI wire's shape. The
+native server and L<Langertha::Knarr::PSGI> answer alike.
+
+A routed stream sends its C<200> with its first chunk (or its end, for a
+stream without one), not before: a handler that fails before that is
+answered like a non-streaming request, with a status in that shape. Once
+the stream has started, a failure ends it (the protocol's error frame for
+an upstream timeout). The client therefore sees no response headers until
+the backend's first token.
+
 =head1 ARCHITECTURE
 
 Three pluggable layers:
@@ -253,7 +274,8 @@ C<knarr start> passes L<Langertha::Knarr::Config/protocol_args>.
 
 Optional shared secret. When set, every incoming request must present
 it as C<Authorization: Bearer> or C<x-api-key>. Discovery routes
-(C</.well-known/agent.json>) stay anonymous.
+(C</.well-known/agent.json>) stay anonymous. A missing or wrong key gets
+C<401> in the error shape of the route's protocol (see L</ERRORS>).
 
 A header sent twice counts as one value of comma-separated elements (that
 is how a PSGI server and C<< HTTP::Headers->header >> merge it), and the key
@@ -1043,10 +1065,20 @@ sub _not_configured_answer {
   my ($self, $proto) = @_;
   my $admin = $self->admin or return;
   return if $admin->configured;
-  my $message = 'not configured: Knarr has no setup yet';
-  return ( 503, 'application/json',
-    $self->_json->encode({ error => { message => $message } }) ) unless $proto;
-  my ($status, $headers, $body) = $proto->format_error_response( 503, $message );
+  return $self->_error_answer( $proto, 503, 'not configured: Knarr has no setup yet' );
+}
+
+# An error Knarr answers itself, as ( status, content type, body ) in the
+# client protocol's error shape (format_error_response): Anthropic's typed
+# error object, Ollama's plain string. A route of Knarr's own, without a
+# protocol, gets the OpenAI wire's {"error":{"message":...}}. Every such
+# answer goes through here -- 401, 404, 500, 502-504 alike (k78) -- on the
+# native server and the PSGI adapter.
+sub _error_answer {
+  my ($self, $proto, $code, $message) = @_;
+  return ( $code, 'application/json',
+    $self->_json->encode({ error => { message => "$message" } }) ) unless $proto;
+  my ($status, $headers, $body) = $proto->format_error_response( $code, $message );
   return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
@@ -1115,11 +1147,14 @@ sub _parse_chat_request {
   return $sb_req;
 }
 
-# The one 401 answer, shared by the native server and the PSGI adapter (k25).
+# The one 401 answer, shared by the native server and the PSGI adapter (k25),
+# in the protocol's error shape of the route asked for (k78): an Anthropic
+# SDK reads error.type (authentication_error), an Ollama client a string.
+# The route is known before the key is checked; only Knarr's own routes
+# (the manifest) have no protocol and get the OpenAI wire's shape.
 sub _unauthorized {
-  my ($self) = @_;
-  return ( 401, 'application/json',
-    $self->_json->encode({ error => { message => 'unauthorized' } }) );
+  my ($self, $proto) = @_;
+  return $self->_error_answer( $proto, 401, 'unauthorized' );
 }
 
 sub _dispatch {
@@ -1133,18 +1168,18 @@ sub _dispatch {
   }
   my $action = $route->{action};
   return $self->_dispatch_admin( $req, $action ) if $route->{admin};
-  unless ( $self->_check_auth( $req, $action ) ) {
-    return $self->_send_simple( $req, $self->_unauthorized );
-  }
   my $proto  = $route->{protocol};
+  unless ( $self->_check_auth( $req, $action ) ) {
+    return $self->_send_simple( $req, $self->_unauthorized($proto) );
+  }
   if ( my @answer = $self->_not_configured_answer($proto) ) {
     return $self->_send_simple( $req, @answer );
   }
   my $simple = $self->_simple_action($action);
   my $code = $simple ? undef : $self->can("_action_$action");
   unless ( $simple || $code ) {
-    return $self->_send_simple( $req, 500, 'application/json',
-      $self->_json->encode({ error => { message => "unknown action $action" } }) );
+    return $self->_send_simple( $req,
+      $self->_error_answer( $proto, 500, "unknown action $action" ) );
   }
   try {
     if ( $simple ) {
@@ -1157,8 +1192,7 @@ sub _dispatch {
   } catch {
     my $err = $_;
     $log->errorf("Request error (%s): %s", $action, $err);
-    $self->_send_simple( $req, 500, 'application/json',
-      $self->_json->encode({ error => { message => "$err" } }) );
+    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err) ) );
   };
 }
 
@@ -1194,18 +1228,13 @@ sub _handle_chat {
     } catch {
       my $err = $_;
       $log->errorf("Chat response error: %s", $err);
-      $self->_send_simple( $req, 500, 'application/json',
-        $self->_json->encode({ error => { message => "$err" } }) );
+      $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err) ) );
     };
   });
   $f->on_fail( sub {
     my ($err, $category) = @_;
     $log->errorf("Chat handler error: %s", $err);
-    if ( my @answer = $self->_handler_failure_answer( $proto, $err, $category ) ) {
-      return $self->_send_simple( $req, @answer );
-    }
-    $self->_send_simple( $req, 500, 'application/json',
-      $self->_json->encode({ error => { message => "$err" } }) );
+    $self->_send_simple( $req, $self->_handler_failure_answer( $proto, $err, $category ) );
   });
   $f->retain;
 }
@@ -1213,21 +1242,13 @@ sub _handle_chat {
 sub _handle_stream {
   my ($self, $proto, $req, $sb_req, $session, $handler) = @_;
 
-  # A handler that refuses the request outright (no route for the model,
-  # k41) has failed before any stream exists: answer it like a
-  # non-streaming request, before the stream's 200 goes out.
-  my $f = $handler->handle_stream_f( $session, $sb_req );
-  if ( $f->is_failed ) {
-    if ( my @answer = $self->_handler_failure_answer( $proto, $f->failure ) ) {
-      return $self->_send_simple( $req, @answer );
-    }
-  }
-
-  my $header = HTTP::Response->new( 200 );
-  $header->protocol('HTTP/1.1');
-  $header->header( 'Content-Type'  => $proto->stream_content_type );
-  $header->header( 'Cache-Control' => 'no-cache' );
-  $req->respond_chunk_header( $header );
+  # The stream's 200 goes out with its first event -- its first chunk, or
+  # its end -- not before. Until then the status is still free: a handler
+  # that fails (nothing serves the model, k41; an upstream timeout, k36; any
+  # backend failure, k78) is answered like a non-streaming request, in the
+  # protocol's error shape. Only a failure after that ends the started
+  # stream.
+  my $started = 0;
 
   my $write = sub {
     my ($bytes) = @_;
@@ -1236,14 +1257,31 @@ sub _handle_stream {
     $req->write_chunk( $bytes );
   };
 
+  my $start = sub {
+    return if $started++;
+    my $header = HTTP::Response->new( 200 );
+    $header->protocol('HTTP/1.1');
+    $header->header( 'Content-Type'  => $proto->stream_content_type );
+    $header->header( 'Cache-Control' => 'no-cache' );
+    $req->respond_chunk_header( $header );
+    $write->( $proto->format_stream_open($sb_req) );
+  };
+
+  my $refuse = sub {
+    my ($err, $category) = @_;
+    return if $req->is_closed;
+    $self->_send_simple( $req, $self->_handler_failure_answer( $proto, $err, $category ) );
+  };
+
+  my $f = $handler->handle_stream_f( $session, $sb_req );
   $f->on_done( sub {
     my ($stream) = @_;
-    $write->( $proto->format_stream_open($sb_req) );
     my $pump; $pump = sub {
       if ( $req->is_closed ) { undef $pump; return }
       $stream->next_chunk_f->on_done( sub {
         my ($delta) = @_;
         if ( $req->is_closed ) { undef $pump; return }
+        $start->();
         if ( defined $delta ) {
           $write->( $proto->format_stream_chunk( $delta, $sb_req ) );
           $pump->();
@@ -1264,6 +1302,7 @@ sub _handle_stream {
         my ($err, $category) = @_;
         $log->errorf("Stream chunk error: %s", $err);
         undef $pump;
+        return $refuse->( $err, $category ) unless $started;
         return if $self->_stream_failure_frame( $proto, $req, $err, $category );
         $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
         $write->( $proto->format_stream_close($sb_req) );
@@ -1277,9 +1316,7 @@ sub _handle_stream {
   $f->on_fail( sub {
     my ($err, $category) = @_;
     $log->errorf("Stream handler error: %s", $err);
-    return if $self->_stream_failure_frame( $proto, $req, $err, $category );
-    $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
-    $req->write_chunk_eof;
+    $refuse->( $err, $category );
   });
   $f->retain;
 }
@@ -1298,13 +1335,13 @@ sub _handler_failure_status {
   return;
 }
 
-# That status in the client protocol's error shape. Empty for a failure
-# without one.
+# A handler failure as ( status, content type, body ) in the client
+# protocol's error shape: the status of its category, else 500 -- a backend
+# that failed is answered in the client's own shape too (k78).
 sub _handler_failure_answer {
   my ($self, $proto, $err, $category) = @_;
-  my $code = $self->_handler_failure_status($category) or return;
-  my ($status, $headers, $body) = $proto->format_error_response( $code, _error_text($err) );
-  return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
+  return $self->_error_answer( $proto,
+    $self->_handler_failure_status($category) // 500, _error_text($err) );
 }
 
 # The same for a stream whose headers are out: the protocol's error frame,
@@ -1555,8 +1592,7 @@ sub _raw_passthrough_fall_back {
   } catch {
     my $err = $_;
     $log->errorf("Passthrough fallback error [%s]: %s", $sb_req->model // 'unknown', $err);
-    $self->_send_simple( $req, 500, 'application/json',
-      $self->_json->encode({ error => { message => "$err" } }) );
+    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err) ) );
   };
   return;
 }
@@ -1631,9 +1667,8 @@ sub _raw_passthrough_failed {
   my ($self, $proto, $sb_req, $trace, $err, $category) = @_;
   $log->errorf("Passthrough error [%s]: %s", $sb_req->model // 'unknown', $err);
   $self->tracing->end_trace($trace, error => "$err") if $trace;
-  my ($status, $headers, $body) = $proto->format_error_response(
+  return $self->_error_answer( $proto,
     $self->_raw_passthrough_status($category), 'passthrough failed: ' . _error_text($err) );
-  return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
 sub _raw_passthrough_status {

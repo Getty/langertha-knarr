@@ -82,6 +82,10 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
   `langfuse` key-wise; PUT replaces the push layer, DELETE drops it (k75).
 - No model in the request (A2A always, ACP w/o `agent_name`) → default engine with its
   own `model:` (k42). Nothing can serve → 404 in the protocol's error shape.
+- Every error Knarr answers itself (401, 404, 500, 502–504) goes through
+  `Knarr::_error_answer` → the protocol's `format_error_response`; no protocol (unknown
+  path, manifest) → `{"error":{"message"}}`. A routed stream sends its 200 with its first
+  chunk, so a failure before that is a status, not a 200 (k78; native + PSGI).
 - Request fields on the routed path: tools/tool_choice, response_format, temperature,
   max_tokens, seed, parallel_tool_calls, prompt_cache_key, reasoning_effort (Anthropic
   `thinking`/`output_config.effort` and Ollama `think` mapped by `Reasoning`), images

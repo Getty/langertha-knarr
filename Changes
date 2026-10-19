@@ -16,6 +16,20 @@ Revision history for Langertha-Knarr
       (end markers, tool call fragments) and token usage. Skips without
       Langertha::Engine::Virtual.
 
+    - Fix: the 401 of a missing or wrong proxy key and the 500 of a failed
+      backend are in the client protocol's error shape (k78), like 404, 503
+      and 504 already were: Anthropic clients get
+      {"type":"error","error":{"type":"authentication_error"|"api_error",...}},
+      Ollama clients {"error":"..."}; OpenAI, A2A, ACP and AG-UI keep
+      {"error":{"message":...}}. Natively and under PSGI, where a failed
+      handler no longer dies into the server's plain-text 500. A routed
+      stream sends its 200 only with its first chunk, so one whose backend
+      fails before that is answered with that status (504 for an upstream
+      timeout) instead of a 200 with an "[error: ...]" text chunk; response
+      headers now wait for the backend's first token. A backend that failed
+      before the stream's first read no longer looks like an empty, complete
+      stream (Langertha::Knarr::Stream->from_callback).
+
     - Fix: the proxy key is compared in constant time (k76), as the admin key.
 
     - Admin routes to deliver the routing setup at runtime, held in memory

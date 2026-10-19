@@ -4,6 +4,7 @@ our $VERSION = '1.103';
 use Moose;
 use Future;
 use JSON::MaybeXS;
+use Scalar::Util qw( blessed );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::PSGI::FakeReq;
 
@@ -53,7 +54,11 @@ L<Langertha::Knarr::Handler::Passthrough> in the handler chain forwards
 Requests are authenticated exactly like on the native server: with
 L<Langertha::Knarr/auth_token> set, every route except the A2A agent card
 needs the key as C<Authorization: Bearer> or C<x-api-key>, and a missing
-or wrong key gets the same C<401> JSON error.
+or wrong key gets the same C<401>, in the route's protocol's error shape.
+Every other error is answered as on the native server too (see
+L<Langertha::Knarr/ERRORS>): a failed handler or backend with its status
+in the protocol's error shape. As a stream is buffered here, a stream
+that fails at any point gets that status, not a C<200>.
 
 The admin routes (see L<Langertha::Knarr/ADMIN ROUTES> and
 L<Langertha::Knarr::Admin>) work as on the native server, with one more
@@ -146,10 +151,11 @@ sub _handle_psgi {
     return [ $status, [ 'Content-Type' => $ctype, map { @$_ } @{ $headers // [] } ], [ $body ] ];
   }
 
-  # Same auth decision and 401 as the native server (k25), before any
-  # handler work, so a rejected streaming request never starts its stream.
+  # Same auth decision and 401 as the native server (k25), in the route's
+  # protocol's error shape (k78), before any handler work, so a rejected
+  # streaming request never starts its stream.
   unless ( $sb->_check_auth( $fake_http, $action ) ) {
-    my ($status, $ctype, $body) = $sb->_unauthorized;
+    my ($status, $ctype, $body) = $sb->_unauthorized($proto);
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 
@@ -157,6 +163,29 @@ sub _handle_psgi {
   if ( my ($status, $ctype, $body) = $sb->_not_configured_answer($proto) ) {
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
+
+  # Whatever fails from here is answered like the native server answers
+  # it, in the protocol's error shape: a handler failure with the status
+  # of its category (504 for an upstream timeout, k36; 404 for a model
+  # nothing serves, k41), anything else 500 (k78). A stream is buffered, so
+  # nothing has gone out yet when its handler fails, mid-stream included.
+  my $res;
+  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http ); 1 };
+  my $e = $@;
+  my ( $message, $category ) = blessed($e) && $e->isa('Future::Exception')
+    ? ( $e->message, $e->category ) : ( $e );
+  my ($status, $ctype, $body) = $sb->_handler_failure_answer( $proto, $message, $category );
+  return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
+}
+
+# A request past the auth and setup checks, answered as a PSGI response.
+# Dies on any failure; _handle_psgi answers it.
+sub _handle_action {
+  my ($self, $env, $route, $fake_http) = @_;
+  my $sb = $self->knarr;
+  my $path   = $env->{PATH_INFO} // '/';
+  my $proto  = $route->{protocol};
+  my $action = $route->{action};
 
   if ( $action eq 'models' || $action eq 'acp_agents' ) {
     my $models = $sb->handler->list_models;
@@ -182,8 +211,8 @@ sub _handle_psgi {
     return [ $status, [ %$headers ], [ $body ] ];
   }
   if ( $action ne 'chat' ) {
-    return [ 500, [ 'Content-Type' => 'application/json' ],
-      [ $self->_json->encode({ error => { message => "unknown action $action" } }) ] ];
+    my ($status, $ctype, $body) = $sb->_error_answer( $proto, 500, "unknown action $action" );
+    return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 
   my $body = $self->_read_body($env);
@@ -216,18 +245,6 @@ sub _handle_psgi {
   my $session = $sb->session( $sb_req->session_id );
   my $handler = $sb->handler;
 
-  # An upstream timeout in the handler chain answers 504 in the protocol's
-  # error shape, as the native server does (k36), a model nothing serves
-  # 404 (k41). A buffered stream has sent nothing yet, so it gets the same
-  # answer, like the raw passthrough under this adapter. Any other failure
-  # dies as before.
-  my @answer;
-  my $answered = sub {
-    my ($e) = @_;
-    return 0 unless ref $e && eval { $e->isa('Future::Exception') };
-    @answer = $sb->_handler_failure_answer( $proto, $e->message, $e->category );
-    return scalar @answer;
-  };
   # A read the upstream has not fed yet is a plain pending Future (the
   # stream's own queue), which cannot ->get by itself: run the loop until
   # it is ready.
@@ -239,31 +256,20 @@ sub _handle_psgi {
 
   if ( $sb_req->stream ) {
     # Buffered streaming: drive the stream to completion, concatenate frames.
-    my $out = eval {
-      my $stream = $get->( $handler->handle_stream_f( $session, $sb_req ) );
-      my $out = $proto->format_stream_open($sb_req);
-      while ( defined( my $delta = $get->( $stream->next_chunk_f ) ) ) {
-        $out .= $proto->format_stream_chunk( $delta, $sb_req );
-      }
-      my $finish_reason = $stream->can('finish_reason') ? $stream->finish_reason : undef;
-      my $tool_calls    = $stream->can('tool_calls')    ? $stream->tool_calls    : [];
-      my $usage         = $stream->can('usage')         ? $stream->usage         : undef;
-      $out .= $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls, $usage );
-      $out .= $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls, $usage );
-      $out;
-    };
-    if ( my $e = $@ ) {
-      return [ $answer[0], [ 'Content-Type' => $answer[1] ], [ $answer[2] ] ] if $answered->($e);
-      die $e;
+    my $stream = $get->( $handler->handle_stream_f( $session, $sb_req ) );
+    my $out = $proto->format_stream_open($sb_req);
+    while ( defined( my $delta = $get->( $stream->next_chunk_f ) ) ) {
+      $out .= $proto->format_stream_chunk( $delta, $sb_req );
     }
+    my $finish_reason = $stream->can('finish_reason') ? $stream->finish_reason : undef;
+    my $tool_calls    = $stream->can('tool_calls')    ? $stream->tool_calls    : [];
+    my $usage         = $stream->can('usage')         ? $stream->usage         : undef;
+    $out .= $proto->format_stream_close( $sb_req, $finish_reason, $tool_calls, $usage );
+    $out .= $proto->format_stream_done( $sb_req, $finish_reason, $tool_calls, $usage );
     return [ 200, [ 'Content-Type' => $proto->stream_content_type ], [ $out ] ];
   }
 
-  my $response = eval { $get->( $handler->handle_chat_f( $session, $sb_req ) ) };
-  if ( my $e = $@ ) {
-    return [ $answer[0], [ 'Content-Type' => $answer[1] ], [ $answer[2] ] ] if $answered->($e);
-    die $e;
-  }
+  my $response = $get->( $handler->handle_chat_f( $session, $sb_req ) );
   my ($status, $headers, $obody) = $proto->format_chat_response( $response, $sb_req );
   return [ $status, [ %$headers ], [ $obody ] ];
 }
