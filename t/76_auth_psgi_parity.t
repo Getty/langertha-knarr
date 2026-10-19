@@ -76,6 +76,9 @@ my %anonymous_action = ( a2a_card => 1 );
 my %unauthorized_body = (
   Anthropic => { type => 'error', error => { type => 'authentication_error', message => 'unauthorized' } },
   Ollama    => { error => 'unauthorized' },
+  # JSON-RPC (k79); the request is not parsed before the key is checked: id null
+  A2A       => { jsonrpc => '2.0', id => undef,
+    error => { code => -32600, message => 'unauthorized', data => { status => 401 } } },
 );
 sub unauthorized_body {
   my ($route) = @_;

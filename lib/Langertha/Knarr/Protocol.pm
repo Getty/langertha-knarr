@@ -82,25 +82,30 @@ asked for it with C<stream_options.include_usage>.
 
 =method format_error_response
 
-    my ($status, \%headers, $body) = $proto->format_error_response( 504, 'upstream timed out' );
+    my ($status, \%headers, $body) = $proto->format_error_response( 504, 'upstream timed out', $request );
 
 An error answer in this protocol's shape. Default: the OpenAI wire's
 C<{"error":{"message":...}}>; Anthropic answers
 C<{"type":"error","error":{"type":...,"message":...}}>, Ollama a plain
-C<{"error":"..."}>. Knarr answers every error of its own through it, the
+C<{"error":"..."}>, A2A a JSON-RPC response with an C<error> object. The
+optional third argument is the parsed L<Langertha::Knarr::Request> (absent
+when the request never parsed); A2A takes the JSON-RPC C<id> from it. Knarr answers every error of its own through it, the
 C<401> and the C<500> of a failed backend included (see
 L<Langertha::Knarr/ERRORS>).
 
 =method format_stream_error
 
-    my $bytes = $proto->format_stream_error( 504, 'upstream timed out' );
+    my $bytes = $proto->format_stream_error( 504, 'upstream timed out', $request );
 
 The frame that tells a client its stream failed after the response
 headers went out, or C<''> (the default) when the protocol has none.
 OpenAI sends C<data: {"error":{...}}>, Anthropic an C<event: error>,
-Ollama an C<{"error":"..."}> line. The raw passthrough writes it before
-closing a stream the upstream stopped feeding, and so does a routed stream
-whose handler failed with an upstream timeout.
+Ollama an C<{"error":"..."}> line, A2A a JSON-RPC error event, ACP
+C<event: run.failed>, AG-UI C<RUN_ERROR>. The frame is the end of the
+stream: no end marker follows it. A routed stream whose handler fails after
+its first chunk ends with it (500, or the status of the failure's
+category), and so does the raw passthrough when the upstream stops feeding
+its stream.
 
 =method stream_content_type
 
@@ -168,7 +173,7 @@ sub format_stream_close { '' }
 
 # An error answer in the protocol's own shape; default is the OpenAI wire's.
 sub format_error_response {
-  my ($self, $status, $message) = @_;
+  my ($self, $status, $message, $request) = @_;
   return ( $status, { 'Content-Type' => 'application/json' },
     JSON::MaybeXS->new( utf8 => 1, canonical => 1 )->encode({ error => { message => "$message" } }) );
 }

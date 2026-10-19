@@ -139,5 +139,27 @@ sub format_stream_close {
 
 sub format_stream_done { '' }
 
+=method format_stream_error
+
+    my $bytes = $proto->format_stream_error( 500, 'boom', $request );
+
+C<event: run.failed> carrying the run with C<status: failed> and an
+C<error> (C<code> C<server_error>, C<not_found> or C<invalid_input>, and
+the C<message>). It takes the place of C<run.completed>.
+
+=cut
+
+sub format_stream_error {
+  my ($self, $status, $message, $request) = @_;
+  return $self->_sse_event( 'run.failed' => {
+    run_id => $request ? $request->extra->{run_id} : undef,
+    status => 'failed',
+    error  => {
+      code    => $status == 404 ? 'not_found' : $status >= 500 ? 'server_error' : 'invalid_input',
+      message => "$message",
+    },
+  });
+}
+
 __PACKAGE__->meta->make_immutable;
 1;

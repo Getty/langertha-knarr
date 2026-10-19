@@ -223,5 +223,48 @@ sub format_stream_close {
 
 sub format_stream_done { '' }
 
+# JSON-RPC's error object (k79): -32603 Internal error for a server-side
+# status, -32600 Invalid Request for a client-side one; the HTTP status in
+# data. The id is the request's, null when no request was parsed.
+sub _rpc_error {
+  my ($self, $status, $message, $request) = @_;
+  return {
+    jsonrpc => '2.0',
+    id      => $request ? $request->extra->{jsonrpc_id} : undef,
+    error   => {
+      code    => $status >= 500 ? -32603 : -32600,
+      message => "$message",
+      data    => { status => $status + 0 },
+    },
+  };
+}
+
+=method format_error_response
+
+    my ($status, $headers, $body) = $proto->format_error_response( 500, 'boom', $request );
+
+A2A answers an error as a JSON-RPC response with an C<error> object (C<code>,
+C<message>, C<data.status>) and the C<id> of the request, not the OpenAI
+wire's C<{"error":{"message":...}}>. The HTTP status is kept.
+
+=cut
+
+sub format_error_response {
+  my ($self, $status, $message, $request) = @_;
+  return ( $status, { 'Content-Type' => 'application/json' },
+    $self->_json->encode( $self->_rpc_error( $status, $message, $request ) ) );
+}
+
+=method format_stream_error
+
+The same JSON-RPC error response as an SSE event; it ends the stream.
+
+=cut
+
+sub format_stream_error {
+  my ($self, $status, $message, $request) = @_;
+  return "data: " . $self->_json->encode( $self->_rpc_error( $status, $message, $request ) ) . "\n\n";
+}
+
 __PACKAGE__->meta->make_immutable;
 1;

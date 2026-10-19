@@ -4,6 +4,7 @@ our $VERSION = '1.103';
 use Moose;
 use Future;
 use JSON::MaybeXS;
+use Log::Any qw( $log );
 use Scalar::Util qw( blessed );
 use Langertha::Knarr::Request;
 use Langertha::Knarr::PSGI::FakeReq;
@@ -169,19 +170,22 @@ sub _handle_psgi {
   # of its category (504 for an upstream timeout, k36; 404 for a model
   # nothing serves, k41), anything else 500 (k78). A stream is buffered, so
   # nothing has gone out yet when its handler fails, mid-stream included.
-  my $res;
-  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http ); 1 };
+  my ( $res, $sb_req );
+  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http, \$sb_req ); 1 };
   my $e = $@;
   my ( $message, $category ) = blessed($e) && $e->isa('Future::Exception')
     ? ( $e->message, $e->category ) : ( $e );
-  my ($status, $ctype, $body) = $sb->_handler_failure_answer( $proto, $message, $category );
+  # The client gets the cleaned text; the log keeps the whole message (k79).
+  $log->errorf( 'Request error (%s): %s', $route->{action}, $message );
+  my ($status, $ctype, $body) = $sb->_handler_failure_answer( $proto, $message, $category, $sb_req );
   return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
 }
 
 # A request past the auth and setup checks, answered as a PSGI response.
-# Dies on any failure; _handle_psgi answers it.
+# Dies on any failure; _handle_psgi answers it. The parsed request is put
+# into $$request_slot as soon as it exists, so the error answer can address it.
 sub _handle_action {
-  my ($self, $env, $route, $fake_http) = @_;
+  my ($self, $env, $route, $fake_http, $request_slot) = @_;
   my $sb = $self->knarr;
   my $path   = $env->{PATH_INFO} // '/';
   my $proto  = $route->{protocol};
@@ -217,6 +221,7 @@ sub _handle_action {
 
   my $body = $self->_read_body($env);
   my $sb_req = $sb->_parse_chat_request( $proto, $fake_http, \$body );
+  $$request_slot = $sb_req if $request_slot;
 
   # Raw passthrough, decided and prepared by the same Knarr code as on the
   # native server (k26): the client's bytes go 1:1 to the upstream and its

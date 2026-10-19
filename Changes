@@ -1,6 +1,29 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Fix: errors Knarr answers itself no longer show Perl internals (k79):
+      the text a client gets has no " at /path/Module.pm line N.", no stack
+      frames, no @INC list and no source path; the log (and the request log)
+      keeps the full message, under PSGI too.
+
+    - Fix: a routed stream that fails after its first chunk ends with the
+      protocol's own error frame (k79) -- OpenAI a data: error object,
+      Anthropic event: error, Ollama an {"error":...} line, A2A a JSON-RPC
+      error event, ACP event: run.failed, AG-UI RUN_ERROR -- also when the
+      failure has no category (500), instead of an "[error: ...]" text chunk.
+      The error frame is the end of the stream; no success marker follows.
+
+    - Tests: t/72_multi_listen.t and t/98_listen_backlog.t take their listen
+      ports from the kernel (port 0, read back from the bound sockets)
+      instead of picking a free port, closing it and binding it later, where
+      a parallel test could take it in between (k79). t/97_workers_live.t
+      checks the "Cannot fork a worker" of its injected fork failure instead
+      of letting it spill onto stderr.
+
+    - Fix: A2A answers an error with a JSON-RPC response carrying an error
+      object (code, message, data.status) and the request's id, not
+      {"error":{"message":...}} (k79).
+
     - Routed streams carry the backend's token usage (k77): the client's
       stream (OpenAI usage chunk with include_usage, Anthropic message_delta,
       Ollama done line), the request log and the Langfuse generation now

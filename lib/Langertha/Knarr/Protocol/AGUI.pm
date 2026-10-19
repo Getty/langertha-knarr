@@ -140,5 +140,23 @@ sub format_stream_close {
 
 sub format_stream_done { '' }
 
+=method format_stream_error
+
+    my $bytes = $proto->format_stream_error( 500, 'boom' );
+
+AG-UI's C<RUN_ERROR> event (C<message>, C<code>); it takes the place of
+C<RUN_FINISHED>.
+
+=cut
+
+sub format_stream_error {
+  my ($self, $status, $message) = @_;
+  return $self->_sse({
+    type    => 'RUN_ERROR',
+    message => "$message",
+    code    => $status == 404 ? 'not_found' : $status >= 500 ? 'server_error' : 'invalid_input',
+  });
+}
+
 __PACKAGE__->meta->make_immutable;
 1;

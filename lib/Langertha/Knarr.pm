@@ -149,16 +149,22 @@ failed or timed out -- is in the error shape of the protocol the client
 spoke (L<Langertha::Knarr::Protocol/format_error_response>): Anthropic's
 C<{"type":"error","error":{"type":...,"message":...}}> with the error type
 of the status (C<authentication_error>, C<api_error>, ...), Ollama's
-C<{"error":"..."}>, the OpenAI wire's C<{"error":{"message":...}}> for
-OpenAI, A2A, ACP and AG-UI. Only an unknown path and Knarr's own manifest
+C<{"error":"..."}>, A2A's JSON-RPC response with an C<error> object (and
+the request's C<id>), the OpenAI wire's C<{"error":{"message":...}}> for
+OpenAI, ACP and AG-UI. The message is the cause without where Perl died:
+no file path, line number, stack frame or C<@INC> list ever reaches a
+client; the log and the request log keep the full text. Only an unknown path and Knarr's own manifest
 route, which have no protocol, answer in the OpenAI wire's shape. The
 native server and L<Langertha::Knarr::PSGI> answer alike.
 
 A routed stream sends its C<200> with its first chunk (or its end, for a
 stream without one), not before: a handler that fails before that is
 answered like a non-streaming request, with a status in that shape. Once
-the stream has started, a failure ends it (the protocol's error frame for
-an upstream timeout). The client therefore sees no response headers until
+the stream has started, a failure ends it with the protocol's error frame
+(OpenAI C<data:> error object, Anthropic C<event: error>, Ollama
+C<{"error":...}> line, A2A JSON-RPC error event, ACP C<run.failed>, AG-UI
+C<RUN_ERROR>), the status of the failure's category (500 without one); the
+frame replaces the end marker. The client therefore sees no response headers until
 the backend's first token.
 
 =head1 ARCHITECTURE
@@ -1073,12 +1079,13 @@ sub _not_configured_answer {
 # error object, Ollama's plain string. A route of Knarr's own, without a
 # protocol, gets the OpenAI wire's {"error":{"message":...}}. Every such
 # answer goes through here -- 401, 404, 500, 502-504 alike (k78) -- on the
-# native server and the PSGI adapter.
+# native server and the PSGI adapter. $sb_req, when the request was parsed,
+# lets a protocol address the error to it (A2A's JSON-RPC id).
 sub _error_answer {
-  my ($self, $proto, $code, $message) = @_;
+  my ($self, $proto, $code, $message, $sb_req) = @_;
   return ( $code, 'application/json',
     $self->_json->encode({ error => { message => "$message" } }) ) unless $proto;
-  my ($status, $headers, $body) = $proto->format_error_response( $code, $message );
+  my ($status, $headers, $body) = $proto->format_error_response( $code, $message, $sb_req );
   return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
@@ -1228,13 +1235,13 @@ sub _handle_chat {
     } catch {
       my $err = $_;
       $log->errorf("Chat response error: %s", $err);
-      $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err) ) );
+      $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err), $sb_req ) );
     };
   });
   $f->on_fail( sub {
     my ($err, $category) = @_;
     $log->errorf("Chat handler error: %s", $err);
-    $self->_send_simple( $req, $self->_handler_failure_answer( $proto, $err, $category ) );
+    $self->_send_simple( $req, $self->_handler_failure_answer( $proto, $err, $category, $sb_req ) );
   });
   $f->retain;
 }
@@ -1270,7 +1277,7 @@ sub _handle_stream {
   my $refuse = sub {
     my ($err, $category) = @_;
     return if $req->is_closed;
-    $self->_send_simple( $req, $self->_handler_failure_answer( $proto, $err, $category ) );
+    $self->_send_simple( $req, $self->_handler_failure_answer( $proto, $err, $category, $sb_req ) );
   };
 
   my $f = $handler->handle_stream_f( $session, $sb_req );
@@ -1303,8 +1310,8 @@ sub _handle_stream {
         $log->errorf("Stream chunk error: %s", $err);
         undef $pump;
         return $refuse->( $err, $category ) unless $started;
-        return if $self->_stream_failure_frame( $proto, $req, $err, $category );
-        $write->( $proto->format_stream_chunk( "[error: $err]", $sb_req ) );
+        return if $self->_stream_failure_frame( $proto, $req, $err, $category, $sb_req );
+        $write->( $proto->format_stream_chunk( '[error: '._error_text($err).']', $sb_req ) );
         $write->( $proto->format_stream_close($sb_req) );
         $req->write_chunk_eof;
       })->retain;
@@ -1339,19 +1346,20 @@ sub _handler_failure_status {
 # protocol's error shape: the status of its category, else 500 -- a backend
 # that failed is answered in the client's own shape too (k78).
 sub _handler_failure_answer {
-  my ($self, $proto, $err, $category) = @_;
+  my ($self, $proto, $err, $category, $sb_req) = @_;
   return $self->_error_answer( $proto,
-    $self->_handler_failure_status($category) // 500, _error_text($err) );
+    $self->_handler_failure_status($category) // 500, _error_text($err), $sb_req );
 }
 
-# The same for a stream whose headers are out: the protocol's error frame,
-# then the end of the stream. False (nothing written) when the failure has
-# no status or the protocol has no error frame, so the caller answers as
-# before.
+# The same for a stream whose headers are out: the protocol's error frame
+# (status of the category, else 500), then the end of the stream; the frame
+# is the stream's end, no success marker follows it (k79). False (nothing
+# written) only when the protocol has no error frame, so the caller answers
+# as before.
 sub _stream_failure_frame {
-  my ($self, $proto, $req, $err, $category) = @_;
-  my $code = $self->_handler_failure_status($category) or return 0;
-  my $frame = $proto->format_stream_error( $code, _error_text($err) );
+  my ($self, $proto, $req, $err, $category, $sb_req) = @_;
+  my $code = $self->_handler_failure_status($category) // 500;
+  my $frame = $proto->format_stream_error( $code, _error_text($err), $sb_req );
   return 0 unless length $frame;
   return 1 if $req->is_closed;
   $req->write_chunk($frame);
@@ -1676,10 +1684,21 @@ sub _raw_passthrough_status {
   return Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category) ? 504 : 502;
 }
 
+# What a client may be told of a failure (k79): the message without where
+# Perl died -- " at /path/Module.pm line 12." and "<$fh> line 3", the stack
+# frames of a confess, the @INC list of a missing module, any remaining
+# source path. The full text goes to the log and the request log, not here.
+# A message that is nothing but a location becomes "internal error".
 sub _error_text {
   my ($err) = @_;
-  ( my $text = "$err" ) =~ s/\s+\z//;
-  return $text;
+  my $text = "$err";
+  $text = join "\n", grep { !/^\s+\S.*\bcalled at\b/ && !/^\t/ } split /\n/, $text;
+  $text =~ s/\s*\(\@INC[^)]*\)//g;
+  $text =~ s/,?\s*\bat (?:\S+|\((?:re_)?eval \d+\)) line \d+(?:, <[^>]*> (?:line|chunk) \d+)?\.?//g;
+  $text =~ s{(?<![\w.])/(?:[\w.\-]+/)*[\w.\-]+\.(?:pm|pl|t|xs)\b}{<file>}g;
+  $text =~ s/\s+\z//;
+  $text =~ s/\A\s+//;
+  return length $text ? $text : 'internal error';
 }
 
 sub _action_acp_agents { goto &_action_models }
