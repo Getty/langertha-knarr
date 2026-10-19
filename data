@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-10-19T04:31:54Z
+claimed_by: claude-k78
+class: standard
+completed: 2026-10-19T04:31:54Z
+created: 2026-10-16T17:25:26Z
+id: 78
+priority: medium
+started: 2026-10-19T03:43:09Z
+status: done
+title: 401 and 500 answers ignore the protocol's error shape (Anthropic, Ollama)
+updated: 2026-10-19T04:31:54Z
+---
+
+Gefunden durch Szenario t/scenarios/09-error-shape-anthropic.yml (skip). Knarr::_unauthorized (auch PSGI) und der generische 500 eines ausgefallenen Backends (_handle_chat on_fail, sync catch, Stream-Pfade) liefern immer {error:{message}}; nur 404/503/504 laufen durch format_error_response. Anthropic-SDK liest error.type (undef), Ollama erwartet error als String. Noetig: Protokoll in _unauthorized und die 500-Stellen (nativ + PSGI) durchreichen - Designfall. Szenario danach freischalten.
+
+Start: Worktree .claude/worktrees/k78-error-shape (Branch k78-error-shape).
+
+2026-10-19 03:54 Umgesetzt: Knarr::_error_answer(proto, code, msg) = einziger Weg fuer selbst beantwortete Fehler (format_error_response; ohne Protokoll -- nur Manifest-Route -- das OpenAI-Shape). _unauthorized(proto) nimmt das Protokoll der Route (Route ist vor dem Key-Check bekannt; 404 'no route' bleibt ohne Protokoll im alten Shape). _handler_failure_answer liefert jetzt immer: Kategorie-Status (504/404) sonst 500. Native Stream sendet sein 200 erst mit dem ersten Event (erster Chunk oder Ende) -- Begruendung: nur so ist 'Backend scheitert vor dem ersten Chunk' als Status beantwortbar; gleiche Semantik wie Raw-Passthrough (Header erst mit Upstream-Headern) und PSGI (gepuffert). Trade-off: Client sieht bis zum ersten Token keine Header. PSGI: alles nach Auth/503 in eval, jeder Fehler -> _handler_failure_answer (vorher die -> Plack-Textfehler). Zusaetzlich gefunden+gefixt: Stream->from_callback verschluckte einen Fehler ohne wartenden Read als leeren, erfolgreichen Stream (Virtual-Engine streamt 'No Reaction' als 200 + end_turn).
+
+2026-10-19 04:00 Auch gefunden (nicht in Scope, fuer den Dispatcher): (1) 500-Texte tragen Perl-Ortsangaben ('at /home/.../Role/Chat.pm line 1164.') bis zum Client -- nur trailing whitespace wird gestrippt (_error_text). (2) Mid-stream-Fehler ohne Kategorie nach dem ersten Chunk: '[error: ...]' als Text-Chunk + format_stream_close, ohne End-Marker (format_stream_done) und ohne format_stream_error-Frame. (3) A2A beantwortet Fehler im OpenAI-Shape statt als JSON-RPC-error-Objekt (A2A hat kein eigenes format_error_response). (4) t/72_multi_listen.t flakt unter -j4 (Port-Race 'two distinct free ports'), einzeln gruen.
+
+2026-10-19 04:00 Done: 401 + alle generischen 500er (nativ + PSGI, sync + Stream vor erstem Chunk) laufen ueber Knarr::_error_answer -> format_error_response (Anthropic authentication_error/api_error, Ollama String). Native Routed-Stream sendet 200 erst mit erstem Chunk/Ende. Stream->from_callback verschluckt Frueh-Fehler nicht mehr. Szenario 09 freigeschaltet + erweitert (Ollama 401, Stream-Faelle), neu t/105_error_shape.t (nativ+PSGI, Handler-Fakes, Stream-Unit), angepasst t/76_auth_psgi_parity.t (401-Body je Protokoll) und t/87_handler_timeouts.t (Stream ohne Antwort -> 504 statt 200+Frame; broken stream -> 500 statt [error:]-Chunk). Alle neuen/angepassten Tests rot ohne Fix verifiziert. prove -lr -j4 t: 81 Dateien, 4866 Tests PASS (einziger Skip: Szenario 16 stream-usage, vorbestehend); 40/41 streaming live gruen. POD (Knarr ERRORS, auth_token, Protocol, PSGI, Stream), CLAUDE.md, Changes.
+
+Commit da23962 auf Branch k78-error-shape (nicht gemergt).
