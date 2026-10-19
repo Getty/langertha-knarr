@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-10-19T04:31:53Z
+claimed_by: claude-k77
+class: standard
+completed: 2026-10-19T04:31:53Z
+created: 2026-10-16T17:25:25Z
+id: 77
+priority: medium
+started: 2026-10-19T03:43:03Z
+status: done
+title: Routed streams never request usage (stream_options.include_usage)
+updated: 2026-10-19T04:32:01Z
+---
+
+Gefunden durch Szenario t/scenarios/16-stream-usage.yml (skip). Handler::Engine/Request::chat_f_args sendet stream_options.include_usage nicht; ein gerouteter Stream an einen OpenAI-Wire-Backend liefert keine Usage: Client-Stream, Anthropic message_delta (output_tokens 0), Ollama done-Zeile, Request-Log und Langfuse ohne Zahlen. Noetig: include_usage bei jedem gerouteten Stream (faehigkeitsgebunden; ob Langertha chat_stream_request es weiterreicht, klaeren). Szenario danach freischalten.
+
+Start: Worktrees knarr .claude/worktrees/k77-stream-usage (Branch k77-stream-usage), langertha ~/dev/langertha/.claude/worktrees/stream-usage (Branch stream-usage). Entscheidung: Gate als Capability stream_usage in Langertha (eigene Capability-Rolle nach ADR 0002/0016); der Core setzt stream_options.include_usage selbst in OpenAICompatible::chat_stream_request, wenn supports('stream_usage') -- so bekommen alle Langertha-Nutzer die Usage, die Wire-Kenntnis bleibt an einer Stelle, ein explizites stream_options des Aufrufers (%extra) gewinnt. knarr braucht dann keine eigene Wire-Logik.
+
+2026-10-19 04:05 Befund: knarr-Code braucht keine Aenderung. Gegen Langertha stream-usage (69eb820) ist Szenario 16 ohne skip gruen: Backend bekommt stream_options.include_usage vom Core, der Usage-Chunk nach dem Finish-Chunk ist inhaltsleer -> Stream::from_callback $emit verwirft leere Strings (kein leerer data:/content_block_delta/Ollama-Frame), $finish/$tool_call nur bei has_finish_reason/has_tool_calls (nicht ueberschrieben), $usage letzte Meldung gewinnt; kein $chunks->[-1] in lib/. Gegen Langertha main: Szenario 16 rot (usage fehlt in Client-Stream, alle 3 Protokolle, und Request-Log). Request::chat_f_args reicht kein stream_options weiter (gewollt, Wire-Wissen im Core).
+
+2026-10-19 04:13 Entscheidung Core-Abhaengigkeit: Tests, die den stream_usage-Core brauchen, skippen mit Begruendung, wenn Langertha::Role::StreamUsage nicht laedt (gleiches Muster wie skip_all ohne Engine::Virtual). Begruendung: bis zum Langertha-Release laeuft dzil test gegen CPAN-Langertha; ein harter Rotlauf wuerde die Suite blockieren, ohne etwas ueber knarr auszusagen. Der Release-Manager hebt den cpanfile-Floor, dann greift der Skip nie. Szenario-Runner bekommt dafuer ein generisches needs: {Modul: Grund} (statt skip:), Szenario 16 nutzt es. Pruefung per Modul statt per supports('stream_usage'), weil ein Stub-Modul die Rot-Gegenprobe gegen main ohne Code-Edit erlaubt.
+
+2026-10-19 04:13 Done, knarr-lib unveraendert (Handler::Engine/Stream::from_callback tragen den Core-Usage-Chunk schon korrekt: leerer Inhalt wird von $emit verworfen, finish_reason/tool_calls nur bei has_*, letzte Usage gewinnt). Geaendert: t/scenarios/16-stream-usage.yml (skip weg, needs: Langertha::Role::StreamUsage, +chunks/finish_reason, +OpenAI ohne include_usage -> kein Usage-Chunk aber Log hat Usage, +Tool-Call-Streams OpenAI/Anthropic mit Usage, +Backend-Body stream_options.include_usage), t/200_core_scenarios.t (needs:-Key), t/46_stream_usage.t (Subtest: echter Engine::OpenAI-Core gegen lokalen Upstream, der wie OpenAI nur auf include_usage den Usage-Frame schickt; prueft Upstream-Request, Usage in Stream/Trace/RequestLog, keine leeren Chunks, finish_reason + Tool-Call erhalten), Handler::Engine POD, Changes. Verifiziert: Gesamtsuite gegen Langertha stream-usage 80 Files/4793 Tests PASS; gegen Langertha main PASS (Szenario 16 und t/46 Subtest 11 skippen mit Grund); main + Stub-StreamUsage: Szenario 16 18 Fehler, t/46 Subtest 11 4 Fehler (rot); Mutationen (leere Chunks durchlassen / finish_reason ueberschreiben) machen t/46 rot. Streaming-Pflicht 40/41/46 PASS.
+
+Commit 2739214 auf Branch k77-stream-usage (nicht gemergt); braucht Langertha-Commit 69eb820 (Branch stream-usage).
+
+Koordinator 2026-10-19: geprüft (kombinierte Suite 4867 grün gegen langertha 2c3f74c, skeid/raider grün gegen neuen Core), gemerged (2739214 + langertha 2c3f74c). Beim Release: Langertha-Floor in cpanfile auf die Version mit stream_usage.
