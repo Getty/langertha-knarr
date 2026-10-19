@@ -48,6 +48,15 @@ Action names map to C<_action_*> methods on the Knarr core.
 
 Required. Returns a L<Langertha::Knarr::Request>.
 
+=method request_body_error
+
+    my $reason = $proto->request_body_error(\$body);
+
+Returns why the body cannot be a chat request (not JSON, or JSON that is no
+object) as a fixed text without the decoder's message, else nothing. Knarr
+answers it with a 400 in the protocol's error shape (k81). A2A overrides it
+to nothing: its parse failure is a JSON-RPC error of its own.
+
 =method format_chat_response
 
     my ($status, \%headers, $body) = $proto->format_chat_response($response, $request);
@@ -183,6 +192,21 @@ sub format_stream_close { '' }
 
 # An error answer in the protocol's own shape; default is the OpenAI wire's.
 sub error_uses_body { 0 }
+
+# The reason a request body cannot be a chat request, or nothing: it is not
+# JSON, or JSON that is no object (array, string, number, null). An empty
+# body counts as {} like in the parsers. The texts are fixed -- the
+# decoder's own message never reaches a client (k81). A protocol with its
+# own error for a broken body (A2A's JSON-RPC parse error) overrides it.
+sub request_body_error {
+  my ($self, $body_ref) = @_;
+  my $body = $$body_ref;
+  return unless defined $body && length $body;
+  my $data = eval { JSON::MaybeXS->new( utf8 => 1 )->decode($body) };
+  return 'request body is not valid JSON' if $@;
+  return 'request body must be a JSON object' unless ref $data eq 'HASH';
+  return;
+}
 
 # The code of a status in the error vocabulary ACP and AG-UI share.
 sub _status_error_code {

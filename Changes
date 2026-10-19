@@ -1,6 +1,16 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Fix: a request body that is not JSON, or JSON that is no object
+      (array, string, number, null), is answered 400 in the protocol's error
+      shape (k81) -- OpenAI, Anthropic, Ollama, ACP and AG-UI, natively and
+      under PSGI -- with a fixed text; it was a 500 carrying the JSON
+      decoder's message, or an empty request for null. The check is
+      Protocol::request_body_error, run before the parse and before any
+      handler; the raw passthrough sees the same body unchanged. A2A keeps
+      its JSON-RPC answer (-32700 for bad JSON); a JSON null body is now
+      -32600 Invalid Request there too.
+
     - Fix: ACP and AG-UI answer a sync error in their own shape (k80), not
       the OpenAI wire's {"error":{"message":...}}: ACP its Error object
       {"code":"server_error"|"not_found"|"invalid_input","message":...}

@@ -4,6 +4,7 @@ our $VERSION = '1.103';
 use Moose;
 use Future;
 use Future::AsyncAwait;
+use Future::Exception;
 use IO::Async::Loop;
 use IO::Async::Resolver;
 use Net::Async::HTTP;
@@ -1145,6 +1146,12 @@ sub _without_proxy_key {
 # by the native server and the PSGI adapter.
 sub _parse_chat_request {
   my ($self, $proto, $req, $body_ref) = @_;
+  # A body that is no JSON object is the client's mistake: 400 in the
+  # protocol's shape, a fixed text (k81). Checked before the parse, which
+  # alone would die with the decoder's message and become a 500.
+  if ( defined( my $reason = $proto->request_body_error($body_ref) ) ) {
+    die Future::Exception->new( $reason, 'bad_request' );
+  }
   my $sb_req = $proto->parse_chat_request( $req, $body_ref );
   # One header line at a time, as the parser recorded them (k60): a line
   # that was only the key is dropped, the others keep their order.
@@ -1204,8 +1211,11 @@ sub _dispatch {
     }
   } catch {
     my $err = $_;
-    $log->errorf("Request error (%s): %s", $action, $err);
-    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err), undef, $req->body ) );
+    my ( $message, $category ) = blessed($err) && $err->isa('Future::Exception')
+      ? ( $err->message, $err->category ) : ( $err );
+    $log->errorf("Request error (%s): %s", $action, $message);
+    $self->_send_simple( $req,
+      $self->_handler_failure_answer( $proto, $message, $category, undef, $req->body ) );
   };
 }
 
@@ -1345,6 +1355,7 @@ sub _handler_failure_status {
   my ($self, $category) = @_;
   return 504 if Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
   return 404 if defined $category && $category eq 'model_not_found';
+  return 400 if defined $category && $category eq 'bad_request';
   return;
 }
 

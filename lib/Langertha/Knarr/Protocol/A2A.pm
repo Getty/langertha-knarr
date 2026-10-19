@@ -45,6 +45,7 @@ L</agent_description> are then not used).
 =cut
 our $VERSION = '1.103';
 use Moose;
+use Carp qw( croak );
 use JSON::MaybeXS;
 use Data::UUID;
 use Time::HiRes qw( time );
@@ -127,6 +128,8 @@ sub protocol_routes {
 sub parse_chat_request {
   my ($self, $http_req, $body_ref) = @_;
   my $env = $self->_json->decode( $$body_ref || '{}' );
+  # JSON that is no object (null would pass as an empty request): -32600.
+  croak('request is not a JSON object') unless ref $env eq 'HASH';
   my $method = $env->{method} // '';
   my $params = $env->{params} // {};
   my $stream = $method eq 'tasks/sendSubscribe' ? 1 : 0;
@@ -237,8 +240,9 @@ sub _rpc_error {
     $id = $request->extra->{jsonrpc_id};
   }
   elsif ( defined $body && length $body ) {
-    my $env = eval { $self->_json->decode($body) };
-    if ( !defined $env && $status == 500 ) {
+    my $env;
+    my $decoded = eval { $env = $self->_json->decode($body); 1 };
+    if ( !$decoded && $status == 500 ) {
       ( $status, $code, $message ) = ( 400, -32700, 'Parse error' );
     }
     elsif ( ref $env eq 'HASH' ) {
@@ -260,6 +264,9 @@ sub _rpc_error {
 }
 
 sub error_uses_body { 1 }
+
+# A body that is not JSON is answered by _rpc_error as -32700 / -32600 (k80).
+sub request_body_error { return }
 
 =method format_error_response
 
