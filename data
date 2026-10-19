@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-10-19T10:12:32Z
+claimed_by: k80-worker
+class: standard
+completed: 2026-10-19T10:12:31Z
+created: 2026-10-19T09:58:27Z
+id: 80
+priority: medium
+started: 2026-10-19T09:58:57Z
+status: done
+title: ACP and AG-UI sync error bodies in their own shape, A2A error ids
+updated: 2026-10-19T10:12:32Z
+---
+
+Rest aus #79 (2026-10-19): ACP/AG-UI-Sync-Fehlerbody bleibt im OpenAI-Shape; A2A-401/Parse-Fehler und synchrones die im Handler antworten mit id null statt der Request-id (wo bekannt).
+
+2026-10-19 10:07 Decisions: ACP = top-level Error object {code,message} (ACP spec; server_error/not_found/invalid_input, 401 -> invalid_input, ACP has no auth code). AG-UI defines no HTTP error body, only RUN_ERROR; sync body = that event as application/json, same object as its stream frame. A2A id read off the raw body when no parsed request exists (401/503 come before parse; PSGI reads body only if Protocol::error_uses_body). Non-JSON body -> 400/-32700 Parse error/id null (JSON-RPC 2.0: null when id undetectable; was 500 with decoder text). Valid JSON non-object -> 400/-32600. Worktree was behind main; fast-forwarded to f830fb1. Open: bad-JSON parse failures of OpenAI/ACP/AG-UI still 500, outside this card.
+
+Commit 8621efe auf worktree-k80-error-format; Suite 83 Dateien / 5050 Tests PASS. Offen: Bad-JSON-Parsefehler bei OpenAI/ACP/AG-UI antworten weiter 500 (ausserhalb k80).
+
+Koordinator 2026-10-19: geprüft (Suite grün, t/107 rot gegen alten Code), gemerged (8621efe). Rest: Bad-JSON bei OpenAI/ACP/AG-UI noch 500.
