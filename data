@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-19T05:52:27Z
+claimed_by: knarr-k79
+class: standard
+completed: 2026-10-19T05:52:26Z
+created: 2026-10-19T05:37:28Z
+id: 79
+priority: medium
+started: 2026-10-19T05:37:45Z
+status: done
+title: 'Follow-ups of k78: no Perl paths in 500 texts, error frame mid-stream, A2A
+  error object, flaky t/72'
+updated: 2026-10-19T05:52:27Z
+---
+
+Aus den Notizen zu #78 (2026-10-19): (1) 500-Texte zeigen Perl-Pfade ('at …/Chat.pm line …') — an Clients nur bereinigte Meldung, Details ins Log. (2) Fehler ohne Kategorie mitten im Stream erscheint als [error: …]-Text-Chunk ohne Error-Frame des Protokolls. (3) A2A antwortet ohne JSON-RPC-error-Objekt. (4) t/72_multi_listen.t wackelt unter -j4 (Port-Kollision). (5) t/97_workers_live: 'Cannot fork a worker' unter -j4 auf stderr klären.
+
+Punkte 1-3 umgesetzt (Branch k79-folgen, Worktree .claude/worktrees/k79-folgen): Knarr::_error_text bereinigt (Pfad/Zeile/Stack/@INC), PSGI loggt nun volle Meldung; _stream_failure_frame nutzt 500 als Default, A2A/ACP/AGUI haben format_stream_error (Fehlerframe ersetzt End-Marker); A2A format_error_response liefert JSON-RPC error (-32603/-32600, id aus Request, null wenn nicht geparst). Test t/106_error_hygiene.t. Entscheidung: ACP/AG-UI non-stream-Fehlerbody unveraendert (OpenAI-Shape), nur Stream-Frames spec-nah; OpenAI-Fehlerframe ohne [DONE] (wie Raw-Passthrough).
+
+Punkt 4: t/72 und t/98 (gleiches Muster) nutzen Port 0 und lesen die gebundenen Ports aus _servers; Ursache = free_port() bindet/schliesst/bindet spaeter (TOCTOU im gemeinsamen Ephemeral-Bereich, den auch Client-Verbindungen paralleler Tests nutzen). Flake war lokal nicht reproduzierbar (144 parallele Laeufe + Connection-Hog ohne Fehler), Fix folgt der Ursachenanalyse. Punkt 5: 'Cannot fork a worker' ist keine Race, sondern die absichtlich injizierte EAGAIN des Subtests 'a first worker that cannot fork is fatal' (auch ohne -j4 auf stderr); t/97 faengt stderr jetzt in Datei und prueft die Meldung. t/76 erwartet A2A-401 nun als JSON-RPC (id null, da Request vor Auth nicht geparst).
+
+Branch k79-folgen (Worktree .claude/worktrees/k79-folgen), 4 WIP-Commits, Suite 82 Dateien/5010 Tests PASS, 0 Skips. 1: _error_text bereinigt Pfade/Stack/@INC, PSGI loggt volle Meldung. 2: Fehlerframes fuer alle 6 Protokolle, 500 als Default, Frame ersetzt End-Marker. 3: A2A JSON-RPC error. 4/5: siehe Notizen. Offen/Folge: ACP/AG-UI Sync-Fehlerbody noch OpenAI-Shape; A2A-Auth-401 und Parse-Fehler mit id null; Flake t/72 lokal nicht reproduziert. Vorschlag Commit-Subject: Keep Perl internals out of client errors, frame mid-stream failures per protocol, JSON-RPC errors for A2A (k79)
+
+Koordinator 2026-10-19: geprüft (5010 grün, t/106 + t/76 rot gegen alten Code), gemerged (40c93d0). Offen: ACP/AG-UI Sync-Fehlerbody im OpenAI-Shape; A2A-401/Parse-Fehler mit id null.
