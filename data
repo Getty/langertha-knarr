@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-10-19T10:33:15Z
+claimed_by: claude-k81
+class: standard
+completed: 2026-10-19T10:33:15Z
+created: 2026-10-19T10:12:43Z
+id: 81
+priority: medium
+started: 2026-10-19T10:13:11Z
+status: done
+title: Malformed JSON bodies answer 400 in every protocol, not 500
+updated: 2026-10-19T10:33:15Z
+---
+
+Rest aus #80 (2026-10-19): Bad-JSON-Parsefehler bei OpenAI, Anthropic, Ollama, ACP und AG-UI antworten mit 500 (Decoder-Text). Erwartet: 400 im Fehlerformat des Protokolls (invalid_request_error o. ä.), ohne Decoder-Interna; nativ + PSGI.
+
+Branch worktree-k81-badjson, 7463cb7, Suite gruen, bereit fuer Review/Commit-Politur
