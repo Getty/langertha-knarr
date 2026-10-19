@@ -102,7 +102,14 @@ sub to_app {
   };
 }
 
+# The body is read once and kept in the environment: an error answer may
+# need it (_error_body) before the action reads it.
 sub _read_body {
+  my ($self, $env) = @_;
+  return $env->{'knarr.body'} //= $self->_slurp_body($env);
+}
+
+sub _slurp_body {
   my ($self, $env) = @_;
   my $input = $env->{'psgi.input'} or return '';
   my $len = $env->{CONTENT_LENGTH} // 0;
@@ -117,6 +124,14 @@ sub _read_body {
     $read += $n;
   }
   return $body;
+}
+
+# The request body for an error answer, read only for a protocol that
+# addresses its errors with it (A2A's JSON-RPC id, k80); undef for any other.
+sub _error_body {
+  my ($self, $env, $proto) = @_;
+  return unless $proto && $proto->error_uses_body;
+  return $self->_read_body($env);
 }
 
 sub _handle_psgi {
@@ -156,12 +171,12 @@ sub _handle_psgi {
   # protocol's error shape (k78), before any handler work, so a rejected
   # streaming request never starts its stream.
   unless ( $sb->_check_auth( $fake_http, $action ) ) {
-    my ($status, $ctype, $body) = $sb->_unauthorized($proto);
+    my ($status, $ctype, $body) = $sb->_unauthorized( $proto, $self->_error_body( $env, $proto ) );
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 
   # No setup delivered yet (remote_config): 503, as on the native server (k75).
-  if ( my ($status, $ctype, $body) = $sb->_not_configured_answer($proto) ) {
+  if ( my ($status, $ctype, $body) = $sb->_not_configured_answer( $proto, $self->_error_body( $env, $proto ) ) ) {
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 
@@ -170,14 +185,14 @@ sub _handle_psgi {
   # of its category (504 for an upstream timeout, k36; 404 for a model
   # nothing serves, k41), anything else 500 (k78). A stream is buffered, so
   # nothing has gone out yet when its handler fails, mid-stream included.
-  my ( $res, $sb_req );
-  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http, \$sb_req ); 1 };
+  my ( $res, $sb_req, $raw_body );
+  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http, \$sb_req, \$raw_body ); 1 };
   my $e = $@;
   my ( $message, $category ) = blessed($e) && $e->isa('Future::Exception')
     ? ( $e->message, $e->category ) : ( $e );
   # The client gets the cleaned text; the log keeps the whole message (k79).
   $log->errorf( 'Request error (%s): %s', $route->{action}, $message );
-  my ($status, $ctype, $body) = $sb->_handler_failure_answer( $proto, $message, $category, $sb_req );
+  my ($status, $ctype, $body) = $sb->_handler_failure_answer( $proto, $message, $category, $sb_req, $raw_body );
   return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
 }
 
@@ -185,7 +200,7 @@ sub _handle_psgi {
 # Dies on any failure; _handle_psgi answers it. The parsed request is put
 # into $$request_slot as soon as it exists, so the error answer can address it.
 sub _handle_action {
-  my ($self, $env, $route, $fake_http, $request_slot) = @_;
+  my ($self, $env, $route, $fake_http, $request_slot, $body_slot) = @_;
   my $sb = $self->knarr;
   my $path   = $env->{PATH_INFO} // '/';
   my $proto  = $route->{protocol};
@@ -215,11 +230,13 @@ sub _handle_action {
     return [ $status, [ %$headers ], [ $body ] ];
   }
   if ( $action ne 'chat' ) {
-    my ($status, $ctype, $body) = $sb->_error_answer( $proto, 500, "unknown action $action" );
+    my ($status, $ctype, $body) = $sb->_error_answer( $proto, 500, "unknown action $action",
+      undef, $self->_error_body( $env, $proto ) );
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
 
   my $body = $self->_read_body($env);
+  $$body_slot = $body if $body_slot;
   my $sb_req = $sb->_parse_chat_request( $proto, $fake_http, \$body );
   $$request_slot = $sb_req if $request_slot;
 

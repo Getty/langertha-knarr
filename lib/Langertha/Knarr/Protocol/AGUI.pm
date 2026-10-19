@@ -149,13 +149,35 @@ C<RUN_FINISHED>.
 
 =cut
 
-sub format_stream_error {
+sub _run_error {
   my ($self, $status, $message) = @_;
-  return $self->_sse({
+  return {
     type    => 'RUN_ERROR',
     message => "$message",
-    code    => $status == 404 ? 'not_found' : $status >= 500 ? 'server_error' : 'invalid_input',
-  });
+    code    => $self->_status_error_code($status),
+  };
+}
+
+sub format_stream_error {
+  my ($self, $status, $message) = @_;
+  return $self->_sse( $self->_run_error( $status, $message ) );
+}
+
+=method format_error_response
+
+    my ($status, $headers, $body) = $proto->format_error_response( 500, 'boom' );
+
+An error before the stream started: AG-UI defines no error body of its
+own, only the C<RUN_ERROR> event, so the body is that event as plain JSON
+(C<application/json>, the HTTP status kept) -- the same object the stream
+sends as an SSE frame once it has started.
+
+=cut
+
+sub format_error_response {
+  my ($self, $status, $message) = @_;
+  return ( $status, { 'Content-Type' => 'application/json' },
+    $self->_json->encode( $self->_run_error( $status, $message ) ) );
 }
 
 __PACKAGE__->meta->make_immutable;

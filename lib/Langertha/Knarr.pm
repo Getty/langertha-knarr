@@ -149,9 +149,12 @@ failed or timed out -- is in the error shape of the protocol the client
 spoke (L<Langertha::Knarr::Protocol/format_error_response>): Anthropic's
 C<{"type":"error","error":{"type":...,"message":...}}> with the error type
 of the status (C<authentication_error>, C<api_error>, ...), Ollama's
-C<{"error":"..."}>, A2A's JSON-RPC response with an C<error> object (and
-the request's C<id>), the OpenAI wire's C<{"error":{"message":...}}> for
-OpenAI, ACP and AG-UI. The message is the cause without where Perl died:
+C<{"error":"..."}>, A2A's JSON-RPC response with an C<error> object and
+the request's C<id> (C<null> for a body that is not JSON, which is a
+C<400> C<-32700> Parse error), ACP's C<{"code":...,"message":...}>
+(C<server_error>, C<not_found>, C<invalid_input>), AG-UI's C<RUN_ERROR>
+event as JSON, the OpenAI wire's C<{"error":{"message":...}}> for
+OpenAI. The message is the cause without where Perl died:
 no file path, line number, stack frame or C<@INC> list ever reaches a
 client; the log and the request log keep the full text. Only an unknown path and Knarr's own manifest
 route, which have no protocol, answer in the OpenAI wire's shape. The
@@ -1068,10 +1071,10 @@ sub _presents_admin_key {
 # setup to serve from (remote_config without a start setup, before the first push, k75): 503 in the
 # protocol's error shape. Empty when Knarr can serve.
 sub _not_configured_answer {
-  my ($self, $proto) = @_;
+  my ($self, $proto, $body) = @_;
   my $admin = $self->admin or return;
   return if $admin->configured;
-  return $self->_error_answer( $proto, 503, 'not configured: Knarr has no setup yet' );
+  return $self->_error_answer( $proto, 503, 'not configured: Knarr has no setup yet', undef, $body );
 }
 
 # An error Knarr answers itself, as ( status, content type, body ) in the
@@ -1080,12 +1083,15 @@ sub _not_configured_answer {
 # protocol, gets the OpenAI wire's {"error":{"message":...}}. Every such
 # answer goes through here -- 401, 404, 500, 502-504 alike (k78) -- on the
 # native server and the PSGI adapter. $sb_req, when the request was parsed,
-# lets a protocol address the error to it (A2A's JSON-RPC id).
+# lets a protocol address the error to it (A2A's JSON-RPC id); $body, the
+# request's raw body, does so for an error that came before the parse (401,
+# 503) or because of it -- only for a protocol that reads it
+# (Protocol::error_uses_body, k80).
 sub _error_answer {
-  my ($self, $proto, $code, $message, $sb_req) = @_;
+  my ($self, $proto, $code, $message, $sb_req, $raw_body) = @_;
   return ( $code, 'application/json',
     $self->_json->encode({ error => { message => "$message" } }) ) unless $proto;
-  my ($status, $headers, $body) = $proto->format_error_response( $code, $message, $sb_req );
+  my ($status, $headers, $body) = $proto->format_error_response( $code, $message, $sb_req, $raw_body );
   return ( $status, $headers->{'Content-Type'} // 'application/json', $body );
 }
 
@@ -1160,8 +1166,8 @@ sub _parse_chat_request {
 # The route is known before the key is checked; only Knarr's own routes
 # (the manifest) have no protocol and get the OpenAI wire's shape.
 sub _unauthorized {
-  my ($self, $proto) = @_;
-  return $self->_error_answer( $proto, 401, 'unauthorized' );
+  my ($self, $proto, $body) = @_;
+  return $self->_error_answer( $proto, 401, 'unauthorized', undef, $body );
 }
 
 sub _dispatch {
@@ -1177,16 +1183,16 @@ sub _dispatch {
   return $self->_dispatch_admin( $req, $action ) if $route->{admin};
   my $proto  = $route->{protocol};
   unless ( $self->_check_auth( $req, $action ) ) {
-    return $self->_send_simple( $req, $self->_unauthorized($proto) );
+    return $self->_send_simple( $req, $self->_unauthorized( $proto, $req->body ) );
   }
-  if ( my @answer = $self->_not_configured_answer($proto) ) {
+  if ( my @answer = $self->_not_configured_answer( $proto, $req->body ) ) {
     return $self->_send_simple( $req, @answer );
   }
   my $simple = $self->_simple_action($action);
   my $code = $simple ? undef : $self->can("_action_$action");
   unless ( $simple || $code ) {
     return $self->_send_simple( $req,
-      $self->_error_answer( $proto, 500, "unknown action $action" ) );
+      $self->_error_answer( $proto, 500, "unknown action $action", undef, $req->body ) );
   }
   try {
     if ( $simple ) {
@@ -1199,7 +1205,7 @@ sub _dispatch {
   } catch {
     my $err = $_;
     $log->errorf("Request error (%s): %s", $action, $err);
-    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err) ) );
+    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err), undef, $req->body ) );
   };
 }
 
@@ -1346,9 +1352,9 @@ sub _handler_failure_status {
 # protocol's error shape: the status of its category, else 500 -- a backend
 # that failed is answered in the client's own shape too (k78).
 sub _handler_failure_answer {
-  my ($self, $proto, $err, $category, $sb_req) = @_;
+  my ($self, $proto, $err, $category, $sb_req, $body) = @_;
   return $self->_error_answer( $proto,
-    $self->_handler_failure_status($category) // 500, _error_text($err), $sb_req );
+    $self->_handler_failure_status($category) // 500, _error_text($err), $sb_req, $body );
 }
 
 # The same for a stream whose headers are out: the protocol's error frame
@@ -1600,7 +1606,7 @@ sub _raw_passthrough_fall_back {
   } catch {
     my $err = $_;
     $log->errorf("Passthrough fallback error [%s]: %s", $sb_req->model // 'unknown', $err);
-    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err) ) );
+    $self->_send_simple( $req, $self->_error_answer( $proto, 500, _error_text($err), $sb_req ) );
   };
   return;
 }

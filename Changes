@@ -1,6 +1,22 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Fix: ACP and AG-UI answer a sync error in their own shape (k80), not
+      the OpenAI wire's {"error":{"message":...}}: ACP its Error object
+      {"code":"server_error"|"not_found"|"invalid_input","message":...}
+      (top level, as in the ACP specification), AG-UI -- which defines no
+      error body, only the RUN_ERROR event -- that event as the JSON body,
+      the same object its stream sends once it has started. The HTTP status
+      is unchanged.
+
+    - Fix: an A2A error carries the request's JSON-RPC id (k80): a handler
+      failure, the 401 and the 503 (decided before the parse) read it off
+      the raw body. The id is null only where JSON-RPC 2.0 requires it --
+      the id could not be detected: a body that is not JSON answers 400,
+      -32700 Parse error, id null (it was a 500 with the decoder's text).
+      Protocol::format_error_response takes the raw body as 4th argument,
+      Protocol::error_uses_body tells PSGI to read it for such an error.
+
     - Fix: errors Knarr answers itself no longer show Perl internals (k79):
       the text a client gets has no " at /path/Module.pm line N.", no stack
       frames, no @INC list and no source path; the log (and the request log)

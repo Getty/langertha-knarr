@@ -76,9 +76,13 @@ my %anonymous_action = ( a2a_card => 1 );
 my %unauthorized_body = (
   Anthropic => { type => 'error', error => { type => 'authentication_error', message => 'unauthorized' } },
   Ollama    => { error => 'unauthorized' },
-  # JSON-RPC (k79); the request is not parsed before the key is checked: id null
-  A2A       => { jsonrpc => '2.0', id => undef,
+  # JSON-RPC (k79); the request is not parsed before the key is checked, its
+  # id is read off the body (k80; every A2A request of this test has id 1)
+  A2A       => { jsonrpc => '2.0', id => 1,
     error => { code => -32600, message => 'unauthorized', data => { status => 401 } } },
+  # ACP's Error object and AG-UI's RUN_ERROR event (k80)
+  ACP       => { code => 'invalid_input', message => 'unauthorized' },
+  AGUI      => { type => 'RUN_ERROR', code => 'invalid_input', message => 'unauthorized' },
 );
 sub unauthorized_body {
   my ($route) = @_;

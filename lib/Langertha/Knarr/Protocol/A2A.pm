@@ -225,34 +225,61 @@ sub format_stream_done { '' }
 
 # JSON-RPC's error object (k79): -32603 Internal error for a server-side
 # status, -32600 Invalid Request for a client-side one; the HTTP status in
-# data. The id is the request's, null when no request was parsed.
+# data. The id is the request's: from the parsed request, else read off the
+# raw body (the 401 comes before the parse), else null -- JSON-RPC 2.0: null
+# when the id could not be detected. A body that is not JSON at all is the
+# failure of the parse: 400, -32700 Parse error, id null, the decoder's own
+# text kept out of the answer (k80).
 sub _rpc_error {
-  my ($self, $status, $message, $request) = @_;
+  my ($self, $status, $message, $request, $body) = @_;
+  my ($id, $code) = ( undef, $status >= 500 ? -32603 : -32600 );
+  if ( $request ) {
+    $id = $request->extra->{jsonrpc_id};
+  }
+  elsif ( defined $body && length $body ) {
+    my $env = eval { $self->_json->decode($body) };
+    if ( !defined $env && $status == 500 ) {
+      ( $status, $code, $message ) = ( 400, -32700, 'Parse error' );
+    }
+    elsif ( ref $env eq 'HASH' ) {
+      $id = $env->{id} if defined $env->{id} && !ref $env->{id};
+    }
+    elsif ( $status == 500 ) {
+      ( $status, $code, $message ) = ( 400, -32600, 'Invalid Request' );
+    }
+  }
   return {
     jsonrpc => '2.0',
-    id      => $request ? $request->extra->{jsonrpc_id} : undef,
+    id      => $id,
     error   => {
-      code    => $status >= 500 ? -32603 : -32600,
+      code    => $code,
       message => "$message",
       data    => { status => $status + 0 },
     },
   };
 }
 
+sub error_uses_body { 1 }
+
 =method format_error_response
 
-    my ($status, $headers, $body) = $proto->format_error_response( 500, 'boom', $request );
+    my ($status, $headers, $body) = $proto->format_error_response( 500, 'boom', $request, $raw_body );
 
 A2A answers an error as a JSON-RPC response with an C<error> object (C<code>,
 C<message>, C<data.status>) and the C<id> of the request, not the OpenAI
-wire's C<{"error":{"message":...}}>. The HTTP status is kept.
+wire's C<{"error":{"message":...}}>. The HTTP status is kept. The C<id> comes
+from the parsed request, else from the raw body (a C<401> is decided before
+the parse), else it is C<null>. A 500 whose body is not JSON was a failed
+parse: it becomes 400 with C<-32700> C<Parse error>, and C<id> C<null>, as
+JSON-RPC 2.0 requires when the id cannot be detected.
 
 =cut
 
 sub format_error_response {
-  my ($self, $status, $message, $request) = @_;
-  return ( $status, { 'Content-Type' => 'application/json' },
-    $self->_json->encode( $self->_rpc_error( $status, $message, $request ) ) );
+  my ($self, $status, $message, $request, $body) = @_;
+  my $error = $self->_rpc_error( $status, $message, $request, $body );
+  return ( $error->{error}{data}{status}, { 'Content-Type' => 'application/json' },
+    $self->_json->encode($error) );
 }
 
 =method format_stream_error

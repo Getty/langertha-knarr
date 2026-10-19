@@ -149,13 +149,29 @@ the C<message>). It takes the place of C<run.completed>.
 
 =cut
 
+=method format_error_response
+
+    my ($status, $headers, $body) = $proto->format_error_response( 500, 'boom' );
+
+ACP's C<Error> object at the top of the body: C<{"code":"server_error","message":"boom"}>,
+C<code> being C<server_error> (5xx), C<not_found> (404) or C<invalid_input>
+(any other status, the 401 included -- ACP has no other code).
+
+=cut
+
+sub format_error_response {
+  my ($self, $status, $message) = @_;
+  return ( $status, { 'Content-Type' => 'application/json' },
+    $self->_json->encode({ code => $self->_status_error_code($status), message => "$message" }) );
+}
+
 sub format_stream_error {
   my ($self, $status, $message, $request) = @_;
   return $self->_sse_event( 'run.failed' => {
     run_id => $request ? $request->extra->{run_id} : undef,
     status => 'failed',
     error  => {
-      code    => $status == 404 ? 'not_found' : $status >= 500 ? 'server_error' : 'invalid_input',
+      code    => $self->_status_error_code($status),
       message => "$message",
     },
   });

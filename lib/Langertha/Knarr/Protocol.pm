@@ -89,9 +89,19 @@ C<{"error":{"message":...}}>; Anthropic answers
 C<{"type":"error","error":{"type":...,"message":...}}>, Ollama a plain
 C<{"error":"..."}>, A2A a JSON-RPC response with an C<error> object. The
 optional third argument is the parsed L<Langertha::Knarr::Request> (absent
-when the request never parsed); A2A takes the JSON-RPC C<id> from it. Knarr answers every error of its own through it, the
-C<401> and the C<500> of a failed backend included (see
-L<Langertha::Knarr/ERRORS>).
+when the request never parsed); the optional fourth is the request's raw body
+(see L</error_uses_body>). A2A takes the JSON-RPC C<id> from them. ACP answers
+its C<Error> object C<{"code":...,"message":...}> (C<server_error>,
+C<not_found>, C<invalid_input>), AG-UI the C<RUN_ERROR> event as JSON. Knarr
+answers every error of its own through it, the C<401> and the C<500> of a
+failed backend included (see L<Langertha::Knarr/ERRORS>).
+
+=method error_uses_body
+
+True for a protocol whose error answer reads the request body (A2A's
+JSON-RPC C<id>, which is in the body even when the request was rejected
+before it parsed): the PSGI adapter reads the body for such an error only
+then. Default false.
 
 =method format_stream_error
 
@@ -172,6 +182,14 @@ sub format_stream_open  { '' }
 sub format_stream_close { '' }
 
 # An error answer in the protocol's own shape; default is the OpenAI wire's.
+sub error_uses_body { 0 }
+
+# The code of a status in the error vocabulary ACP and AG-UI share.
+sub _status_error_code {
+  my ($self, $status) = @_;
+  return $status == 404 ? 'not_found' : $status >= 500 ? 'server_error' : 'invalid_input';
+}
+
 sub format_error_response {
   my ($self, $status, $message, $request) = @_;
   return ( $status, { 'Content-Type' => 'application/json' },
