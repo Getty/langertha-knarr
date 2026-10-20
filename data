@@ -1,0 +1,145 @@
+---
+claimed_at: 2026-10-20T21:20:44Z
+claimed_by: claude-k82
+class: standard
+created: 2026-10-20T20:03:06Z
+id: 82
+priority: high
+started: 2026-10-20T20:05:34Z
+status: review
+tags:
+- auth
+- citiai
+title: Token auth per model against a PostgreSQL view, authorizer after parsing, routing
+  per token provider (CitiAI tester)
+updated: 2026-10-20T21:20:44Z
+---
+
+# Langertha::Knarr: Token-Prüfung je Modell gegen eine Datenbank-View
+
+Übergabe an die Knarr-Entwicklung. Anlass ist der Modelltester der
+CitiAI-Plattform. Ein Admin klickt an einem Modell auf „Testen“. Die Plattform
+stellt dann ein kurzlebiges Token (15 min, höchstens 60) für **genau dieses
+Modell** aus. Der Browser spricht mit einem Tester-Knarr, der die
+Anbieter-Schlüssel hält. Anbieter-Schlüssel liegen nur im Knarr, nie in der
+Plattform-Oberfläche oder im Browser.
+
+core rollt den Tester-Knarr schon aus (`config.tester` am Knarr-Hexel). Weil
+Knarr 1.102 das Folgende nicht kann, ist er gesperrt (`TESTER_LOCK_KEY`, 401 auf
+alles).
+
+## Befund Knarr 1.102
+
+- Es gibt nur `auth_token`, einen festen String. `_check_auth` vergleicht
+  `Authorization: Bearer` bzw. `x-api-key` damit. Es gibt keinen Hook, kein Plugin
+  und keine Auth-Klasse.
+- Die Prüfung läuft in `_dispatch` **vor** dem Parsen der Anfrage, das Modell ist
+  dort noch unbekannt.
+- `knarr start` baut `Langertha::Knarr->new` fest (`Start.pm`), eine andere
+  Klasse lässt sich nicht einschieben.
+- Routing gibt es nur statisch (`models:`, `default`, `passthrough`).
+- Gut: Das Request-Log ist aus, solange `logging.file/dir`, `KNARR_LOG_*` und
+  `LANGFUSE_*` fehlen. Unbekannte Konfigschlüssel werden ignoriert.
+
+## Was gebraucht wird
+
+### 1. Prüfstelle nach dem Parsen
+Ein austauschbarer Authorizer, z. B. `authorizer->authorize($req, $action, $model)`,
+aufgerufen, nachdem Aktion (chat, completions, embeddings, models) und Modell
+bekannt sind. Der bisherige `auth_token` wird eine Implementierung davon.
+Rückgabe: erlaubt, oder ein Fehler mit HTTP-Status (401 unbekannt/abgelaufen,
+403 falsches Modell). `GET /v1/models` liefert bei Token-Auth nur das Modell des
+Tokens.
+
+### 2. `token_auth` gegen PostgreSQL
+Die Konfiguration, die core schon in `tester/knarr.yaml` schreibt:
+
+```yaml
+token_auth:
+  backend: postgresql
+  dsn: dbi:Pg:host=…;dbname=…
+  user: tester_knarr
+  password_env: TESTER_DB_PASSWORD
+  relation: citiai_tester_token_auth      # View der Plattform, nur SELECT
+  listen: citiai_tester_token             # NOTIFY-Kanal bei Ausstellen/Widerruf
+  hash: sha256                            # sha256(Bearer) = token_hash (hex)
+  columns: { hash: token_hash, model: model, provider: provider, expires: expires_at }
+  match_model: true
+```
+
+Geprüft wird `sha256(Bearer) = token_hash`, `expires_at > now()` und, bei
+`match_model`, das Modell der Anfrage gegen das Modell der Zeile. Knarr cacht die
+Treffer und verwirft den Cache bei `NOTIFY` auf `listen`. Fehlt die Verbindung,
+wird abgelehnt (fail-closed). Das Token selbst wird nie geloggt.
+
+### 3. Routing je Zeile
+`routes:` nach der Spalte `provider`: `local` → ein Skeid-Upstream (eigene
+Modelle, Dienstschlüssel aus der Umgebung), `openai`/`anthropic`/… → der
+jeweilige Anbieter mit dem Schlüssel, den Knarr aus OpenBao bzw. seiner
+Umgebung hat.
+
+```yaml
+routes:
+  local:     { upstream: http://api:8080/v1, key_env: SKEID_KEY }
+  openai:    { provider: openai,    key_env: OPENAI_API_KEY }
+  anthropic: { provider: anthropic, key_env: ANTHROPIC_API_KEY }
+```
+
+### 4. Verdrahtung
+`knarr start` liest `token_auth` und `routes` aus der Konfiguration und baut den
+Authorizer und das Routing. Ohne diese Schlüssel verhält sich Knarr wie bisher.
+
+## Tests (Vorschlag)
+- Authorizer-Schnittstelle: Der bisherige `auth_token` verhält sich unverändert.
+- `token_auth` gegen eine Test-DB: gültiges Token → 200, abgelaufenes → 401,
+  falsches Modell → 403, nach `NOTIFY` und Widerruf → 401 ohne Neustart. Die
+  Modellliste zeigt nur das Token-Modell.
+- Routing: `provider = local` geht an den Skeid-Mock, `openai` an den
+  Anbieter-Mock. Der Schlüssel erscheint in keiner Antwort und in keinem Log.
+
+## Danach in CitiAI
+core lässt `TESTER_LOCK_KEY` weg (core#126), und die Plattform zeigt den
+Tester-Link als aktiv. Offen auf CitiAI-Seite ist, wer den Skeid-Dienstschlüssel
+`tester.skeid_key` ausstellt.
+
+2026-10-20 20:08 Entwurf (claude-k82): zweistufiger Authorizer (identify vor dem Parsen: 401/503; authorize nach dem Parsen: 403), StaticKey = bisheriges auth_token bitgenau, Token-Authorizer über TokenStore (Memory für Tests, Pg async via pg_async+pg_socket unter IO::Async, LISTEN), routes-Handler nach provider, raw passthrough unter token_auth aus. Branch k82-token-auth.
+
+2026-10-20 20:11 TokenStore role + Memory store landed (lib/Langertha/Knarr/TokenStore.pm, TokenStore/Memory.pm); interface in tmp/k82-store-ready.txt. Next: TokenStore::Pg (pg_async + pg_socket watch).
+
+2026-10-20 20:11 knarr-worker (Authorizer/Knarr/PSGI/TokenRoutes): started. Plan: admin-key 401 stays in Knarr before the authorizer (both authorizers alike); Request->grant rw + apply_grant fills the token model; raw passthrough off + auth headers dropped when forwards_client_key is 0.
+
+2026-10-20 20:19 knarr-worker: Authorizer role + StaticKey + Token + Handler::TokenRoutes written; Knarr.pm/PSGI.pm wired (identify_f before parse, authorize after; Request->grant + apply_grant). Router gained public engine_for(def, model) (one-line delegate to _get_engine) so TokenRoutes reuses engine construction -- cli-worker lane, please note. TokenRoutes: provider routes accept an optional url (regional endpoint; used by tests for a provider mock) -- Config validation may allow it. t/110, t/111 green; t/112 routing next.
+
+2026-10-20 20:23 TokenStore part done (store worker): TokenStore role (+poll, hash_token, on_invalidate single listener), Memory, Pg. Pg = DBD::Pg pg_async + dup of pg_socket watched by IO::Async::Handle (results + NOTIFY without polling), 1 s ticker only while a query is in flight (query_timeout 10 s -> lost; also collects input a libpq call left behind), queue with shared in-flight hash, lost -> available 0 + invalidate(disconnect) + pending fail + reconnect 1,2,4..30 s + LISTEN again; lazy connect, pid change -> InactiveDestroy + invalidate; DSN gets connect_timeout=10 + keepalives 30/10/3 unless set (connect is the one blocking step: DBD::Pg has no async connect). Fixed failure text 'token store unavailable'; DBI errors logged first line, password + 64-hex masked. cpanfile recommends DBI, DBD::Pg. Tests t/111_token_store_memory.t (offline) + t/112_token_store_pg_live.t (live vs knarr_test, 10 subtests incl. kill backend, query timeout, blocking path, fork, secrets; schema dropped in END, also on TERM) green 3x; skipped mode green; RED vs old (modules missing); 3 mutations caught. Authorizer must NOT gate on available before asking (lazy connect) and must call poll before reading its cache on PSGI.
+
+2026-10-20 20:23 knarr-worker: tests t/110_authorizer_static.t, t/113_token_auth.t, t/114_token_routes.t (renamed off 111/112, which the store worker uses) green; red against old main shown. Running full suite next.
+
+2026-10-20 20:27 Store follow-up: Pg connect attempts under the loop are preceded by a non-blocking TCP probe (IO::Async connect + timeout_future, connect_timeout default 3 s); probe failure -> backoff without any DBI call; lookups wait during an attempt, fail fast during backoff; no probe for unix-socket/service/host-list DSNs (documented). Tests renamed t/113_token_store_memory.t, t/114_token_store_pg_live.t; t/114 gained DSN-target parsing + closed-port and unroutable (192.0.2.1) cases asserting a 50 ms loop timer never gaps >= 0.5 s, fixed failure text, no DBI connect. Live 3x green; skip-probe mutation makes the unroutable case fail (gap) as intended.
+
+2026-10-20 20:28 knarr-worker DONE (my part: design 1,2,3,5). New: Authorizer (role: identify_f/identify/authorize/visible_models/forwards_client_key), Authorizer::StaticKey (auth_token bit-identical; admin-key 401 stays in Knarr::_identify_f before any authorizer), Authorizer::Token (cache+generation guard, 401/403/503, manifest 403 under token auth, model fill-in via Request->apply_grant, PSGI path no cache), Handler::TokenRoutes (extends Handler::Router, overrides _resolve; upstream->OpenAI engine, provider->catalog engine, optional url; no route 403 / key_env unset 503). Knarr->new(authorizer=>...), default StaticKey rebuilt on auth_token change. Router: public engine_for. Not done (cli-worker): Config token_auth/routes, Stack building authorizer+TokenRoutes (and _apply_stack taking a stack authorizer if Stack grows one), Start/check, Admin status. Full suite: 89 files / 5496 tests PASS. Not handed to review: the store worker and cli-worker still work this card.
+
+2026-10-20 20:28 TokenStore (Memory + Pg) fertig, WIP 11bb3cd: pg_async + Socket-Watch unter IO::Async, LISTEN, eine Abfrage je Verbindung (Queue, gleiche Hashes teilen), Reconnect 1..30 s Backoff, vor jedem connect nicht-blockierende TCP-Probe (DBD::Pg kann nicht async verbinden; DSN ohne TCP-Host verbindet blockierend bis connect_timeout 3 s — dokumentiert). Live-Test t/114 grün gegen knarr_test.
+
+2026-10-20 20:31 Authorizer-Teil fertig, WIP d44a5ea: Authorizer-Rolle, StaticKey (bisheriges auth_token unverändert, alte Auth-Tests unverändert grün), Token (401/403/503, Cache mit Ablaufprüfung, Leeren bei NOTIFY/Verbindungsverlust), TokenRoutes-Handler, nativ+PSGI, Streaming. Manifest unter token_auth → 403. Suite 89 Dateien/5507 Tests grün inkl. Live-PG. Nächster Schritt: Config/Stack/Start/Admin.
+
+2026-10-20 20:59 knarr-worker (eager connect + e2e): Authorizer role gained start($loop) (no-op); Authorizer::Token->start starts its store once per process (pid guard); Knarr starts it in the serving process only: start() with workers 1, each forked worker after post_fork, never the prefork supervisor; _apply_stack re-calls it in a serving process (idempotent, a new authorizer from a push gets started). PSGI untouched. New t/121_authorizer_start.t (offline, counting store; red vs HEAD lib + old main; mutation 'start in supervisor' caught) and t/120_token_auth_pg_live.t (real knarr start CLI vs knarr_test, own schema+view+NOTIFY trigger dropped in END/signals: 200 via local route with key_env key, openai provider route, 403/401/401, /v1/models only token model, stream [DONE], cache hit without DB query, DELETE->401 w/o restart, pg_terminate_backend->503->200 + LISTEN back, -w 2: two backends before any token request, both workers look up + both deny after revoke, no token/hash/password/key in server log, request log, upstream). Live 3x green; suite 94 files / 5716 tests PASS with PG env. No bug found by the live test. Also found (not fixed, perf): first routed request per process pays ~1.6-2.5 s for loading/building the Langertha engine class; under token_auth nothing preloads it in the prefork parent (no models -> no probe), so every worker's first request is slow -- TokenRoutes could load its routes' engine classes at build time.
+
+2026-10-20 21:11 knarr-worker: engine preload done. TokenRoutes BUILD loads every route's engine class (Langertha->resolve_engine_class; class only, no engine, no key, no network) -> in knarr start at Stack->build, before the fork. Unloadable class croaks "route 'X': engine E cannot be loaded: <cause>" without a code location, so knarr start / knarr check stop with it (Config validate only checks the provider name against the catalog; loadability is checked at build, which both start and check run). t/122_token_routes_preload.t (offline; red vs HEAD lib + old main); t/120 asserts every request-log duration_ms < 1000 (was ~2000 for each worker's first request, now ~240; red vs HEAD). t/120-122 3x green, suite 95 files / 5716+5 = 5721 tests PASS with PG env.
+
+2026-10-20 21:20 ## Für core (Abschluss k82, Branch k82-token-auth, nicht gemergt)
+
+Konfig-Schlüssel: `token_auth` (backend, dsn, user, password_env, relation, listen, hash, columns{hash,model,provider,expires}, match_model) und `routes` (`{upstream, key_env}` | `{provider, key_env}`) gelten UNVERÄNDERT wie in tester/knarr.yaml. Ergänzungen: `columns` und `hash` haben Defaults (token_hash/model/provider/expires_at, sha256); Route `provider` darf optional `url` tragen. Unbekannte Schlüssel in token_auth/columns/routes sind ein Startfehler (Tippfehler fallen laut auf).
+
+Abweichung, die core nachziehen muss: `token_auth` schließt `proxy_api_key` aus — auch `KNARR_API_KEY` aus der Umgebung (TESTER_LOCK_KEY muss weg, core#126), ebenso models/default/passthrough/auto_discover/remote_config. Grund: ein Proxy-Schlüssel würde jedes Modell öffnen und das Modell-Token aushebeln; passthrough würde den Client-Schlüssel upstream schicken. `knarr start` bricht sonst mit klarer Meldung ab. --from-env wird ignoriert, sobald knarr.yaml existiert.
+
+Statuscodes (Fehlerformat des Client-Protokolls): 401 Token fehlt/unbekannt/abgelaufen (vor dem Parsen: Unangemeldete sehen nie 400/404/Modellnamen) · 403 anderes Modell, Provider ohne Route, Manifest unter token_auth · 503 Token-Prüfung nicht möglich · 503 key_env der Route leer. Modelllisten (/v1/models, /api/tags, ACP /agents) zeigen nur das Token-Modell; A2A/ACP ohne Modell bekommen das Token-Modell; Agent-Card bleibt anonym; /api/version braucht ein Token.
+
+DB-Ausfall: fail-closed mit 503 (nicht 401: das Token ist nicht falsch, der Client darf wiederholen). Bei Verbindungsverlust wird der Treffer-Cache sofort verworfen, Reconnect mit Backoff 1–30 s, davor nicht-blockierende TCP-Probe; danach LISTEN neu, ab dann wieder 200. Ein still verschwundener DB-Host fällt über TCP-Keepalive (~60 s) auf. NOTIFY auf `listen` verwirft den Cache (Ausstellen und Widerruf), `expires_at` wird auch bei Cache-Treffern geprüft. Jeder Prefork-Worker hat eine eigene Verbindung + LISTEN.
+
+View-Erwartung: `expires_at` timestamptz, `token_hash` = lc hex sha256 des Bearer-Tokens, Benutzer braucht nur SELECT + LISTEN; NOTIFY-Trigger auf der Basistabelle (Insert/Update/Delete). PostgreSQL kann jede TCP-Probe als "incomplete startup packet" loggen.
+
+Admin (k75): token_auth/routes sind nur Start-Konfig; Push mit diesen Schlüsseln oder mit models/passthrough/proxy_api_key → 400, nichts geändert. /knarr/admin/status zeigt nur token_auth {backend, connected}. Token, Hash, DB-Passwort und Routen-Schlüssel erscheinen in keinem Log, Trace, RequestLog, Fehlertext oder Status.
+
+Hinweise: Knarr hat keine Embeddings-/Bild-Routen; geprüft werden chat (alle Protokolle, sync+stream), /api/show, Modelllisten, Manifest, version. Tests: t/110, t/113–t/122; Live-PG t/114 + t/120 (KNARR_TEST_PG_DSN/_USER/_PASS). Suite 95 Dateien/5721 Tests grün inkl. Live-PG; dzil build grün (vorbestehender Changes-Bruch durch "}}" mit behoben, 4d5223e).
+
+k82 fertig auf Branch k82-token-auth (7 Commits über main 816ca5c, nicht gemergt, nicht gepusht). Suite 95/5721 grün inkl. Live-PG, dzil build grün. Details und Notiz für core oben.
