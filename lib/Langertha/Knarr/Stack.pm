@@ -2,11 +2,15 @@ package Langertha::Knarr::Stack;
 # ABSTRACT: The routing parts of a running Knarr, built from one config
 our $VERSION = '1.103';
 use Moose;
+use JSON::MaybeXS ();
 use Langertha::Knarr::Router;
 use Langertha::Knarr::Handler::Passthrough;
 use Langertha::Knarr::Handler::Router;
 use Langertha::Knarr::Handler::Tracing;
 use Langertha::Knarr::Handler::RequestLog;
+use Langertha::Knarr::Handler::TokenRoutes;
+use Langertha::Knarr::Authorizer::Token;
+use Langertha::Knarr::TokenStore::Pg;
 
 =head1 SYNOPSIS
 
@@ -24,6 +28,7 @@ use Langertha::Knarr::Handler::RequestLog;
         router          => $stack->router,
         raw_passthrough => $stack->raw_passthrough,
         auth_token      => $stack->auth_token,
+        ( $stack->authorizer ? ( authorizer => $stack->authorizer ) : () ),
         ...
     );
 
@@ -80,7 +85,30 @@ configured. Built on first use.
 
 The handler chain: L<Langertha::Knarr::Handler::Router> (with
 L</raw_passthrough> as its fallback), inside the tracing and request-log
-decorators. Built on first use.
+decorators. Built on first use. With L<Langertha::Knarr::Config/token_auth>
+the core is a L<Langertha::Knarr::Handler::TokenRoutes> over
+L<Langertha::Knarr::Config/routes> instead, and there is no
+L</raw_passthrough>.
+
+=attr token_store
+
+The L<Langertha::Knarr::TokenStore> behind L</authorizer>: with
+L<Langertha::Knarr::Config/token_auth> a L<Langertha::Knarr::TokenStore::Pg>
+over the config's C<dsn>, C<user>, C<password_env>, C<relation>, C<listen> and
+C<columns>, using L</loop>; C<undef> without it. Building the store loads
+C<DBD::Pg> (a missing one croaks C<token_auth backend postgresql needs
+DBD::Pg>) but does not connect: the store connects in the process that serves,
+when L<Langertha::Knarr> starts the L</authorizer> there (else on its first
+lookup), so a forked worker never shares the parent's connection.
+Can be given to the constructor (tests hand in a
+L<Langertha::Knarr::TokenStore::Memory>).
+
+=attr authorizer
+
+The L<Langertha::Knarr::Authorizer::Token> over L</token_store> with the
+config's C<match_model>, or C<undef> without C<token_auth>. L<Langertha::Knarr>
+takes it from the stack (C<_apply_stack>); without one it keeps checking the
+proxy key. Can be given to the constructor.
 
 =method auth_token
 
@@ -93,7 +121,11 @@ when none is set.
     my $next = $stack->with_config( $config, tracing => $tracing_or_undef );
 
 A new stack for C<$config> with the same L</loop>, L</tracing> and
-L</request_log>. Nothing of this stack's router, engines or passthrough is
+L</request_log>, and, when C<$config> has the same
+L<Langertha::Knarr::Config/token_auth> section as this stack's config, the
+same L</authorizer> and L</token_store> -- a push of other settings must not
+drop the token check or reconnect to the database. A different (or no)
+C<token_auth> section gets a fresh store and authorizer. Nothing of this stack's router, engines or passthrough is
 reused. A C<tracing> argument (an enabled tracing, or C<undef> for none)
 replaces the tracing: a delivered C<langfuse> section brings its own.
 
@@ -101,7 +133,7 @@ replaces the tracing: a delivered C<langfuse> section brings its own.
 
     $stack->build;
 
-Builds L</router>, L</raw_passthrough> and L</handler> now, so a config
+Builds L</router>, L</raw_passthrough>, L</token_store>, L</authorizer> and L</handler> now, so a config
 they cannot be built from fails here and not on the first request. Returns
 the stack.
 
@@ -140,6 +172,20 @@ has raw_passthrough => (
   builder => '_build_raw_passthrough',
 );
 
+has token_store => (
+  is      => 'ro',
+  isa     => 'Maybe[Object]',
+  lazy    => 1,
+  builder => '_build_token_store',
+);
+
+has authorizer => (
+  is      => 'ro',
+  isa     => 'Maybe[Object]',
+  lazy    => 1,
+  builder => '_build_authorizer',
+);
+
 has handler => (
   is      => 'ro',
   lazy    => 1,
@@ -148,6 +194,9 @@ has handler => (
 
 # The classes the stack is made of, named once each (override points).
 sub router_class              { 'Langertha::Knarr::Router' }
+sub token_routes_class        { 'Langertha::Knarr::Handler::TokenRoutes' }
+sub authorizer_class          { 'Langertha::Knarr::Authorizer::Token' }
+sub token_store_class         { 'Langertha::Knarr::TokenStore::Pg' }
 sub passthrough_class         { 'Langertha::Knarr::Handler::Passthrough' }
 sub router_handler_class      { 'Langertha::Knarr::Handler::Router' }
 sub tracing_handler_class     { 'Langertha::Knarr::Handler::Tracing' }
@@ -158,9 +207,35 @@ sub _build_router {
   return $self->router_class->new( config => $self->config );
 }
 
+sub _build_token_store {
+  my ($self) = @_;
+  my $auth = $self->config->token_auth or return undef;
+  return $self->token_store_class->new(
+    dsn      => $auth->{dsn},
+    relation => $auth->{relation},
+    listen   => $auth->{listen},
+    columns  => $auth->{columns},
+    ( defined $auth->{user}         ? ( user         => $auth->{user} )         : () ),
+    ( defined $auth->{password_env} ? ( password_env => $auth->{password_env} ) : () ),
+    ( $self->loop ? ( loop => $self->loop ) : () ),
+  );
+}
+
+sub _build_authorizer {
+  my ($self) = @_;
+  my $auth = $self->config->token_auth or return undef;
+  return $self->authorizer_class->new(
+    store       => $self->token_store,
+    match_model => $auth->{match_model},
+  );
+}
+
 sub _build_raw_passthrough {
   my ($self) = @_;
   my $config = $self->config;
+  # Token-checked requests never go through the raw passthrough: it would
+  # hand the client's token upstream.
+  return undef if $config->token_auth;
   my $upstreams = $config->passthrough;
   return undef unless $upstreams && %$upstreams;
   return $self->passthrough_class->new(
@@ -174,10 +249,15 @@ sub _build_raw_passthrough {
 sub _build_handler {
   my ($self) = @_;
   my $passthrough = $self->raw_passthrough;
-  my $handler = $self->router_handler_class->new(
-    router => $self->router,
-    ( $passthrough ? ( passthrough => $passthrough ) : () ),
-  );
+  my $handler = $self->config->token_auth
+    ? $self->token_routes_class->new(
+        routes => $self->config->routes,
+        router => $self->router,
+      )
+    : $self->router_handler_class->new(
+        router => $self->router,
+        ( $passthrough ? ( passthrough => $passthrough ) : () ),
+      );
   $handler = $self->tracing_handler_class->new(
     wrapped => $handler,
     tracing => $self->tracing,
@@ -196,7 +276,10 @@ sub auth_token {
 
 sub with_config {
   my ($self, $config, %over) = @_;
+  my $same_auth = $self->_same_token_auth($config);
   return ref($self)->new(
+    ( $same_auth && $self->authorizer
+      ? ( authorizer => $self->authorizer, token_store => $self->token_store ) : () ),
     config      => $config,
     loop        => $self->loop,
     tracing     => ( exists $over{tracing} ? $over{tracing} : $self->tracing ),
@@ -204,9 +287,18 @@ sub with_config {
   );
 }
 
+# Whether $config asks for the very token check this stack has.
+sub _same_token_auth {
+  my ($self, $config) = @_;
+  my ( $mine, $next ) = ( $self->config->token_auth, $config->token_auth );
+  return 0 unless $mine && $next;
+  my $json = JSON::MaybeXS->new( canonical => 1 );
+  return $json->encode($mine) eq $json->encode($next) ? 1 : 0;
+}
+
 sub build {
   my ($self) = @_;
-  $self->$_ for qw( router raw_passthrough handler );
+  $self->$_ for qw( router raw_passthrough token_store authorizer handler );
   return $self;
 }
 

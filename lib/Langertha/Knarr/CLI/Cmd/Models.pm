@@ -14,6 +14,10 @@ stderr), triggers auto-discovery (if enabled), and prints the full model
 list as a table or JSON. Each row shows the model ID, engine class, backend model name, and
 whether it was explicitly configured or auto-discovered.
 
+With a C<token_auth:> section there is no model list: every token names its
+model, so the command says so (C<--format json> prints an empty list) and
+shows the routes.
+
 See L<knarr> for option details and L<Langertha::Knarr::Config> for the
 configuration file format.
 
@@ -56,6 +60,15 @@ sub execute {
     print STDERR "Configuration INVALID:\n";
     print STDERR "  - $_\n" for @errors;
     exit 1;
+  }
+  if ( $config->token_auth ) {
+    if ( $self->format eq 'json' ) {
+      print "[]\n";
+      return;
+    }
+    print "Models come from the issued tokens (token_auth): there is no static model list.\n";
+    print "Routes by the token's provider: ", join( ', ', sort keys %{ $config->routes } ), "\n";
+    return;
   }
   my $router = Langertha::Knarr::Router->new(config => $config);
   my $models = $router->list_models;

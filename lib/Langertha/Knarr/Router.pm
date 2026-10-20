@@ -209,6 +209,27 @@ sub resolve {
   return ($engine, $resolved_model, $alias_only);
 }
 
+sub engine_for {
+  my ($self, $def, $model_name) = @_;
+  return $self->_get_engine( $def, $model_name );
+}
+
+=method engine_for
+
+    my $engine = $router->engine_for(
+      { engine => 'OpenAI', url => $url, api_key_env => 'KEY_VAR', model => 'gpt-4o' },
+      'gpt-4o',
+    );
+
+The engine for one model config, built and cached exactly as L</resolve>
+builds those of L<Langertha::Knarr::Config/models> (key from
+C<api_key_env>, L<Langertha::Knarr::Config/upstream_timeout>, Langfuse
+keys), without looking the model up. L<Langertha::Knarr::Handler::TokenRoutes>
+builds its engines through it. Croaks like L</resolve> when the key
+variable is unset.
+
+=cut
+
 sub _get_engine {
   my ($self, $def, $model_name) = @_;
 

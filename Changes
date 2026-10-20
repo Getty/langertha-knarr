@@ -1,6 +1,43 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - New: token_auth (k82) -- per-model short-lived tokens checked against
+      a PostgreSQL view (CitiAI tester), through a pluggable authorizer
+      (Langertha::Knarr::Authorizer). The token is identified before the
+      body is parsed (401 for a missing, unknown or expired token, 503 while
+      the token store is unavailable: fail-closed) and authorized once
+      action and model are known (403 for another model; chat, sync and
+      stream, /api/show and the manifest). /v1/models, /api/tags and ACP
+      /agents list only the token's model; a request without a model (A2A,
+      ACP without agent_name) gets the token's model. auth_token /
+      proxy_api_key is now Authorizer::StaticKey, behaviour unchanged.
+
+    - New: TokenStore::Pg compares sha256(Bearer) in hex with the view's
+      hash column and requires expires_at > now(); identifiers are quoted.
+      DBD::Pg is optional (recommends); a missing driver stops knarr start
+      with a clear error. Under IO::Async the store is asynchronous
+      (pg_async + socket watch): LISTEN/NOTIFY drops the hit cache, a lost
+      connection drops it at once, reconnect backs off, a non-blocking TCP
+      probe precedes each connect. It connects in each serving process --
+      every prefork worker, never the supervisor. PSGI does a blocking
+      lookup, drains notifications first and has no cache.
+
+    - New: token_auth routes pick the backend by the token row's provider:
+      upstream plus key_env (OpenAI-compatible) or provider plus key_env
+      and optional url (that Langertha engine). A provider without a route
+      is 403, an unset key variable 503. The client's token never reaches
+      an upstream: no raw passthrough, Authorization and x-api-key are not
+      forwarded. Route engine classes load before the fork.
+
+    - New: Config validation for token_auth: it excludes proxy_api_key
+      (also KNARR_API_KEY), models, default, passthrough, auto_discover and
+      remote_config; token_auth needs routes and routes need token_auth;
+      keys are strict. token_auth and routes are start-only: an admin push
+      naming them, or one that would conflict, is 400, and
+      /knarr/admin/status reports only token_auth backend and connected.
+      Neither token, hash, DB password nor route key appears in logs,
+      traces, the request log, error texts or the admin status.
+
     - Fix: a request body that is not JSON, or JSON that is no object
       (array, string, number, null), is answered 400 in the protocol's error
       shape (k81) -- OpenAI, Anthropic, Ollama, ACP and AG-UI, natively and

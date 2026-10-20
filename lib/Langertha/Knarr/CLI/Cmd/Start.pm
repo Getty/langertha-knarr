@@ -40,6 +40,17 @@ admin key set the admin routes are on, and the
 worker count is set to C<1> with a warning: a push reaches the memory of one
 process only.
 
+With a C<token_auth:> section (see L<Langertha::Knarr::Config/token_auth>)
+the proxy checks a per-model token against the database instead of one shared
+key, and the requests are routed by the token's provider
+(L<Langertha::Knarr::Config/routes>). The banner says
+C<Auth: token_auth (postgresql, routes: ...)> and never the DSN, user,
+password or relation. The stack is built before the server starts, so a
+missing C<DBD::Pg> stops C<start> with C<token_auth backend postgresql needs
+DBD::Pg> instead of failing the first request. The database connection is
+opened by the first token check of each serving process, so with C<-w> every
+worker has its own and the parent never connects.
+
 See L<knarr> for the full option reference and L<Langertha::Knarr::Config>
 for the configuration file format.
 
@@ -209,7 +220,13 @@ sub execute {
   # Log discovered engines and models
   my $models = $config->models;
   my $model_count = scalar keys %$models;
-  if ( $remote_config && !$model_count && !$config->default_engine && !keys %{ $config->passthrough } ) {
+  my $token_auth = $config->token_auth;
+  if ($token_auth) {
+    # Which backend and routes; never the dsn, user, password or relation.
+    _log("Auth: token_auth ($token_auth->{backend}, routes: "
+      . join( ', ', sort keys %{ $config->routes } ) . ")");
+    _log("Engines: none configured, models come from the tokens");
+  } elsif ( $remote_config && !$model_count && !$config->default_engine && !keys %{ $config->passthrough } ) {
     _log("Engines: none yet (remote config: requests answer 503 until PUT /knarr/admin/config)");
   } elsif ($model_count) {
     _log("Engines: $model_count provider(s) configured");
@@ -229,7 +246,7 @@ sub execute {
     _log("Engines: none (passthrough only mode)");
   }
 
-  if ($config->auto_discover) {
+  if ($config->auto_discover && !$token_auth) {
     _log("Auto-discover: enabled (will query provider model lists)");
   }
 
@@ -239,7 +256,9 @@ sub execute {
 
   # Passthrough status
   my $pt = $config->passthrough;
-  if (keys %$pt) {
+  if ($token_auth) {
+    _log("Passthrough: off (token_auth)");
+  } elsif (keys %$pt) {
     my @fmts;
     for my $fmt (sort keys %$pt) {
       push @fmts, "$fmt -> $pt->{$fmt}";
@@ -260,7 +279,9 @@ sub execute {
   }
 
   # Proxy auth status
-  if ($config->has_proxy_api_key) {
+  if ($token_auth) {
+    # the Auth line above says it
+  } elsif ($config->has_proxy_api_key) {
     _log("Proxy auth: enabled (KNARR_API_KEY)");
   } elsif (defined $config->proxy_api_key) {
     _log("WARNING: proxy_api_key / KNARR_API_KEY is empty, proxy is OPEN (no authentication)");
@@ -312,6 +333,17 @@ sub execute {
     request_log => $rlog->_enabled ? $rlog : undef,
   );
 
+  # Builds the token store, which loads DBD::Pg (not connecting: each
+  # serving process does that once it serves, never this one before a
+  # fork): a missing driver stops here, not at the first request.
+  if ($token_auth) {
+    unless ( eval { $stack->build; 1 } ) {
+      ( my $err = $@ ) =~ s/ at \S+ line \d+\.?\n?\z//;
+      _err($err);
+      exit 1;
+    }
+  }
+
   my $admin;
   if ($admin_on) {
     require Langertha::Knarr::Admin;
@@ -331,6 +363,7 @@ sub execute {
     ( $passthrough ? ( raw_passthrough => $passthrough ) : () ),
     ( $tracing->_enabled ? ( tracing => $tracing ) : () ),
     ( defined $stack->auth_token ? ( auth_token => $stack->auth_token ) : () ),
+    ( $stack->authorizer ? ( authorizer => $stack->authorizer ) : () ),
     ( $admin ? ( admin => $admin ) : () ),
     ( defined $config->public_url ? ( public_url => $config->public_url ) : () ),
     ( defined $config->ollama_compat_version

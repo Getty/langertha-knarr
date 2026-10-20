@@ -80,6 +80,26 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
   Admin key on any other route → 401. `remote_config` + no setup → every other route 503. The push is a layer over
   the start config (file/env): models merged by name, other keys push-wins,
   `langfuse` key-wise; PUT replaces the push layer, DELETE drops it (k75).
+- **Auth** (k82) = `Knarr->authorizer` (`Authorizer` role), two phases on native + PSGI:
+  `identify_f` after route match, before not-configured and any body parse (401/503, so
+  an unauthenticated client learns no 400/404/model name); `authorize` once action +
+  model are known (chat sync/stream, `/api/show`, manifest; 403). Model lists go
+  through `visible_models`. Admin key on a proxy route → 401 in `Knarr::_identify_f`,
+  before any authorizer. Default `Authorizer::StaticKey` = `proxy_api_key`/`auth_token`
+  (k53 split, k76 constant time, A2A card anonymous). `token_auth:` →
+  `Authorizer::Token` over `TokenStore::Pg`: `sha256(Bearer)` hex vs the view's hash
+  column, `expires_at > now()`, model must match (`match_model`); unknown/expired 401,
+  other model 403, store down 503 (fail-closed); hits cached, cache dropped on NOTIFY
+  (`listen`) and on connection loss; Pg async (`pg_async` + socket watch, TCP probe
+  before each connect, reconnect backoff), connects per serving process. Identity rides
+  on `Request->grant` (model, provider, expiry -- never the token or its hash); a
+  model-less request gets the token's model. Under token_auth: `Handler::TokenRoutes`
+  routes by the token's `provider` via `routes:` (`upstream`+`key_env` → OpenAI-compatible,
+  `provider`+`key_env` → that engine; no route 403, key var unset 503), no raw
+  passthrough, `Authorization`/`x-api-key` never forwarded, manifest 403, version needs a
+  token. token_auth excludes proxy_api_key, models, default, passthrough, auto_discover,
+  remote_config (`Config->validate`); token_auth/routes are start-only, an admin push
+  naming them → 400.
 - No model in the request (A2A always, ACP w/o `agent_name`) → default engine with its
   own `model:` (k42). Nothing can serve → 404 in the protocol's error shape.
 - Every error Knarr answers itself (401, 404, 500, 502–504) goes through
@@ -109,6 +129,10 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Langertha::Knarr::Manifest** — `/.well-known/langertha.json` provider manifest from the exposed model surface (needs core `Langertha::Manifest::Builder`, else 404)
 - **Langertha::Knarr::Stack** — router + passthrough + handler chain + proxy key built from one Config (what `knarr start` builds; `with_config` for the next)
 - **Langertha::Knarr::Admin** — `/knarr/admin/` routes (k75): PUT/DELETE config, PATCH keys, GET status; own key (SHA-256 digest, constant-time), per-peer lockout, 1 MiB body limit, pushed layer over the start config, in RAM only; swaps the Stack via `Knarr::_apply_stack`
+- **Langertha::Knarr::Authorizer** — Moose role: identify_f/identify (401/503), authorize (403), visible_models, forwards_client_key (k82)
+- **Langertha::Knarr::Authorizer::StaticKey** — the proxy key (`auth_token`), the former `_check_auth`
+- **Langertha::Knarr::Authorizer::Token** — per-model token against a TokenStore, hit cache dropped on invalidate
+- **Langertha::Knarr::TokenStore** — Moose role: lookup_f/lookup/available/poll, on_invalidate; `::Memory` (tests), `::Pg` (DBD::Pg optional, async under IO::Async, LISTEN/NOTIFY)
 - **Langertha::Knarr::Protocol** — Moose role for all wire protocols
 - **Langertha::Knarr::Protocol::OpenAI** — `/v1/chat/completions`, `/v1/models`
 - **Langertha::Knarr::Protocol::Anthropic** — `/v1/messages`
@@ -122,6 +146,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 - **Langertha::Knarr::Handler::Passthrough** — Raw HTTP forwarding to upstream APIs
 - **Langertha::Knarr::Handler::Tracing** — Langfuse decorator (wraps any handler)
 - **Langertha::Knarr::Handler::RequestLog** — JSONL logging decorator
+- **Langertha::Knarr::Handler::TokenRoutes** — token_auth routing by the token's provider (`routes:`), extends Handler::Router
 - **Langertha::Knarr::Handler::Engine** — Single Langertha engine handler
 - **Langertha::Knarr::Handler::Raider** — Per-session Langertha::Raider
 - **Langertha::Knarr::Handler::Code** — Coderef handler (tests/fakes)
@@ -148,7 +173,7 @@ Client → [OpenAI|Anthropic|Ollama|A2A|ACP|AG-UI] → Knarr
 
 ## OOP Framework
 
-- **Moose**: Knarr.pm, Handler role, all Handler::* modules, Protocol role + Protocol::* modules, Role::UpstreamHTTP, Request, Response, Session, Stream, Manifest, PSGI, Reasoning, PassthroughUsage, Stack, Admin
+- **Moose**: Knarr.pm, Handler role, all Handler::* modules, Protocol role + Protocol::* modules, Role::UpstreamHTTP, Request, Response, Session, Stream, Manifest, PSGI, Reasoning, PassthroughUsage, Stack, Admin, Authorizer role + Authorizer::*, TokenStore role + TokenStore::*
 - **Plain** (functions): Image
 - **Moo**: CLI, Config, Router, Tracing, RequestLog
 
@@ -199,12 +224,34 @@ workers: 1                         # KNARR_WORKERS; knarr start -w wins
 a2a: { name: Langertha Knarr Agent, description: LLM agent served through Langertha Knarr }  # agent card
 ```
 
+Token auth (k82) instead of `proxy_api_key`/`models`/`default`/`passthrough`/`auto_discover`:
+
+```yaml
+token_auth:
+  backend: postgresql                     # only backend; needs DBD::Pg (recommends)
+  dsn: dbi:Pg:host=db;dbname=platform
+  user: tester_knarr
+  password_env: TESTER_DB_PASSWORD
+  relation: citiai_tester_token_auth      # view, quoted as identifier
+  listen: citiai_tester_token             # NOTIFY channel → cache dropped
+  hash: sha256                            # lc hex of the Bearer token
+  columns: { hash: token_hash, model: model, provider: provider, expires: expires_at }  # defaults
+  match_model: true
+routes:                                   # by the token row's provider column
+  local:     { upstream: http://api:8080/v1, key_env: SKEID_KEY }
+  openai:    { provider: openai,    key_env: OPENAI_API_KEY }   # optional url:
+  anthropic: { provider: anthropic, key_env: ANTHROPIC_API_KEY }
+```
+
 ## Testing
 
 ```bash
 prove -l t/         # All tests
 prove -lv t/10-config.t   # Config tests
 ```
+
+PostgreSQL live tests (token_auth, k82) run only with `KNARR_TEST_PG_DSN`,
+`KNARR_TEST_PG_USER`, `KNARR_TEST_PG_PASS`; each makes and drops its own schema.
 
 ## CLI
 

@@ -87,7 +87,11 @@ current state took effect), C<layers> (the layers in effect: C<file> or
 C<env> for the start layer, when it holds anything, then C<push>),
 C<configured>, C<remote_config>, C<models> (the names under C<models:>, both
 layers), C<default_engine> (whether there is one) and C<passthrough> (the
-protocols with an upstream, without their URLs).
+protocols with an upstream, without their URLs). With
+L<Langertha::Knarr::Config/token_auth> it also has C<token_auth>:
+C<< { backend, connected } >> (C<connected>: the token store holds a database
+connection at this moment; the store connects on its first lookup). Never
+the DSN, user, password, relation or channel, and nothing of a token.
 
 =item C<PUT /knarr/admin/config>
 
@@ -97,8 +101,14 @@ C<passthrough>, C<auto_discover>, C<proxy_api_key>, the upstream timeouts,
 the capability probe settings and C<langfuse>), structured as in the YAML
 config. A key it leaves out is not set by the push (the start layer's value
 applies). The process settings (C<listen>, C<workers>, C<logging>,
-C<admin_key>, C<remote_config>, C<public_url>, C<a2a>, ...) stay as they
-were at the start; a body that names one is refused. Keys arrive
+C<admin_key>, C<remote_config>, C<public_url>, C<a2a>, C<token_auth>,
+C<routes>, ...) stay as they were at the start; a body that names one is
+refused. Under C<token_auth> the admin route cannot open a hole in the token
+check: the start layer's C<token_auth> is part of every layered setup, so a
+push of C<models>, C<default>, C<passthrough>, C<auto_discover> or
+C<proxy_api_key> fails the config validation (C<400>, nothing changed), and a
+push of the other settings (C<langfuse>, the timeouts) keeps the same
+authorizer and database connection. Keys arrive
 literally as C<api_key>: an C<api_key_env> in a model or the default is
 refused, because the start environment's secrets must not follow a pushed
 C<url>. The layered setup is checked like a config file
@@ -259,7 +269,7 @@ my @ROUTES = (
 # key a push may not set is counted, not echoed.
 my @PROCESS_KEYS = qw(
   listen workers logging admin_key remote_config public_url
-  ollama_compat_version a2a
+  ollama_compat_version a2a token_auth routes
 );
 
 # Actions that read a body.
@@ -473,6 +483,21 @@ sub status {
     models           => [ sort keys %$models ],
     default_engine   => $default ? JSON::MaybeXS->true : JSON::MaybeXS->false,
     passthrough      => [ sort keys %$upstreams ],
+    ( $self->stack->authorizer
+      ? ( token_auth => $self->_token_auth_status ) : () ),
+  };
+}
+
+# token_auth on: the backend and whether the store has a connection right
+# now. Never the dsn, user, password, relation or channel, and nothing of a
+# token (k82).
+sub _token_auth_status {
+  my ($self) = @_;
+  my $stack = $self->stack;
+  my $store = $stack->token_store;
+  return {
+    backend   => $stack->config->token_auth->{backend},
+    connected => ( $store && $store->available ? JSON::MaybeXS->true : JSON::MaybeXS->false ),
   };
 }
 

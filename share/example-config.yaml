@@ -149,3 +149,23 @@ passthrough:
 # logging:
 #   file: /var/log/knarr/requests.jsonl
 #   dir: /var/log/knarr/requests
+
+# Optional: token auth instead of one shared key (needs DBD::Pg). A platform
+# issues a short-lived token for exactly one model; Knarr checks
+# sha256(token) against a PostgreSQL view and routes by the row's provider.
+# Excludes proxy_api_key / KNARR_API_KEY, models, default, passthrough,
+# auto_discover and remote_config; not changeable by an admin push.
+# token_auth:
+#   backend: postgresql
+#   dsn: dbi:Pg:host=db;dbname=platform
+#   user: tester_knarr
+#   password_env: TESTER_DB_PASSWORD   # name of the variable, not the password
+#   relation: tester_token_auth        # view or table, optionally schema.name
+#   listen: tester_token               # NOTIFY channel on issue and revocation
+#   hash: sha256                       # default
+#   columns: { hash: token_hash, model: model, provider: provider, expires: expires_at }  # defaults
+#   match_model: true                  # default: the request model must be the token's
+# routes:                              # by the provider column of the token's row
+#   local:     { upstream: http://api:8080/v1, key_env: SKEID_KEY }
+#   openai:    { provider: openai,    key_env: OPENAI_API_KEY }
+#   anthropic: { provider: anthropic, key_env: ANTHROPIC_API_KEY }   # url: for another endpoint

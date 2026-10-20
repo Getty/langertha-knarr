@@ -20,9 +20,8 @@ use Carp ();
 use POSIX ();
 use Socket ();
 use Log::Any qw( $log );
-use Digest::SHA qw( sha256 );
-use Encode ();
 use Langertha::Knarr::Session;
+use Langertha::Knarr::Authorizer::StaticKey;
 use Langertha::Knarr::Manifest;
 use Langertha::Knarr::PassthroughUsage;
 use Langertha::Knarr::Role::UpstreamHTTP ();
@@ -110,7 +109,9 @@ serving engine's model-scoped capabilities narrowed to what that protocol
 forwards, and an C<api_key> auth entry when L</auth_token> is set. The
 route is protected by L</auth_token> like C<GET /v1/models>. It never
 carries configuration: no upstream URL, key, key variable name, engine
-class or passthrough target.
+class or passthrough target. Under token auth
+(L<Langertha::Knarr::Authorizer::Token>) it answers C<403>: it describes
+every model of the Knarr, and a token is for one.
 
 The manifest needs a Langertha that ships L<Langertha::Manifest::Builder>;
 with an older one the route answers C<404> with a JSON error.
@@ -144,9 +145,11 @@ the capability probe start over with the new router.
 =head1 ERRORS
 
 Every error Knarr answers itself -- C<401> for a missing or wrong
-L</auth_token>, C<404> for a model nothing serves, C<500> for a backend
-that failed, C<503> without a setup, C<502>/C<504> for an upstream that
-failed or timed out -- is in the error shape of the protocol the client
+L</auth_token> or token, C<403> for a model the client's token is not for
+or a token without a route (see L</authorizer>), C<404> for a model nothing
+serves, C<500> for a backend that failed, C<503> without a setup or while
+the token check is unavailable, C<502>/C<504> for an upstream that failed
+or timed out -- is in the error shape of the protocol the client
 spoke (L<Langertha::Knarr::Protocol/format_error_response>): Anthropic's
 C<{"type":"error","error":{"type":...,"message":...}}> with the error type
 of the status (C<authentication_error>, C<api_error>, ...), Ollama's
@@ -302,6 +305,53 @@ client sends its own provider key in the other header -- the proxy key in
 C<x-api-key> and the OpenAI key as C<Authorization: Bearer>, or the proxy
 key as C<Authorization: Bearer> and the Anthropic key in C<x-api-key>.
 
+=attr authorizer
+
+Optional L<Langertha::Knarr::Authorizer>: who may use this Knarr, and with
+which model. Default: a L<Langertha::Knarr::Authorizer::StaticKey> over
+L</auth_token>, built anew when the C<auth_token> changes (an admin push);
+a given authorizer stays for the Knarr's life. An admin push applies the
+authorizer of its L<Langertha::Knarr::Stack> when that has one
+(C<token_auth>: the stack keeps the same authorizer across pushes).
+
+The process that serves calls its L<Langertha::Knarr::Authorizer/start>
+once its loop is set up -- L</start> with one L</workers>, each forked
+worker otherwise, never the prefork supervisor -- so a token store connects
+before the first request instead of on it. Starting does not wait for the
+connection; a second start in the same process (an admin push handing the
+same authorizer over) does nothing.
+
+It is asked twice per request, on the native server and under
+L<Langertha::Knarr::PSGI> alike:
+
+=over
+
+=item 1. B<Identify>, once the route is known and before the body is read
+(and before the C<503> of a Knarr without a setup): a missing, unknown or
+expired credential gets C<401>, a check that cannot be made C<503>, so a
+client that cannot identify itself learns no C<400>, C<404> or model name.
+The native server waits for the answer without holding the event loop
+(L<Langertha::Knarr::Authorizer/identify_f>). A request that presents the
+L</admin> key to any other route gets C<401> before the authorizer is
+asked.
+
+=item 2. B<Authorize>, once action and model are known: a chat request
+after it was parsed (sync and streaming, every protocol; a refused stream
+gets its status, never a C<200>), C<POST /api/show> with the body's model,
+the manifest. The identity of step 1 travels with the request as
+L<Langertha::Knarr::Request/grant>, and a request that names no model gets
+the identity's (L<Langertha::Knarr::Request/apply_grant>).
+
+=back
+
+The model lists (C<GET /v1/models>, C<GET /api/tags>, ACP C<GET /agents>)
+and C<POST /api/show> show what
+L<Langertha::Knarr::Authorizer/visible_models> leaves. An authorizer whose
+L<Langertha::Knarr::Authorizer/forwards_client_key> is false
+(L<Langertha::Knarr::Authorizer::Token>) turns the L</raw_passthrough> off
+and drops C<Authorization> and C<x-api-key> from every header set Knarr
+forwards: the client's credential never reaches an upstream.
+
 =attr ollama_compat_version
 
 The Ollama version reported at C<GET /api/version> as
@@ -344,7 +394,8 @@ piped byte for byte to the upstream for the client's protocol (an Ollama
 C</api/generate> to the upstream's C</api/generate>, any other Ollama chat
 to C</api/chat>), bypassing the handler chain -- but only when that
 protocol has an upstream
-(L<Langertha::Knarr::Handler::Passthrough/serves_protocol>). A request in
+(L<Langertha::Knarr::Handler::Passthrough/serves_protocol>), and only while
+the L</authorizer> lets the client's key go upstream. A request in
 any other protocol (Ollama without an C<ollama> upstream, A2A, ACP, AG-UI)
 goes through the handler, where L<Langertha::Knarr::Handler::Router> hands
 it to the default engine, or answers C<404> in the protocol's error shape
@@ -431,6 +482,11 @@ background; until it has finished, C<POST /api/show> and the manifest answer
 from Langertha's static capability tables. L<Langertha::Knarr::PSGI> does not
 call L</start>, so under PSGI the probe runs only when you call it.
 
+With one L</workers> it then starts the L</authorizer>
+(L<Langertha::Knarr::Authorizer/start>): a token store opens its connection
+in the background. With more, this process only binds; every worker starts
+the authorizer for itself (see L</run>).
+
 =method run
 
     $knarr->run;   # blocks
@@ -455,7 +511,9 @@ the helper processes of the loop's resolver end, so no two workers share
 one: each worker starts its own resolver helpers.
 
 =item 3. L</workers> processes are forked; each rebuilds the loop's kernel
-state (L<IO::Async::Loop/post_fork>) and accepts on the inherited sockets.
+state (L<IO::Async::Loop/post_fork>), accepts on the inherited sockets and
+starts the L</authorizer> (L<Langertha::Knarr::Authorizer/start>): each
+worker opens its own token store connection, the supervisor none.
 
 =item 4. This process supervises them: a worker that exits is replaced --
 one that dies within five seconds of its start after a pause of 1, 2, 4
@@ -584,7 +642,40 @@ has auth_token => (
   isa => 'Maybe[Str]',
   default => sub { undef },
   writer => '_set_auth_token',
+  # The default authorizer is built over the key: a new key (admin push,
+  # k75) needs a new one.
+  trigger => sub { $_[0]->_clear_static_authorizer },
 );
+
+# Who may use this Knarr and with which model (k82). A given authorizer
+# stays for the Knarr's life; without one, a StaticKey over auth_token.
+has _authorizer => (
+  is => 'ro',
+  isa => 'Maybe[Object]',
+  init_arg => 'authorizer',
+  default => sub { undef },
+  writer => '_set_authorizer',
+);
+
+has _static_authorizer => (
+  is => 'ro',
+  lazy => 1,
+  builder => '_build_static_authorizer',
+  clearer => '_clear_static_authorizer',
+);
+
+# The class of the default authorizer, named once (override point).
+sub static_authorizer_class { 'Langertha::Knarr::Authorizer::StaticKey' }
+
+sub _build_static_authorizer {
+  my ($self) = @_;
+  return $self->static_authorizer_class->new( key => $self->auth_token );
+}
+
+sub authorizer {
+  my ($self) = @_;
+  return $self->_authorizer // $self->_static_authorizer;
+}
 
 # Admin routes and the setup they deliver (k75): a Langertha::Knarr::Admin.
 has admin => (
@@ -661,6 +752,13 @@ has _capability_probe => (
   is => 'rw',
 );
 
+# The process that serves requests: set by start() with one worker and by
+# each forked worker, never in the prefork supervisor (k82).
+has _serving_pid => (
+  is => 'rw',
+  default => 0,
+);
+
 has _servers => (
   is => 'rw',
   default => sub { [] },
@@ -692,8 +790,14 @@ sub _apply_stack {
   $self->_set_router( $stack->router );
   $self->_set_raw_passthrough( $stack->raw_passthrough );
   $self->_set_auth_token( $stack->auth_token );
+  # A token_auth stack brings its authorizer (the same object across pushes,
+  # k82); otherwise the proxy key keeps being checked.
+  $self->_set_authorizer( $stack->authorizer ) if $stack->authorizer;
   # A delivered langfuse section brings its own tracing (k75).
   $self->_set_tracing( $stack->tracing );
+  # A serving process starts an authorizer it got from a push; the one it
+  # already had ignores the second start.
+  $self->_start_authorizer if $self->_serving_pid == $$;
   $self->_clear_manifest;
   if ( $self->_server ) {
     if ( my $probe = $self->_capability_probe ) {
@@ -762,7 +866,31 @@ sub start {
   my ($self) = @_;
   $self->_listen;
   $self->_start_capability_probe;
+  # With workers, the supervisor only binds: each worker starts serving.
+  $self->_start_serving unless $self->workers > 1;
   return $self;
+}
+
+# This process serves from now on: its loop is set up, so the authorizer
+# can open its connection (k82) -- once per process, never in the
+# supervisor of prefork workers, whose connection every worker would share.
+sub _start_serving {
+  my ($self) = @_;
+  $self->_serving_pid($$);
+  $self->_start_authorizer;
+  return;
+}
+
+# Authorizer->start does not wait for its connection. A failure to start is
+# logged: the authorizer still answers every request (503 while its store
+# is not available).
+sub _start_authorizer {
+  my ($self) = @_;
+  my $authorizer = $self->authorizer;
+  return unless $authorizer && $authorizer->can('start');
+  eval { $authorizer->start( $self->loop ); 1 }
+    or $log->errorf( 'Authorizer start failed: %s', _error_text($@) );
+  return;
 }
 
 sub _listen {
@@ -991,6 +1119,7 @@ sub _fork_worker {
     my $loop = $self->loop;
     $loop->post_fork;
     $loop->add($_) for @{ $self->_servers };
+    $self->_start_serving;
     $loop->run;
     1;
   };
@@ -1016,40 +1145,60 @@ sub _match_route {
   return undef;
 }
 
-sub _check_auth {
+# The identify phase (k82), as a Future that is done with
+# { identity => \%identity } or { status, message } and never fails. The
+# admin key opens the admin routes and nothing else: it must never reach a
+# handler or an upstream, whatever the authorizer (k75). An authorizer that
+# fails anyway is a check that could not be made: 503, never a way in.
+sub _identify_f {
   my ($self, $req, $action) = @_;
-  # The admin key opens the admin routes and nothing else: it must never
-  # reach a handler or an upstream (k75).
-  return 0 if $self->_presents_admin_key($req);
-  return 1 unless defined $self->auth_token && length $self->auth_token;
-  # Discovery endpoints stay anonymous so clients can introspect.
-  return 1 if $action eq 'a2a_card';
-  # One element of the value is enough: a header sent twice arrives as one
-  # value joined with ', ' (k53).
-  for my $name ( 'Authorization', 'x-api-key' ) {
-    my $value = scalar $req->header($name);
-    next unless defined $value;
-    my $bearer = lc $name eq 'authorization';
-    for my $element ( split /,/, $value ) {
-      $element =~ s/\A\s+|\s+\z//g;
-      next if $bearer && $element !~ s/\ABearer\s+//i;
-      return 1 if _same_key( $element, $self->auth_token );
-    }
-  }
-  return 0;
+  return Future->done( $self->_unauthorized_result ) if $self->_presents_admin_key($req);
+  my $f = eval { $self->authorizer->identify_f( $req, $action ) }
+    // Future->fail( $@ || 'identify_f returned nothing' );
+  return $f->else( sub {
+    $log->errorf( 'Authorizer failed: %s', $_[0] );
+    Future->done( $self->_unavailable_result );
+  } );
 }
 
-# Equal keys, compared without an early exit: both go through SHA-256 and the
-# digests are compared whole, so the time does not depend on how much of the
-# key was right (k76).
+# The same, synchronously (Langertha::Knarr::PSGI).
+sub _identify {
+  my ($self, $req, $action) = @_;
+  return $self->_unauthorized_result if $self->_presents_admin_key($req);
+  my $result = eval { $self->authorizer->identify( $req, $action ) };
+  return $result if $result;
+  $log->errorf( 'Authorizer failed: %s', $@ || 'identify returned nothing' );
+  return $self->_unavailable_result;
+}
+
+sub _unauthorized_result { return { status => 401, message => 'unauthorized' } }
+sub _unavailable_result  { return { status => 503, message => 'token check unavailable' } }
+
+# The answer to a refused identify result, ( status, content type, body ) in
+# the route's protocol's error shape (k78); empty for an identity.
+sub _identify_refusal {
+  my ($self, $proto, $result, $body) = @_;
+  return unless defined $result->{status};
+  return $self->_error_answer( $proto, $result->{status},
+    $result->{message} // 'unauthorized', undef, $body );
+}
+
+# The authorize phase (k82): empty when the identity may do $action with
+# $model, else the refusal as ( status, content type, body ) in the
+# protocol's error shape. Shared by the native server and the PSGI adapter.
+sub _authorize_refusal {
+  my ($self, $proto, $identity, $action, $model, $sb_req, $body) = @_;
+  my ($status, $message) = $self->authorizer->authorize( $identity // {}, $action, $model );
+  return unless defined $status;
+  $log->debugf( 'Authorization refused (%s): %s', $action, $status );
+  return $self->_error_answer( $proto, $status, $message // 'forbidden', $sb_req, $body );
+}
+
+# Equal keys, compared in constant time (k76); see
+# Langertha::Knarr::Authorizer::StaticKey.
 sub _same_key {
   my ($given, $want) = @_;
-  return 0 unless defined $given && defined $want;
-  my $g = sha256( utf8::is_utf8($given) ? Encode::encode( 'UTF-8', $given ) : $given );
-  my $w = sha256( utf8::is_utf8($want)  ? Encode::encode( 'UTF-8', $want )  : $want );
-  my $diff = 0;
-  $diff |= ord( substr $g, $_, 1 ) ^ ord( substr $w, $_, 1 ) for 0 .. 31;
-  return $diff ? 0 : 1;
+  return __PACKAGE__->static_authorizer_class->_same_key( $given, $want );
 }
 
 # True when any element of Authorization or x-api-key is the admin key.
@@ -1123,9 +1272,12 @@ my %PROXY_KEY_HEADER = ( 'authorization' => 1, 'x-api-key' => 1 );
 # ', ' when some do; nothing when only the key was there, so the header is
 # dropped.
 # Every path that forwards client headers goes through here: the raw
-# passthrough and the forward_headers of the protocol parsers.
+# passthrough and the forward_headers of the protocol parsers. Under an
+# authorizer that does not forward the client's key (token auth, k82) both
+# headers carry nothing but Knarr's credential and are dropped whole.
 sub _without_proxy_key {
   my ($self, $name, $value) = @_;
+  return if $PROXY_KEY_HEADER{ lc $name } && !$self->authorizer->forwards_client_key;
   my $key = $self->auth_token;
   return $value unless defined $key && length $key && defined $value
     && $PROXY_KEY_HEADER{ lc $name };
@@ -1142,10 +1294,11 @@ sub _without_proxy_key {
 }
 
 # The protocol's parse, with Knarr's key taken out of the headers a
-# passthrough handler in the chain forwards (forward_headers, k44). Shared
-# by the native server and the PSGI adapter.
+# passthrough handler in the chain forwards (forward_headers, k44), and the
+# identity of the identify phase on the request (grant, k82). Shared by the
+# native server and the PSGI adapter.
 sub _parse_chat_request {
-  my ($self, $proto, $req, $body_ref) = @_;
+  my ($self, $proto, $req, $body_ref, $identity) = @_;
   # A body that is no JSON object is the client's mistake: 400 in the
   # protocol's shape, a fixed text (k81). Checked before the parse, which
   # alone would die with the decoder's message and become a 500.
@@ -1164,17 +1317,9 @@ sub _parse_chat_request {
     }
     $extra->{forward_headers} = \@kept;
   }
+  # A request that names no model gets the identity's (a token is for one).
+  $sb_req->apply_grant($identity) if $identity;
   return $sb_req;
-}
-
-# The one 401 answer, shared by the native server and the PSGI adapter (k25),
-# in the protocol's error shape of the route asked for (k78): an Anthropic
-# SDK reads error.type (authentication_error), an Ollama client a string.
-# The route is known before the key is checked; only Knarr's own routes
-# (the manifest) have no protocol and get the OpenAI wire's shape.
-sub _unauthorized {
-  my ($self, $proto, $body) = @_;
-  return $self->_error_answer( $proto, 401, 'unauthorized', undef, $body );
 }
 
 sub _dispatch {
@@ -1188,10 +1333,27 @@ sub _dispatch {
   }
   my $action = $route->{action};
   return $self->_dispatch_admin( $req, $action ) if $route->{admin};
+  # Who asks, before the body is read (k82). A check that has to ask a
+  # store answers later; the loop serves on meanwhile.
+  my $identified = $self->_identify_f( $req, $action );
+  return $self->_dispatch_identified( $req, $route, $identified->get )
+    if $identified->is_ready;
+  $identified->on_done( sub {
+    my ($result) = @_;
+    return if $req->is_closed;
+    $self->_dispatch_identified( $req, $route, $result );
+  } )->retain;
+  return;
+}
+
+sub _dispatch_identified {
+  my ($self, $req, $route, $result) = @_;
+  my $action = $route->{action};
   my $proto  = $route->{protocol};
-  unless ( $self->_check_auth( $req, $action ) ) {
-    return $self->_send_simple( $req, $self->_unauthorized( $proto, $req->body ) );
+  if ( my @refused = $self->_identify_refusal( $proto, $result, $req->body ) ) {
+    return $self->_send_simple( $req, @refused );
   }
+  my $identity = $result->{identity} // {};
   if ( my @answer = $self->_not_configured_answer( $proto, $req->body ) ) {
     return $self->_send_simple( $req, @answer );
   }
@@ -1203,11 +1365,11 @@ sub _dispatch {
   }
   try {
     if ( $simple ) {
-      my ($status, $headers, $body) = $self->$simple( $proto, $req->body );
+      my ($status, $headers, $body) = $self->$simple( $proto, $req->body, $identity );
       $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
     }
     else {
-      $self->$code( $proto, $req );
+      $self->$code( $proto, $req, $identity );
     }
   } catch {
     my $err = $_;
@@ -1220,9 +1382,14 @@ sub _dispatch {
 }
 
 sub _action_chat {
-  my ($self, $proto, $req) = @_;
+  my ($self, $proto, $req, $identity) = @_;
   my $body = $req->body;
-  my $sb_req = $self->_parse_chat_request( $proto, $req, \$body );
+  my $sb_req = $self->_parse_chat_request( $proto, $req, \$body, $identity );
+  # The model is known now (k82): a 403 before any handler work, so a
+  # refused stream never sends its 200.
+  if ( my @refused = $self->_authorize_refusal( $proto, $identity, 'chat', $sb_req->model, $sb_req, $body ) ) {
+    return $self->_send_simple( $req, @refused );
+  }
 
   # Raw passthrough: pipe bytes 1:1 to upstream, skip handler chain
   if ( $self->_is_raw_passthrough($sb_req) ) {
@@ -1356,6 +1523,11 @@ sub _handler_failure_status {
   return 504 if Langertha::Knarr::Role::UpstreamHTTP->is_upstream_timeout($category);
   return 404 if defined $category && $category eq 'model_not_found';
   return 400 if defined $category && $category eq 'bad_request';
+  # A handler that refuses the request's grant (Handler::TokenRoutes: no
+  # route for its provider), or lacks what it needs to serve it (its key
+  # variable unset), k82.
+  return 403 if defined $category && $category eq 'forbidden';
+  return 503 if defined $category && $category eq 'unavailable';
   return;
 }
 
@@ -1496,6 +1668,9 @@ sub _is_raw_passthrough {
   # any other protocol goes through the handler chain, to the default
   # engine or to a 404 in the protocol's error shape (k41).
   return 0 unless $pt && $router && $pt->serves_protocol( $sb_req->protocol );
+  # The client's key never goes upstream under an authorizer that keeps it
+  # (token auth, k82).
+  return 0 unless $self->authorizer->forwards_client_key;
   return 1 if $router->is_passthrough_model( $sb_req->model );
   # A model only auto-discovery knows, listed by this very upstream, goes
   # there byte for byte too; discovery then only feeds the model lists
@@ -1749,16 +1924,20 @@ sub _simple_version {
 # lists (the /api/tags surface) is shown, anything else gets Ollama's 404.
 # capabilities never carry "thinking": Knarr drops think on the Ollama wire.
 sub _simple_show {
-  my ($self, $proto, $body) = @_;
+  my ($self, $proto, $body, $identity) = @_;
   my $data = eval { $self->_json->decode( defined $body && length $body ? $body : '{}' ) };
   $data = {} unless ref $data eq 'HASH';
   my $model = $data->{model};
   $model = $data->{name} unless defined $model && length $model;   # Ollama's legacy field
   return $proto->format_error_response( 400, 'model is required' )
     unless defined $model && !ref $model && length $model;
+  # May this identity see the model at all (k82)?
+  my ($refused, $message) = $self->authorizer->authorize( $identity // {}, 'show', $model );
+  return $proto->format_error_response( $refused, $message // 'forbidden' ) if defined $refused;
 
   my $router = $self->router;
-  my $listed = $router ? $router->list_models : $self->handler->list_models;
+  my $listed = $self->authorizer->visible_models( $identity // {},
+    $router ? $router->list_models : $self->handler->list_models );
   my ($known) = grep { $_ eq $model }
     map { ref $_ eq 'HASH' ? $_->{id} // '' : "$_" } @{ $listed || [] };
   return $proto->format_error_response( 404, "model '$model' not found" )
@@ -1798,7 +1977,10 @@ sub _image_input_known {
 }
 
 sub _action_manifest {
-  my ($self, $proto, $req) = @_;
+  my ($self, $proto, $req, $identity) = @_;
+  if ( my @refused = $self->_authorize_refusal( $proto, $identity, 'manifest', undef ) ) {
+    return $self->_send_simple( $req, @refused );
+  }
   my $proto_header = lc( scalar( $req->header('X-Forwarded-Proto') ) // '' );
   my ($status, $body) = $self->manifest_response(
     scheme => ( $proto_header =~ /\A(https?)\z/ ? $1 : 'http' ),
@@ -1839,10 +2021,18 @@ sub manifest_response {
 }
 
 sub _action_models {
-  my ($self, $proto, $req) = @_;
-  my $models = $self->handler->list_models;
+  my ($self, $proto, $req, $identity) = @_;
+  my $models = $self->_visible_models($identity);
   my ($status, $headers, $body) = $proto->format_models_response( $models );
   $self->_send_simple( $req, $status, $headers->{'Content-Type'} // 'application/json', $body );
+}
+
+# What a model list shows this identity (k82): the handler's models,
+# narrowed by the authorizer. Shared by the native server and the PSGI
+# adapter.
+sub _visible_models {
+  my ($self, $identity) = @_;
+  return $self->authorizer->visible_models( $identity // {}, $self->handler->list_models );
 }
 
 # $headers: optional further [ name, value ] pairs, each line added (the

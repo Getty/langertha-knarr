@@ -78,12 +78,29 @@ pairs). L<Langertha::Knarr> takes its own proxy key out of every pair;
 L<Langertha::Knarr::Handler::Passthrough> sends each pair upstream as a line
 of its own. Read them with L</forward_header_pairs> and L</forward_header>.
 
+=attr grant
+
+The identity L<Langertha::Knarr::Authorizer> found for the client, a
+HashRef, or C<undef> on a request built by hand. C<{}> for the shared proxy
+key (L<Langertha::Knarr::Authorizer::StaticKey>); C<model>, C<provider>
+and C<expires> for a token (L<Langertha::Knarr::Authorizer::Token>), which
+L<Langertha::Knarr::Handler::TokenRoutes> routes by. It never carries a
+key, a token or a hash of one. Set by L</apply_grant>.
+
 =cut
 
 has model => (
   is => 'ro',
   isa => 'Maybe[Str]',
   default => sub { undef },
+  writer => '_set_model',
+);
+
+has grant => (
+  is => 'ro',
+  isa => 'Maybe[HashRef]',
+  default => sub { undef },
+  writer => '_set_grant',
 );
 
 has messages => (
@@ -242,6 +259,26 @@ C<[ name, value ]> pairs, in their order, repeats kept (copies: changing one
 leaves the request alone). A C<forward_headers> hash, as a request built by
 hand may carry, reads as one pair per key, sorted by name. Empty when the
 request has none.
+
+=cut
+
+sub apply_grant {
+  my ($self, $grant) = @_;
+  $self->_set_grant($grant);
+  my $model = $self->model;
+  $self->_set_model( $grant->{model} )
+    if !( defined $model && length $model ) && $grant && defined $grant->{model};
+  return $self;
+}
+
+=method apply_grant
+
+    $request->apply_grant( { model => 'gpt-4o', provider => 'openai', expires => $epoch } );
+
+Sets L</grant>. A request that names no L</model> (A2A always, ACP without
+C<agent_name>) gets the grant's C<model>: a token is for that one model. A
+request that names one keeps it; whether it may use it is the authorizer's
+decision. Returns the request.
 
 =cut
 

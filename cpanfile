@@ -26,6 +26,8 @@ requires 'MIME::Base64';
 
 recommends 'Plack';
 recommends 'HTTP::Message::PSGI';
+recommends 'DBI';
+recommends 'DBD::Pg';
 
 on test => sub {
   requires 'Test2::Suite';

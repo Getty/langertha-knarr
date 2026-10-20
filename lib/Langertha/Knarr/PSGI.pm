@@ -52,10 +52,15 @@ forwards each line. The same holds for the auth headers a
 L<Langertha::Knarr::Handler::Passthrough> in the handler chain forwards
 (C<forward_headers>, see L<Langertha::Knarr::Request/forward_header_pairs>).
 
-Requests are authenticated exactly like on the native server: with
-L<Langertha::Knarr/auth_token> set, every route except the A2A agent card
-needs the key as C<Authorization: Bearer> or C<x-api-key>, and a missing
-or wrong key gets the same C<401>, in the route's protocol's error shape.
+Requests are authenticated exactly like on the native server, by the same
+L<Langertha::Knarr/authorizer>: with L<Langertha::Knarr/auth_token> set,
+every route except the A2A agent card needs the key as
+C<Authorization: Bearer> or C<x-api-key>, and a missing or wrong key gets
+the same C<401>, in the route's protocol's error shape. Under token auth
+(L<Langertha::Knarr::Authorizer::Token>) the same C<401>, C<403> and
+C<503> come back as on the native server; the token check blocks the
+request here (L<Langertha::Knarr::Authorizer/identify>) and asks the token
+store every time, without the native server's cache.
 Every other error is answered as on the native server too (see
 L<Langertha::Knarr/ERRORS>): a failed handler or backend with its status
 in the protocol's error shape. As a stream is buffered here, a stream
@@ -167,13 +172,15 @@ sub _handle_psgi {
     return [ $status, [ 'Content-Type' => $ctype, map { @$_ } @{ $headers // [] } ], [ $body ] ];
   }
 
-  # Same auth decision and 401 as the native server (k25), in the route's
-  # protocol's error shape (k78), before any handler work, so a rejected
-  # streaming request never starts its stream.
-  unless ( $sb->_check_auth( $fake_http, $action ) ) {
-    my ($status, $ctype, $body) = $sb->_unauthorized( $proto, $self->_error_body( $env, $proto ) );
+  # Same identify decision and 401/503 as the native server (k25, k82), in
+  # the route's protocol's error shape (k78), before any handler work and
+  # before the body is parsed, so a rejected streaming request never starts
+  # its stream. The check may block here.
+  my $identified = $sb->_identify( $fake_http, $action );
+  if ( my ($status, $ctype, $body) = $sb->_identify_refusal( $proto, $identified, $self->_error_body( $env, $proto ) ) ) {
     return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
   }
+  my $identity = $identified->{identity} // {};
 
   # No setup delivered yet (remote_config): 503, as on the native server (k75).
   if ( my ($status, $ctype, $body) = $sb->_not_configured_answer( $proto, $self->_error_body( $env, $proto ) ) ) {
@@ -186,7 +193,7 @@ sub _handle_psgi {
   # nothing serves, k41), anything else 500 (k78). A stream is buffered, so
   # nothing has gone out yet when its handler fails, mid-stream included.
   my ( $res, $sb_req, $raw_body );
-  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http, \$sb_req, \$raw_body ); 1 };
+  return $res if eval { $res = $self->_handle_action( $env, $route, $fake_http, \$sb_req, \$raw_body, $identity ); 1 };
   my $e = $@;
   my ( $message, $category ) = blessed($e) && $e->isa('Future::Exception')
     ? ( $e->message, $e->category ) : ( $e );
@@ -200,18 +207,21 @@ sub _handle_psgi {
 # Dies on any failure; _handle_psgi answers it. The parsed request is put
 # into $$request_slot as soon as it exists, so the error answer can address it.
 sub _handle_action {
-  my ($self, $env, $route, $fake_http, $request_slot, $body_slot) = @_;
+  my ($self, $env, $route, $fake_http, $request_slot, $body_slot, $identity) = @_;
   my $sb = $self->knarr;
   my $path   = $env->{PATH_INFO} // '/';
   my $proto  = $route->{protocol};
   my $action = $route->{action};
 
   if ( $action eq 'models' || $action eq 'acp_agents' ) {
-    my $models = $sb->handler->list_models;
+    my $models = $sb->_visible_models($identity);
     my ($status, $headers, $body) = $proto->format_models_response($models);
     return [ $status, [ %$headers ], [ $body ] ];
   }
   if ( $action eq 'manifest' ) {
+    if ( my ($status, $ctype, $body) = $sb->_authorize_refusal( $proto, $identity, 'manifest', undef ) ) {
+      return [ $status, [ 'Content-Type' => $ctype ], [ $body ] ];
+    }
     my ($status, $body) = $sb->manifest_response(
       scheme => $env->{'psgi.url_scheme'} // 'http',
       host   => $env->{HTTP_HOST}
@@ -222,7 +232,7 @@ sub _handle_action {
   }
   # The same table and methods as the native server (k29).
   if ( my $simple = $sb->_simple_action($action) ) {
-    my ($status, $headers, $body) = $sb->$simple( $proto, $self->_read_body($env) );
+    my ($status, $headers, $body) = $sb->$simple( $proto, $self->_read_body($env), $identity );
     return [ $status, [ %$headers ], [ $body ] ];
   }
   if ( $action eq 'a2a_card' ) {
@@ -237,8 +247,12 @@ sub _handle_action {
 
   my $body = $self->_read_body($env);
   $$body_slot = $body if $body_slot;
-  my $sb_req = $sb->_parse_chat_request( $proto, $fake_http, \$body );
+  my $sb_req = $sb->_parse_chat_request( $proto, $fake_http, \$body, $identity );
   $$request_slot = $sb_req if $request_slot;
+  # The model is known now (k82): refused before any handler work.
+  if ( my ($status, $ctype, $obody) = $sb->_authorize_refusal( $proto, $identity, 'chat', $sb_req->model, $sb_req, $body ) ) {
+    return [ $status, [ 'Content-Type' => $ctype ], [ $obody ] ];
+  }
 
   # Raw passthrough, decided and prepared by the same Knarr code as on the
   # native server (k26): the client's bytes go 1:1 to the upstream and its
