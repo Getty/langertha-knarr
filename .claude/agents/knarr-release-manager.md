@@ -4,6 +4,7 @@ description: "Owns knarr's commits and release readiness — cuts commits from t
 model: sonnet
 briefing:
   skills:
+    - knarr-core
     - getty-git-commit-style
     - getty-git-usage
     - getty-perl-release-author-getty

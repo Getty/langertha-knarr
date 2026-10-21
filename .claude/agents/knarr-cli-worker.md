@@ -7,6 +7,7 @@ briefing:
     - getty-perl-core
     - getty-perl-moo
     - perl-ai-langertha
+    - knarr-core
     - kanban-issues-karr-ticket
 ---
 
