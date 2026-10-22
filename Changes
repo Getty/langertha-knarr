@@ -1,6 +1,10 @@
 Revision history for Langertha-Knarr
 
 {{$NEXT}}
+    - Langertha floor raised from 0.503 to 0.504: routed streams ask for
+      usage only on engines that claim stream_usage (k77), and the scenario
+      suite runs on Langertha::Engine::Virtual.
+
     - New: token_auth (k82) -- per-model short-lived tokens checked against
       a PostgreSQL view (CitiAI tester), through a pluggable authorizer
       (Langertha::Knarr::Authorizer). The token is identified before the
