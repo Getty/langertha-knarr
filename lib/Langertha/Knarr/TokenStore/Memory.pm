@@ -1,6 +1,6 @@
 package Langertha::Knarr::TokenStore::Memory;
 # ABSTRACT: In-memory token store for tests of token_auth
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Carp qw( croak );
 use Future;

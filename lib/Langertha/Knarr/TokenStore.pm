@@ -1,6 +1,6 @@
 package Langertha::Knarr::TokenStore;
 # ABSTRACT: Role for the stores token_auth looks access tokens up in
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose::Role;
 use Digest::SHA qw( sha256_hex );
 use Log::Any qw( $log );

@@ -1,6 +1,6 @@
 package Langertha::Knarr::TokenStore::Pg;
 # ABSTRACT: PostgreSQL token store for token_auth, asynchronous under IO::Async
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Carp qw( croak );
 use Future;

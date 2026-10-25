@@ -1,6 +1,6 @@
 package Langertha::Knarr::Admin;
 # ABSTRACT: Admin routes that deliver, rotate and drop a routing setup layered over Knarr's own, in memory only
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Carp qw( croak );
 use Digest::SHA qw( sha256 );

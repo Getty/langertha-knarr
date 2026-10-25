@@ -1,6 +1,6 @@
 package Langertha::Knarr::Authorizer;
 # ABSTRACT: Role for who may use a Knarr, and with which model
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose::Role;
 use Future;
 

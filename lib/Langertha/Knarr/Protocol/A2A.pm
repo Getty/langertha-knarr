@@ -43,7 +43,7 @@ card to advertise specific skills, version, etc. (L</agent_name> and
 L</agent_description> are then not used).
 
 =cut
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Carp qw( croak );
 use JSON::MaybeXS;

@@ -24,7 +24,7 @@ the engine via C<chat_f>. Tool-call responses are serialised into
 C<message.tool_calls> with C<finish_reason: "tool_calls">.
 
 =cut
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use JSON::MaybeXS;
 use Time::HiRes qw( time );

@@ -1,6 +1,6 @@
 package Langertha::Knarr::Stack;
 # ABSTRACT: The routing parts of a running Knarr, built from one config
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use JSON::MaybeXS ();
 use Langertha::Knarr::Router;

@@ -1,6 +1,6 @@
 package Langertha::Knarr::Authorizer::Token;
 # ABSTRACT: One short-lived token per model, checked against a token store
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Future;
 use Log::Any qw( $log );

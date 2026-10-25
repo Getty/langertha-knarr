@@ -1,6 +1,6 @@
 package Langertha::Knarr::Handler::TokenRoutes;
 # ABSTRACT: Knarr handler that routes a token-checked request by its token's provider
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Carp qw( croak );
 use Future::Exception;

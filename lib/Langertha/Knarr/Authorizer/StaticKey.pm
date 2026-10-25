@@ -1,6 +1,6 @@
 package Langertha::Knarr::Authorizer::StaticKey;
 # ABSTRACT: One shared proxy key for every route and model (auth_token)
-our $VERSION = '1.103';
+our $VERSION = '1.104';
 use Moose;
 use Digest::SHA qw( sha256 );
 use Encode ();
