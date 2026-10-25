@@ -27,6 +27,9 @@
       "perl-ai-langertha@langertha",
       "perl-io-async-future@getty",
       "perl-release-dist-ini@getty"
+    ],
+    "bundles": [
+      "getty-cpan-dist@getty"
     ]
   },
   "targets": [

@@ -6,8 +6,9 @@ Knarr is an LLM proxy that accepts requests in OpenAI, Anthropic, Ollama, A2A, A
 
 ## Delegation
 
-Delegate behavior-relevant code to the right agent instead of touching it yourself —
-principle and lane are in `.claude/rules/knarr-rules.md`.
+Delegate behavior-relevant code to the right agent instead of touching it yourself — the
+principle is a shared house rule (skilletor bundle `getty-cpan-dist@getty`), the lanes are in
+`.claude/rules/knarr-rules.md`.
 
 | Task | Agent |
 |---|---|
