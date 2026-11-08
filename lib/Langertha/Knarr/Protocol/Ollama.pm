@@ -260,7 +260,7 @@ sub format_error_response {
         context_length => 131072,   # optional
     } );
 
-The C<POST /api/show> answer for a model Knarr serves (k29). Only what
+The C<POST /api/show> answer for a model Knarr serves. Only what
 Knarr knows is claimed: C<capabilities> as given, C<model_info> with
 C<general.architecture> (C<knarr>) and C<knarr.context_length> when a
 context length is known -- the pair VS Code Copilot reads, C<{}> otherwise

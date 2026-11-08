@@ -54,7 +54,7 @@ Required. Returns a L<Langertha::Knarr::Request>.
 
 Returns why the body cannot be a chat request (not JSON, or JSON that is no
 object) as a fixed text without the decoder's message, else nothing. Knarr
-answers it with a 400 in the protocol's error shape (k81). A2A overrides it
+answers it with a 400 in the protocol's error shape. A2A overrides it
 to nothing: its parse failure is a JSON-RPC error of its own.
 
 =method format_chat_response
