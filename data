@@ -1,0 +1,31 @@
+---
+class: standard
+created: 2026-11-10T03:01:05Z
+id: 83
+priority: high
+status: todo
+tags:
+- ci
+title: 'release-binaries red for 1.103: namespace::autoclean missing from the binary'
+updated: 2026-11-10T03:01:05Z
+---
+
+The `release-binaries` workflow failed for tag 1.103 (2026-10-25, the latest run of that workflow) on x86_64 and aarch64, step "Verify binary". Run: `gh run view 40149008131 -R Getty/langertha-knarr --log-failed`.
+
+    build-binary: not bundled, does not load: Langertha::Knarr (Can't locate namespace/autoclean.pm in @INC ...)
+    build-binary: not bundled, does not load: Langertha::Knarr::Authorizer::Token (...)
+    build-binary: not bundled, does not load: Langertha::Knarr::Handler::TokenRoutes (...)
+    FAIL: knarr start: server exited
+    Can't locate namespace/autoclean.pm ... at inc/lib/Langertha/Knarr/Authorizer/StaticKey.pm line 7.
+
+`namespace::autoclean` is used by the modules but is neither installed in the build environment nor packed, so the release 1.103 has no working binaries attached.
+
+## Steps
+
+1. Check on `main` whether `namespace::autoclean` is declared in `cpanfile` (runtime requires) and reaches the binary build's module list; add it where it is missing.
+2. Run the binary build and its verify step locally the way the workflow does.
+3. Say on the card whether the 1.103 binaries should be rebuilt (`gh workflow run` on the tag) or whether the next release carries the fix; that choice is the maintainer's.
+
+## Proof
+
+The local binary starts (`knarr start` passes the verify script), and the workflow's next run is green.
