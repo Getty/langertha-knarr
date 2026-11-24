@@ -2,13 +2,12 @@
 name: knarr-test-writer
 description: "Write Knarr tests with Test2::V0 and the Handler::Code fake handler — protocol round-trips, streaming end markers, routing/passthrough behavior. Tests never require live API keys. Use for test additions, regression scaffolding, and coverage of new handlers or protocols."
 model: sonnet
-briefing:
-  skills:
-    - getty-perl-core
-    - perl-ai-langertha
-    - knarr-core
-    - perl-io-async-future
-    - kanban-issues-karr-ticket
+skills:
+  - getty-perl-core
+  - perl-ai-langertha
+  - knarr-core
+  - perl-io-async-future
+  - kanban-issues-karr-ticket
 ---
 
 You are the knarr-test-writer for **Knarr, the Langertha LLM proxy**.

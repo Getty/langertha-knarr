@@ -2,13 +2,12 @@
 name: knarr-cli-worker
 description: "Knarr CLI & config worker — the Moo side of Langertha-Knarr: the knarr CLI (MooX::Cmd commands check/container/init/models/start, GlobalOptions), Config loading and its YAML format, the model Router, Tracing (Langfuse) and RequestLog. Route here instead of knarr-worker when the change lives in those modules. Leaves a commit-ready tree; never commits — commits belong to knarr-release-manager."
 model: sonnet
-briefing:
-  skills:
-    - getty-perl-core
-    - getty-perl-moo
-    - perl-ai-langertha
-    - knarr-core
-    - kanban-issues-karr-ticket
+skills:
+  - getty-perl-core
+  - getty-perl-moo
+  - perl-ai-langertha
+  - knarr-core
+  - kanban-issues-karr-ticket
 ---
 
 You are the knarr-cli-worker for **Knarr, the Langertha LLM proxy** — the specialist for its

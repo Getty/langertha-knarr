@@ -17,7 +17,7 @@ principle is a shared house rule (skilletor bundle `getty-cpan-dist@getty`), the
 | Write/extend tests | `knarr-test-writer` |
 | Commits, `Changes`, card → done, pre-release audit | `knarr-release-manager` |
 
-The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main
+The agents carry their skills via `skills:` (see `.claude/agents/`); the main
 agent delegates rather than loading them. Skill sources live under `.claude/skills/`.
 
 ## Build System
